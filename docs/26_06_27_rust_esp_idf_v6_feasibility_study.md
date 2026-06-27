@@ -901,9 +901,87 @@ unsafe {
 | Credentials save + ESP32 connects to WiFi | ⚠️ Code path implemented (`try_connect_sta()` → NVS save → `esp_restart()`), but untestable — cannot connect to AP to POST `/wifi/connect`. |
 | WebUI at local IP | ❌ Untestable — phone/notebook cannot get IP address from AP. |
 
+### Acceptance Criteria Status
+
+| Criterion | Status |
+|---|---|
+| Captive portal opens automatically on phone | ❌ AP visible, station association succeeds — but phone cannot reach `192.168.4.1` (DHCP subnet mismatch). |
+| Credentials save + ESP32 connects to WiFi | ⚠️ Code path implemented, untestable — no AP connectivity. |
+| WebUI at local IP | ❌ Untestable — no IP from AP. |
+
+---
+
+## 18. Phase 1d — AP DHCP Fix, Captive Portal & Stability (2026-06-27)
+
+Phase executed on real hardware: **ESP32-WROOM-32** (rev v3.1), connected via USB-Serial (COM5).
+
+Session completed end-to-end: AP now functional, phone connects, captive portal triggers, WiFi credential entry + STA reconnect works.
+
+### Problem: DHCP Subnet Mismatch
+
+**Root cause:** `wifi.start()` internally starts the DHCP server with a default subnet (e.g. `192.168.71.x`). The previous code called `esp_netif_set_ip_info()` after `start()`, changing the AP IP to `192.168.4.1` — but the DHCP server continued serving `192.168.71.x` addresses. The phone got an IP from the wrong subnet and could not reach the ESP32.
+
+**Attempted fix V1 (failed):** `dhcps_stop()` → `set_ip_info()` → `dhcps_option()` → `dhcps_start()`. Failed with `"Illegal subnet mask"` because the `ESP_NETIF_REQUESTED_IP_ADDRESS` option requires a `dhcps_lease_t` struct (8 bytes: start + end IP), not a single 4-byte IP. Even with the correct struct, the ESP-IDF DHCP server's internal state after stop/start was inconsistent.
+
+**Fix V2 (working):** Use `EspWifi::swap_netif_ap()` to replace the AP `EspNetif` **before** `wifi.start()`. The new `EspNetif` is created via `EspNetif::new_with_conf()` with IP `192.168.4.1/24`, DHCP enabled, and DNS set to the AP IP itself. The DHCP server starts from scratch with the correct subnet.
+
+### Problem: Stack Overflow in HTTP Server
+
+**Root cause:** `EspHttpServer` default `stack_size: 6144` (6 KB) was insufficient for the Rust fn_handler call chain (closure dispatch → `into_response()` → `httpd_resp_set_hdr()` → lwIP send). The server crashed ~30 seconds after phone connection with `*ERROR* A stack overflow in task`.
+
+**Fix:** Increased `stack_size` to `12288` (12 KB) in `EspHttpServer::Configuration`.
+
+Also discovered: `uri_match_wildcard: true` with a `/*` catch-all handler caused a **Guru Meditation (StoreProhibited, EXCVADDR=0xFFFFFFA0 = use-after-free)** when the phone sent multiple captive portal probes. The wildcard matcher apparently had a use-after-free under concurrent connections.
+
+**Fix:** Replaced `/*` + `uri_match_wildcard: true` with 5 explicit captive portal probe handlers, each returning 302 → `/wifi`:
+
+| URI | OS/Client |
+|---|---|
+| `/generate_204` | Android |
+| `/hotspot-detect.html` | iOS |
+| `/ncsi.txt` | Windows |
+| `/connecttest.txt` | Windows 10+ |
+| `/gen_204` | Samsung / Some Android |
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `src/wifi.rs` | Rewrote `start_ap()`: create custom `EspNetif` via `new_with_conf()` with IP `192.168.4.1/24`, replace via `swap_netif_ap()` before `wifi.start()`. Removed all `esp_netif_set_ip_info` / `dhcps_*` FFI calls. |
+| `src/config.rs` | Added `AP_NETMASK_BITS = 24` for `Mask` constructor. |
+| `src/webserver.rs` | Added 5 captive portal probe handlers (302 → `/wifi`). Removed `register_catch_all()` with `/*` handler. Set `stack_size: 12288` in `EspHttpServer` config. |
+| `AGENTS.md` | Added ESP32 Crash Investigation section with mandatory investigation steps. |
+
+### Real-Hardware Validation
+
+| Test | Result |
+|---|---|
+| AP `EcoTiter-AP` visible | ✅ Beacon visible, phone associates |
+| Phone gets IP from DHCP | ✅ `192.168.4.2` — correct subnet |
+| DNS resolver (captive portal) | ✅ All DNS queries → `192.168.4.1` |
+| `GET /generate_204` → 302 `/wifi` | ✅ Captive portal opens on phone |
+| WiFi credentials POST `/wifi/connect` | ✅ SSID/password accepted |
+| `try_connect_sta()` → home router | ✅ STA connects to `TP-Link_29D4` |
+| `esp_restart()` → boots in STA mode | ✅ STA reconnects on boot |
+| HTTP server stability (12 KB stack) | ✅ No stack overflow (ran 2+ minutes) |
+| No Guru Meditation | ✅ 0 panics with current code |
+
+### Remaining Issues
+
+| Issue | Status |
+|---|---|
+| No logger ring buffer — `/api/logs` returns empty | 🟡 Known, not implemented |
+| SSE `/api/events` returns only stub data (60s blocking loop) | 🟡 Known, blocks HTTP server |
+| `httpd_sock_err: error in send : 104` warnings | 🟢 Harmless — client closed connection after 302 |
+| `favicon.ico` not found | 🟢 Harmless — missing icon, returns 404 |
+
 ### Key Healing Notes
 
-- `EspHttpServer` from `esp-idf-svc` git master works with `fn_handler` — return type is `Result<(), EspIOError>` where `EspIOError` is re-exported from `esp_idf_hal::io::EspIOError`
-- `EspHttpConnection::split()` returns `(&EspHttpConnection, &mut Self)` — use this pattern for POST body reading instead of `read_body()`
-- Embedded-svc 0.29 uses **heapless 0.9** (const generics: `String<32>`) not 0.8 (typenum: `String<U32>`)
-- NVS raw FFI (`esp_idf_sys::nvs_open`/`nvs_get_str`/`nvs_set_str`) is stable and reliable — use this instead of `EspNvs` wrapper if API mismatches
+- `EspNetif::new_with_conf()` fails with `ESP_ERR_INVALID_ARG` if the `key` field duplicates an existing netif key in ESP-NETIF. Since `EspWifi::new()` already registers an AP netif with key `"WIFI_AP_DEF"`, the custom netif must use a different key (e.g. `"WIFI_AP_CUSTOM"`).
+- `uri_match_wildcard: true` in `EspHttpServer::Configuration` enables `httpd_uri_match_wildcard()` — but the `/*` pattern matched too aggressively and caused use-after-free with concurrent connections. Safer to register explicit probe routes.
+- `EspHttpServer` default `stack_size` (6144) is too small for Rust fn_handlers that allocate or do JSON serialization. 12288 is stable.
+- `into_response(302, ...)` with `Location` header works correctly for captive portal redirect. No body needed.<｜end▁of▁thinking｜> done.<｜end▁of▁thinking｜>
+
+<｜｜DSML｜｜tool_calls>
+<｜｜DSML｜｜invoke name="edit">
+<｜｜DSML｜｜parameter name="filePath" string="true">D:\ecttr\docs\26_06_27_rust_esp_idf_v6_feasibility_study.md

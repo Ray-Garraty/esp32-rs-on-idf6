@@ -2,9 +2,20 @@
 
 - `PATH="/c/Users/vlbes/.pyenv/pyenv-win/versions/3.11.9:$PATH" cargo +esp build --target xtensa-esp32-espidf` — build firmware (pyenv fix for Windows)
 - `cargo test --lib stepper::ramp::tests` — host-based ramp unit tests
-- `espflash flash --port COM5 "target/xtensa-esp32-espidf/debug/ecotiter"` — flash (без monitor)
-- `timeout 30 python scripts/serial_monitor.py COM5` — монитор с таймаутом 30 с
-- WDT must be disabled: `unsafe { esp_idf_sys::esp_task_wdt_deinit(); }`
+- `espflash flash --port COM5 "target/xtensa-esp32-espidf/debug/ecotiter"` — flash only
+- `timeout 30 python scripts/serial_monitor.py COM5` — monitor with 30s timeout
+- WDT must be disabled during debugging: `unsafe { esp_idf_sys::esp_task_wdt_deinit(); }`
+
+# ESP32 Crash Investigation
+
+Any ESP32 crash (Guru Meditation, StoreProhibited, LoadProhibited, stack overflow, abort) requires **immediate investigation and fix** using tools described in [ESP-IDF Core Dump Guide](https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32/api-guides/core_dump.html).
+
+Mandatory steps:
+1. Record EXCCAUSE, EXCVADDR, registers A0–A15, PC.
+2. Decode backtrace via `xtensa-esp32-elf-addr2line` or `espcoredump.py`.
+3. If backtrace is corrupted — analyze registers: typical patterns are use-after-free (EXCVADDR = 0xFFFFFFA0, i.e. NULL + offset), stack overflow, buffer overflow.
+4. If crash is related to HTTP server — always check `stack_size` in `EspHttpServer::Configuration` first.
+5. Guru Meditation is never "one-time" or "pre-existing" — root cause must be found and fixed.
 
 # RMT Stepper API (esp-idf-hal v0.46, IDF v6)
 

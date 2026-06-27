@@ -271,6 +271,49 @@ impl WifiManager {
 
         info!("Starting AP: {} / ch {}", config::AP_SSID, config::AP_CHANNEL);
 
+        // Create AP EspNetif with 192.168.4.1/24 before wifi.start(),
+        // so DHCP server starts with the correct subnet from the beginning.
+        {
+            use esp_idf_svc::ipv4::{Configuration as IpConfig, RouterConfiguration, Subnet, Mask};
+            use esp_idf_svc::netif::{EspNetif, NetifConfiguration, NetifStack};
+            use std::net::Ipv4Addr;
+
+            let ap_ip = Ipv4Addr::new(config::AP_IP[0], config::AP_IP[1], config::AP_IP[2], config::AP_IP[3]);
+
+            let ap_netif_conf = NetifConfiguration {
+                flags: 0,
+                got_ip_event_id: None,
+                lost_ip_event_id: None,
+                key: "WIFI_AP_CUSTOM".try_into().unwrap(),
+                description: "ap".try_into().unwrap(),
+                route_priority: 10,
+                ip_configuration: Some(IpConfig::Router(RouterConfiguration {
+                    subnet: Subnet {
+                        gateway: ap_ip,
+                        mask: Mask(config::AP_NETMASK_BITS),
+                    },
+                    dhcp_enabled: true,
+                    dns: Some(ap_ip),
+                    secondary_dns: None,
+                })),
+                stack: NetifStack::Ap,
+                custom_mac: None,
+            };
+
+            let custom_ap = match EspNetif::new_with_conf(&ap_netif_conf) {
+                Ok(n) => n,
+                Err(e) => {
+                    warn!("Failed to create custom AP netif: {}", e);
+                    return;
+                }
+            };
+
+            if let Err(e) = wifi.wifi_mut().swap_netif_ap(custom_ap) {
+                warn!("Failed to swap AP netif: {}", e);
+                return;
+            }
+        }
+
         let ap_config = AccessPointConfiguration {
             ssid: config::AP_SSID.try_into().unwrap_or_default(),
             ssid_hidden: false,
@@ -294,36 +337,10 @@ impl WifiManager {
             return;
         }
 
-        // Set AP IP AFTER starting WiFi.
-        // Without this, the AP netif uses a random default subnet (e.g. 192.168.71.x).
-        // DHCP server is NOT restarted — the AP still serves addresses in the original subnet,
-        // but the DNS server is bound to 192.168.4.1 and the HTTP server works on this IP.
-        // The phone gets a 192.168.71.x IP but can still reach 192.168.4.1 (they're on the
-        // same L2 network behind the AP bridge).
-        {
-            use std::net::Ipv4Addr;
-            use esp_idf_svc::handle::RawHandle;
-            let ap_netif = wifi.wifi().ap_netif();
-            let handle = ap_netif.handle();
-            let ip = Ipv4Addr::new(config::AP_IP[0], config::AP_IP[1], config::AP_IP[2], config::AP_IP[3]);
-            let nm = Ipv4Addr::new(config::AP_NETMASK[0], config::AP_NETMASK[1], config::AP_NETMASK[2], config::AP_NETMASK[3]);
-
-            unsafe {
-                let ip_info = esp_idf_sys::esp_netif_ip_info_t {
-                    ip: esp_idf_sys::esp_ip4_addr_t { addr: u32::from(ip) },
-                    netmask: esp_idf_sys::esp_ip4_addr_t { addr: u32::from(nm) },
-                    gw: esp_idf_sys::esp_ip4_addr_t { addr: u32::from(ip) },
-                };
-                esp_idf_sys::esp_netif_set_ip_info(handle, &ip_info);
-            }
-            info!("AP IP set to {}.{}.{}.{}", config::AP_IP[0], config::AP_IP[1], config::AP_IP[2], config::AP_IP[3]);
-        }
-
-        // Wait for AP netif to settle
-        std::thread::sleep(Duration::from_millis(1500));
-
-        self.mode = WifiMode::ApMode;
         info!("AP ready at {}:{}", config::AP_SSID, config::AP_IP_ADDRESS);
+
+        std::thread::sleep(Duration::from_millis(500));
+        self.mode = WifiMode::ApMode;
         self.start_dns();
     }
 

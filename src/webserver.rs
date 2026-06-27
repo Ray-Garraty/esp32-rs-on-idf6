@@ -20,15 +20,16 @@ pub struct WebServer {
 
 impl WebServer {
     pub fn new(wifi_mgr: SharedWifi) -> Self {
-        let mut server = EspHttpServer::new(&Default::default())
-            .expect("EspHttpServer::new()");
+        let mut server = EspHttpServer::new(&esp_idf_svc::http::server::Configuration {
+            stack_size: 12288,
+            ..Default::default()
+        })
+        .expect("EspHttpServer::new()");
         let restart_pending = Arc::new(AtomicBool::new(false));
 
-        // Register routes in priority order: specific first, catch-all last
         Self::register_captive_routes(&mut server, wifi_mgr.clone(), restart_pending.clone());
         Self::register_api_routes(&mut server, wifi_mgr.clone());
         Self::register_webui_routes(&mut server);
-        Self::register_catch_all(&mut server, wifi_mgr.clone());
 
         info!("HTTP server started on port {}", config::HTTP_PORT);
         Self {
@@ -147,6 +148,24 @@ impl WebServer {
                 Ok(())
             })
             .ok();
+
+        // Captive portal probe URLs → redirect to /wifi
+        let probes = [
+            "/generate_204",
+            "/hotspot-detect.html",
+            "/ncsi.txt",
+            "/connecttest.txt",
+            "/gen_204",
+        ];
+        for uri in &probes {
+            server
+                .fn_handler(uri, Method::Get, move |request| -> Result<(), EspIOError> {
+                    let mut resp = request.into_response(302, Some("Found"), &[("Location", "/wifi")])?;
+                    resp.write(b"")?;
+                    Ok(())
+                })
+                .ok();
+        }
     }
 
     fn register_api_routes(server: &mut EspHttpServer<'static>, wifi_mgr: SharedWifi) {
@@ -463,27 +482,6 @@ impl WebServer {
             .ok();
     }
 
-    fn register_catch_all(server: &mut EspHttpServer<'static>, wifi_mgr: SharedWifi) {
-        // Catch-all: serve captive portal page on ANY unknown route in AP mode
-        // Uses HTML meta-refresh for reliable captive portal detection on all OS
-        let mgr = wifi_mgr.clone();
-        server
-            .fn_handler("/*", Method::Get, move |request| -> Result<(), EspIOError> {
-                let wifi = mgr.lock().unwrap();
-                let in_ap = wifi.is_ap_mode();
-                drop(wifi);
-
-                if in_ap {
-                    let mut resp = request.into_ok_response()?;
-                    resp.write(b"<!DOCTYPE html><html><head><meta http-equiv=\"refresh\" content=\"0;url=http://192.168.4.1/wifi\"></head><body>Redirecting...</body></html>")?;
-                } else {
-                    let mut resp = request.into_response(404, Some("text/plain"), &[])?;
-                    resp.write(b"Not found")?;
-                }
-                Ok(())
-            })
-            .ok();
-    }
 }
 
 const CAPTIVE_PORTAL_HTML: &str = r#"<!DOCTYPE html>
