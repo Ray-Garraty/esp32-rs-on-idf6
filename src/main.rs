@@ -18,8 +18,7 @@ static LIMIT_EMPTY_TRIGGERED: AtomicBool = AtomicBool::new(false);
 
 fn main() {
     esp_idf_sys::link_patches();
-    esp_idf_svc::log::EspLogger::initialize_default();
-    log::set_max_level(log::LevelFilter::Info);
+    ecotiter_fw::logger::init();
 
     unsafe {
         esp_idf_sys::esp_task_wdt_deinit();

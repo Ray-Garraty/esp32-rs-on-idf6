@@ -228,13 +228,16 @@ impl WebServer {
                 };
 
                 let mut resp = request.into_ok_response()?;
-                resp.write(b"data: {\"type\":\"connected\"}\n\n").ok();
-                for _ in 0..60 {
+                resp.write(b"event: status\ndata: {\"type\":\"connected\"}\n\n").ok();
+
+                for _ in 0..3 {
                     let wifi = mgr.lock().unwrap();
+                    let ts = unsafe { esp_idf_sys::esp_timer_get_time() as u64 / 1000 };
                     let status_obj = serde_json::json!({
                         "wifi_mode": format!("{:?}", wifi.mode()),
                         "wifi_connected": wifi.is_connected(),
                         "wifi_ssid": wifi.wifi_ssid(),
+                        "wifi_rssi": wifi.wifi_rssi(),
                         "ap_mode": wifi.is_ap_mode(),
                         "temp": null,
                         "mv": null,
@@ -244,7 +247,7 @@ impl WebServer {
                             "vl": 0.0,
                             "spd": 0.0,
                         },
-                        "ts": 0,
+                        "ts": ts,
                     });
                     drop(wifi);
 
@@ -255,6 +258,11 @@ impl WebServer {
                     }
                     std::thread::sleep(Duration::from_millis(1000));
                 }
+
+                // Send accumulated logs
+                let logs_json = crate::logger::get_entries_json(10);
+                let log_msg = format!("event: log\ndata: {}\n\n", logs_json);
+                resp.write(log_msg.as_bytes()).ok();
                 Ok(())
             })
             .ok();
@@ -358,8 +366,9 @@ impl WebServer {
         // GET /api/logs
         server
             .fn_handler("/api/logs", Method::Get, move |request| -> Result<(), EspIOError> {
+                let json = crate::logger::get_entries_json(50);
                 let mut resp = request.into_ok_response()?;
-                resp.write(b"{\"total\":0,\"entries\":[]}")?;
+                resp.write(json.as_bytes())?;
                 Ok(())
             })
             .ok();

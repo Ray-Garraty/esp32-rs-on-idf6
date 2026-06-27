@@ -14,6 +14,7 @@ pub mod limitswitch;
 pub mod wifi;
 
 #[cfg(target_arch = "xtensa")]
+pub mod logger;
 pub mod status;
 
 #[cfg(target_arch = "xtensa")]

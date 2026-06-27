@@ -6,6 +6,23 @@
 - `timeout 30 python scripts/serial_monitor.py COM5` — monitor with 30s timeout
 - WDT must be disabled during debugging: `unsafe { esp_idf_sys::esp_task_wdt_deinit(); }`
 
+# GOLDEN RULE: NEVER BLOCK THE MAIN LOOP
+
+The main loop (`main.rs`, FreeRTOS task `main`) must NEVER execute a blocking operation. Any blocking API call (`send_and_wait`, `sleep` > 1ms, `recv`, synchronous I/O, mutex contention with unbounded wait) MUST live in a dedicated task/thread.
+
+Liftime-blocking operations (RMT transmit, file I/O, HTTP body read, DNS query) are ONLY allowed in:
+- `std::thread::spawn()` tasks with appropriate stack size
+- FreeRTOS tasks created via `xTaskCreate`
+
+The main loop may only:
+- Read atomics
+- Lock mutexes with `try_lock()` (not `lock()`)
+- Write to pre-opened file descriptors (non-blocking)
+- Call `process()` / `poll()` style functions that return immediately
+- `sleep(Duration::from_millis(10))` as pacing tick (exception — 10ms tick is the heartbeat)
+
+Violation of this rule — any blocking call added to main loop — invalidates all changes and requires immediate revert.
+
 # ESP32 Crash Investigation
 
 Any ESP32 crash (Guru Meditation, StoreProhibited, LoadProhibited, stack overflow, abort) requires **immediate investigation and fix** using tools described in [ESP-IDF Core Dump Guide](https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32/api-guides/core_dump.html).

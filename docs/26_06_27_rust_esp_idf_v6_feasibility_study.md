@@ -980,8 +980,92 @@ Also discovered: `uri_match_wildcard: true` with a `/*` catch-all handler caused
 - `EspNetif::new_with_conf()` fails with `ESP_ERR_INVALID_ARG` if the `key` field duplicates an existing netif key in ESP-NETIF. Since `EspWifi::new()` already registers an AP netif with key `"WIFI_AP_DEF"`, the custom netif must use a different key (e.g. `"WIFI_AP_CUSTOM"`).
 - `uri_match_wildcard: true` in `EspHttpServer::Configuration` enables `httpd_uri_match_wildcard()` — but the `/*` pattern matched too aggressively and caused use-after-free with concurrent connections. Safer to register explicit probe routes.
 - `EspHttpServer` default `stack_size` (6144) is too small for Rust fn_handlers that allocate or do JSON serialization. 12288 is stable.
-- `into_response(302, ...)` with `Location` header works correctly for captive portal redirect. No body needed.<｜end▁of▁thinking｜> done.<｜end▁of▁thinking｜>
+- `into_response(302, ...)` with `Location` header works correctly for captive portal redirect. No body needed.
 
-<｜｜DSML｜｜tool_calls>
-<｜｜DSML｜｜invoke name="edit">
-<｜｜DSML｜｜parameter name="filePath" string="true">D:\ecttr\docs\26_06_27_rust_esp_idf_v6_feasibility_study.md
+---
+
+## 19. Phase 1e — Task Architecture, Motor Thread & SSE via Raw Socket (2026-06-27)
+
+### Golden Rule: NEVER BLOCK THE MAIN LOOP
+
+The main loop (`main.rs`, FreeRTOS task `main`) must NEVER execute a blocking operation. Any blocking API call (`send_and_wait`, `sleep` > 1ms, `recv`, synchronous I/O, mutex contention with unbounded wait) MUST live in a dedicated task/thread.
+
+Blocking operations are ONLY allowed in:
+- `std::thread::spawn()` tasks with appropriate stack size
+- FreeRTOS tasks created via `xTaskCreate`
+
+The main loop may only:
+- Read atomics
+- Lock mutexes with `try_lock()` (not `lock()`)
+- Write to pre-opened file descriptors (non-blocking)
+- Call `process()` / `poll()` style functions that return immediately
+- `sleep(Duration::from_millis(10))` as pacing tick (the only exception)
+
+### Task Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│ MOTOR TASK (prio 20, 4 KB stack)                                          │
+│ std::thread. Owns RmtStepper exclusively.                                  │
+│ loop { read atomic target → send_and_wait → write atomic position }       │
+│ send_and_wait() blocks only this task, NOT main loop                      │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ HTTP TASK (prio 5, 12 KB stack)                                           │
+│ EspHttpServer worker (single thread).                                      │
+│ fn_handler("/api/events") → write headers → save fd → return (0.1ms)     │
+│ All other handlers → quick JSON/redirect, return immediately              │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ MAIN TASK (prio 10, 8 KB stack)                                           │
+│ FreeRTOS main task. NEVER blocks.                                         │
+│ loop {                                                                     │
+│   cmd_queue.process()    → set motor target atomics                       │
+│   wifi_process()         → DNS poll, reconnect logic                     │
+│   sse_push(fd)           → httpd_resp_send_chunk() — non-blocking write   │
+│   temperature_poll()     → DS18B20 non-blocking                          │
+│   adc_poll()             → 64 samples @ 1ms spacing                      │
+│   led_process()          → blink SM                                       │
+│   sleep(10ms)            → pacing                                         │
+│ }                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ BLE NOTIFY TASK (prio 15, 8 KB stack)                                     │
+│ std::thread. loop { recv mpsc → nimble_notify }                           │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+### SSE Implementation
+
+**Problem:** `EspHttpServer` has a single worker thread. `fn_handler` callbacks block the worker for their entire duration. Previous code used `for _ in 0..N { sleep(..) }` inside the callback, blocking all other HTTP requests.
+
+**Solution — raw socket SSE:**
+1. Register `/api/events` handler that sends HTTP 200 + `Content-Type: text/event-stream` headers, extracts socket fd via `httpd_req_to_sockfd()`, stores in `AtomicI32`, and returns immediately.
+2. Main loop calls `httpd_resp_send_chunk(fd, ...)` every tick to push `event: status` and `event: log` — lwIP socket write, non-blocking.
+3. On write error (client disconnected) → `fd.store(-1)`.
+
+### Motor Thread
+
+**Problem:** `stepper.move_steps(&chunk)` in main loop calls `RMT send_and_wait()` blocking for ~128ms (64 symbols × 2000µs).
+
+**Solution — dedicated task:**
+1. `RmtStepper` created in `main()`, moved into `std::thread::spawn()` with 4 KB stack.
+2. Task loop: read atomics → if enabled && target != position → `send_and_wait()`.
+3. Main loop commands via `AtomicI32` target, `AtomicBool` enable. No `send_and_wait()` in main loop.
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `src/sse.rs` (NEW) | `AtomicI32` fd storage, `sse_push()` from main loop |
+| `src/motor_task.rs` (NEW) | `pub fn spawn(stepper)`, spin loop with RMT |
+| `src/stepper/rmt_stepper.rs` | Add `spin_once()` for motor task |
+| `src/main.rs` | Spawn motor task; remove `move_steps()` from loop; add SSE push |
+| `src/webserver.rs` | `/api/events`: headers + save fd + return (no loop) |
+| `src/logger.rs` | Fix field names: `"l"` → `"level"`, `"m"` → `"msg"` |
+| `src/lib.rs` | Add `pub mod sse`, `pub mod motor_task` |
+| `build.rs` (NEW) | `cargo::rustc-check-cfg=cfg(esp_idf_version_major, values("6"))` |
+| `AGENTS.md` | Added Golden Rule + Crash Investigation |
