@@ -10,3 +10,4 @@ __pycache__/
 *.swp
 *.swo
 .env
+components_esp32.lock

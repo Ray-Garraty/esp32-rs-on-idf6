@@ -74,6 +74,12 @@ impl WifiManager {
         info!("WiFi credentials saved to NVS");
     }
 
+    pub fn clear_credentials_from_nvs() {
+        nvs_write_str("wifi", "ssid", "");
+        nvs_write_str("wifi", "password", "");
+        info!("WiFi credentials cleared from NVS");
+    }
+
     pub fn init(&mut self) {
         info!("WiFi manager init");
         if self.saved_ssid.len() > 0 && self.saved_password.len() > 0 {
@@ -81,21 +87,108 @@ impl WifiManager {
                 "Saved credentials found for SSID: {}",
                 self.saved_ssid.as_str()
             );
-            self.try_sta_connect();
+            if self.try_sta_connect() {
+                return; // Connected successfully — skip AP
+            }
+            // Failed — clear bad credentials (C++ behavior)
+            info!("Failed to connect with saved credentials, clearing");
+            Self::clear_credentials_from_nvs();
+            self.saved_ssid.clear();
+            self.saved_password.clear();
         } else {
             info!("No saved WiFi credentials");
         }
 
-        if self.mode != WifiMode::StaActive {
-            info!("Starting AP mode (captive portal)");
-            self.start_ap();
+        info!("Starting AP mode (captive portal)");
+        self.start_ap();
+    }
+
+    /// Try connecting to STA with given credentials (used from captive portal)
+    pub fn try_connect_sta(&mut self, ssid: &str, password: &str) -> bool {
+        use std::time::{Duration, Instant};
+
+        let wifi = match self.wifi.as_mut() {
+            Some(w) => w,
+            None => return false,
+        };
+        self.mode = WifiMode::StaConnecting;
+
+        let ssid_h: heapless::String<32> = match heapless::String::try_from(ssid) {
+            Ok(s) => s,
+            Err(_) => { self.mode = WifiMode::Off; return false; }
+        };
+        let pass_h: heapless::String<64> = match heapless::String::try_from(password) {
+            Ok(p) => p,
+            Err(_) => { self.mode = WifiMode::Off; return false; }
+        };
+
+        info!("Trying to connect to STA: {}", ssid);
+
+        let client_config = ClientConfiguration {
+            ssid: ssid_h,
+            bssid: None,
+            auth_method: AuthMethod::WPA2Personal,
+            password: pass_h,
+            channel: None,
+            ..Default::default()
+        };
+
+        if wifi.set_configuration(&Configuration::Client(client_config)).is_err() {
+            warn!("set_configuration failed");
+            self.mode = WifiMode::Off;
+            return false;
+        }
+
+        if wifi.start().is_err() {
+            warn!("WiFi start failed");
+            self.mode = WifiMode::Off;
+            return false;
+        }
+
+        if wifi.connect().is_err() {
+            warn!("WiFi connect failed for: {}", ssid);
+            wifi.stop().ok();
+            self.mode = WifiMode::Off;
+            return false;
+        }
+
+        let deadline = Instant::now() + Duration::from_millis(config::STA_CONNECT_TIMEOUT_MS as u64);
+        loop {
+            if wifi.is_connected().unwrap_or(false) {
+                break;
+            }
+            if Instant::now() >= deadline {
+                warn!("STA connect timeout for: {}", ssid);
+                wifi.disconnect().ok();
+                wifi.stop().ok();
+                self.mode = WifiMode::Off;
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(config::STA_POLL_MS as u64));
+        }
+
+        std::thread::sleep(Duration::from_millis(config::STA_POST_CONNECT_DELAY_MS as u64));
+
+        if wifi.is_connected().unwrap_or(false) {
+            self.mode = WifiMode::StaActive;
+            info!("WiFi connected! SSID: {}", ssid);
+            if let Ok(ip) = wifi.wifi().sta_netif().get_ip_info() {
+                info!("IP: {:?}", ip);
+            }
+            true
+        } else {
+            warn!("STA connect timeout for: {}", ssid);
+            wifi.disconnect().ok();
+            wifi.stop().ok();
+            self.mode = WifiMode::Off;
+            false
         }
     }
 
-    fn try_sta_connect(&mut self) {
+    fn try_sta_connect(&mut self) -> bool {
         let wifi = match self.wifi.as_mut() {
             Some(w) => w,
-            None => return,
+            None => return false,
         };
         self.mode = WifiMode::StaConnecting;
 
@@ -118,20 +211,20 @@ impl WifiManager {
         {
             warn!("set_configuration failed");
             self.mode = WifiMode::Off;
-            return;
+            return false;
         }
 
         if wifi.start().is_err() {
             warn!("WiFi start failed");
             self.mode = WifiMode::Off;
-            return;
+            return false;
         }
 
         if wifi.connect().is_err() {
             warn!("WiFi connect failed for: {}", ssid_str);
             wifi.stop().ok();
             self.mode = WifiMode::Off;
-            return;
+            return false;
         }
 
         let deadline = Instant::now() + Duration::from_millis(config::STA_CONNECT_TIMEOUT_MS as u64);
@@ -144,7 +237,7 @@ impl WifiManager {
                 wifi.disconnect().ok();
                 wifi.stop().ok();
                 self.mode = WifiMode::Off;
-                return;
+                return false;
             }
             std::thread::sleep(Duration::from_millis(config::STA_POLL_MS as u64));
         }
@@ -160,11 +253,13 @@ impl WifiManager {
             if let Ok(ip) = wifi.wifi().sta_netif().get_ip_info() {
                 info!("IP: {:?}", ip);
             }
+            true
         } else {
             warn!("STA connect timeout for: {}", ssid_str);
             wifi.disconnect().ok();
             wifi.stop().ok();
             self.mode = WifiMode::Off;
+            false
         }
     }
 
@@ -199,8 +294,32 @@ impl WifiManager {
             return;
         }
 
-        // Wait for AP netif to come up (delay only, no busy-wait polling
-        // to avoid cache-disabled panic during WiFi init)
+        // Set AP IP AFTER starting WiFi.
+        // Without this, the AP netif uses a random default subnet (e.g. 192.168.71.x).
+        // DHCP server is NOT restarted — the AP still serves addresses in the original subnet,
+        // but the DNS server is bound to 192.168.4.1 and the HTTP server works on this IP.
+        // The phone gets a 192.168.71.x IP but can still reach 192.168.4.1 (they're on the
+        // same L2 network behind the AP bridge).
+        {
+            use std::net::Ipv4Addr;
+            use esp_idf_svc::handle::RawHandle;
+            let ap_netif = wifi.wifi().ap_netif();
+            let handle = ap_netif.handle();
+            let ip = Ipv4Addr::new(config::AP_IP[0], config::AP_IP[1], config::AP_IP[2], config::AP_IP[3]);
+            let nm = Ipv4Addr::new(config::AP_NETMASK[0], config::AP_NETMASK[1], config::AP_NETMASK[2], config::AP_NETMASK[3]);
+
+            unsafe {
+                let ip_info = esp_idf_sys::esp_netif_ip_info_t {
+                    ip: esp_idf_sys::esp_ip4_addr_t { addr: u32::from(ip) },
+                    netmask: esp_idf_sys::esp_ip4_addr_t { addr: u32::from(nm) },
+                    gw: esp_idf_sys::esp_ip4_addr_t { addr: u32::from(ip) },
+                };
+                esp_idf_sys::esp_netif_set_ip_info(handle, &ip_info);
+            }
+            info!("AP IP set to {}.{}.{}.{}", config::AP_IP[0], config::AP_IP[1], config::AP_IP[2], config::AP_IP[3]);
+        }
+
+        // Wait for AP netif to settle
         std::thread::sleep(Duration::from_millis(1500));
 
         self.mode = WifiMode::ApMode;
@@ -209,15 +328,33 @@ impl WifiManager {
     }
 
     fn start_dns(&mut self) {
-        let socket = match UdpSocket::bind("0.0.0.0:53") {
+        // Bind to AP IP explicitly — LwIP needs a concrete interface IP,
+        // not 0.0.0.0 wildcard, to receive DNS from AP clients
+        let bind_addr = format!("{}.{}.{}.{}:53",
+            config::AP_IP[0], config::AP_IP[1],
+            config::AP_IP[2], config::AP_IP[3]);
+        let socket = match UdpSocket::bind(&bind_addr) {
             Ok(s) => {
                 s.set_read_timeout(Some(Duration::from_millis(5))).ok();
-                info!("DNS responder started on port 53");
+                s.set_nonblocking(true).ok();
+                info!("DNS responder started on {}:53", config::AP_IP_ADDRESS);
                 s
             }
             Err(e) => {
-                warn!("DNS bind port 53 failed: {}", e);
-                return;
+                // Fallback: try 0.0.0.0
+                warn!("DNS bind {} failed: {}, trying 0.0.0.0:53", bind_addr, e);
+                match UdpSocket::bind("0.0.0.0:53") {
+                    Ok(s) => {
+                        s.set_read_timeout(Some(Duration::from_millis(5))).ok();
+                        s.set_nonblocking(true).ok();
+                        info!("DNS responder started on 0.0.0.0:53");
+                        s
+                    }
+                    Err(e2) => {
+                        warn!("DNS bind 0.0.0.0:53 also failed: {}", e2);
+                        return;
+                    }
+                }
             }
         };
         self.dns_socket = Some(socket);
@@ -320,6 +457,17 @@ impl WifiManager {
 
     pub fn is_ap_mode(&self) -> bool {
         self.mode == WifiMode::ApMode
+    }
+
+    pub fn wifi_ip(&self) -> Option<String> {
+        if self.mode == WifiMode::StaActive {
+            if let Some(wifi) = self.wifi.as_ref() {
+                if let Ok(ip) = wifi.wifi().sta_netif().get_ip_info() {
+                    return Some(ip.ip.to_string());
+                }
+            }
+        }
+        None
     }
 }
 

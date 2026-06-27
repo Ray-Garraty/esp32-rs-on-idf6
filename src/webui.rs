@@ -1,0 +1,10 @@
+pub const INDEX_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/webui/index.html"));
+pub const STYLE_CSS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/webui/style.css"));
+pub const THEME_CSS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/webui/theme.css"));
+pub const STATE_JS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/webui/state.js"));
+pub const UI_UPDATE_JS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/webui/ui-update.js"));
+pub const SSE_JS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/webui/sse.js"));
+pub const LOGS_JS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/webui/logs.js"));
+pub const STEPPER_JS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/webui/stepper.js"));
+pub const CALIBRATION_JS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/webui/calibration.js"));
+pub const INIT_JS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/webui/init.js"));

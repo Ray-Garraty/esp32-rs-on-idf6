@@ -18,3 +18,6 @@ pub mod status;
 
 #[cfg(target_arch = "xtensa")]
 pub mod webserver;
+
+#[cfg(target_arch = "xtensa")]
+pub mod webui;

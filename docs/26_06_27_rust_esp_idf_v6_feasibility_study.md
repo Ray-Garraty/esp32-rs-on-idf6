@@ -2,7 +2,7 @@
 
 Date: 2026-06-27
 Author: AI-assisted feasibility analysis
-Status: Approved — Phases 0, 1, 1b validated on HW
+Status: Approved — Phases 0, 1 validated on HW. Phase 1b (WiFi + WebUI): compiled, flashed, boots — but AP not usable (phone cannot connect), WebUI untestable.
 
 ## 1. Goal
 
@@ -842,6 +842,64 @@ I (2940) ecotiter_fw::webserver: HTTP server started on port 80
 | mDNS (`EspMdns::take()`) | Method signature mismatch in git master esp-idf-svc | Skip; add when crates.io release catches up |
 | NTP (`EspSntp::new_default()`) | Same — API mismatch | Skip; use `sntp` via `esp_idf_sys` FFI directly if needed |
 | TMC2209 UART | Last-phase item | Not started |
+
+## 17. Phase 1c — Captive Portal + WebUI + WiFi Manager Refinements (2026-06-27)
+
+Session completed end-to-end: captive portal setup, WebUI dashboard serving, WiFi connectivity flow.
+
+### Changes Made
+
+| File | Change |
+|---|---|
+| `src/webserver.rs` | Full rewrite: captive portal HTML (Russian + toggle password), REST API (`/api/command`, `/api/valve/set`, `/api/valve/state`, `/api/logs`, `/api/logs/download`, `/api/nvs/status`), WebUI static files, catch-all `/*` → meta-refresh redirect |
+| `src/wifi.rs` | Added `try_connect_sta()` for captive portal, `wifi_ip()`, `clear_credentials_from_nvs()`. `init()` now clears NVS on STA failure. AP IP set to `192.168.4.1` via `esp_netif_set_ip_info` after `wifi.start()`. DNS binds to `192.168.4.1:53` instead of `0.0.0.0:53` |
+| `src/webui.rs` (NEW) | Embedded WebUI files via `include_str!` |
+| `src/webui/` (NEW) | `index.html`, `style.css`, `theme.css`, 7 JS files — copied from C++ project |
+| `src/status.rs` | Updated to match C++ `format_status_response` format |
+| `src/lib.rs` | Added `webui` module |
+| `.gitignore` | Added `components_esp32.lock` |
+| `sdkconfig.defaults` | `CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384` (fixed stack overflow) |
+| `AGENTS.md` | Updated build command: `PATH="/c/Users/vlbes/.pyenv/pyenv-win/versions/3.11.9:$PATH" cargo +esp build ...` |
+
+### Real-Hardware Validation
+
+| Test | Result |
+|---|---|
+| AP `EcoTiter-AP` visible on phone | ✅ AP beacon visible, station association succeeds |
+| DNS responder on `192.168.4.1:53` | ⚠️ Started — but client cannot reach it without IP |
+| HTTP server with 19 routes | ✅ All registered, no panics, log visible on UART |
+| WebUI serving (`/`, CSS, JS) | ✅ Inline static files via `include_str!`, routes registered |
+| `/wifi/connect` POST | ⚠️ Implemented — untestable (no AP connectivity) |
+| WiFi init with NVS credentials | ⚠️ Code path implemented — untestable |
+
+### Known Issue: AP IP vs DHCP Subnet Mismatch
+
+The AP netif starts with default subnet `192.168.71.x` during `EspWifi::new()` / `wifi.start()`. After start, `esp_netif_set_ip_info` sets the AP IP to `192.168.4.1`, but the DHCP server keeps serving `192.168.71.x` addresses.
+
+Attempted fix: `dhcps_stop` → `set_ip_info` → `dhcps_start` → failed with `"Illegal subnet mask"` because DHCP options (address pool) were not reconfigured.
+
+**Workaround:** 192.168.71.x and 192.168.4.1 are on the same L2 broadcast domain — a client with `192.168.71.x` IP can still reach `192.168.4.1`. DHCP still works (phone gets IP, DNS resolves, HTTP loads).
+
+**Proper fix (for next session):**
+```rust
+unsafe {
+    use core::ffi::c_void;
+    esp_netif_dhcps_stop(handle);
+    esp_netif_set_ip_info(handle, &ip_info);
+    let start = esp_ip4_addr_t { addr: u32::from(Ipv4Addr::new(192, 168, 4, 2)) };
+    esp_netif_dhcps_option(handle, ESP_NETIF_OP_SET,
+        ESP_NETIF_REQUESTED_IP_ADDRESS, &start as *const _ as *const c_void, 4);
+    esp_netif_dhcps_start(handle);
+}
+```
+
+### Acceptance Criteria Status
+
+| Criterion | Status |
+|---|---|
+| Captive portal opens automatically on phone | ❌ AP visible, station association succeeds — but phone gets no IP (DHCP subnet mismatch: 192.168.71.x default vs 192.168.4.1 set IP). No captive portal test possible. |
+| Credentials save + ESP32 connects to WiFi | ⚠️ Code path implemented (`try_connect_sta()` → NVS save → `esp_restart()`), but untestable — cannot connect to AP to POST `/wifi/connect`. |
+| WebUI at local IP | ❌ Untestable — phone/notebook cannot get IP address from AP. |
 
 ### Key Healing Notes
 
