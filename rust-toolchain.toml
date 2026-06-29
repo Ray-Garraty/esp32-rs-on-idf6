@@ -1,0 +1,3 @@
+[toolchain]
+channel = "esp"
+targets = ["xtensa-esp32-espidf", "x86_64-pc-windows-msvc"]

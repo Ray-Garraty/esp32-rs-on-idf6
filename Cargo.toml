@@ -3,6 +3,12 @@ name = "ecotiter-fw"
 version = "0.1.0"
 edition = "2021"
 resolver = "2"
+description = "EcoTiter firmware — ESP32-based titration controller"
+license = "MIT"
+repository = "https://github.com/vlbes/ecotiter"
+readme = "README.md"
+keywords = ["embedded", "esp32", "titration", "iot"]
+categories = ["embedded", "hardware-support", "science"]
 
 [lib]
 name = "ecotiter_fw"
@@ -30,10 +36,19 @@ esp32-nimble = { path = "C:/Users/vlbes/esp32-nimble" }
 embuild = { git = "https://github.com/ivmarkov/embuild", branch = "master" }
 
 [patch.crates-io]
-esp-idf-sys = { git = "https://github.com/esp-rs/esp-idf-sys", features = ["binstart"] }
+esp-idf-sys = { git = "https://github.com/esp-rs/esp-idf-sys" }
 esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal" }
 esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc" }
 embuild = { git = "https://github.com/ivmarkov/embuild", branch = "master" }
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+multiple_crate_versions = "allow"
+
+[features]
+strict-lints = []
 
 [package.metadata.esp-idf-sys]
 extra_components = [

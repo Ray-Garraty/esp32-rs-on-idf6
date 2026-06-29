@@ -1,3 +1,9 @@
+#![allow(
+    clippy::disallowed_types,    // Vec/String OK in build script (not hot path)
+    clippy::if_not_else,         // build script logic fine as-is
+)]
+
+use embuild as _;
 use std::path::PathBuf;
 
 fn main() {
@@ -21,11 +27,11 @@ fn main() {
             args.push(current);
         }
         for arg in &args {
-            println!("cargo:rustc-link-arg-bins={}", arg);
+            println!("cargo:rustc-link-arg-bins={arg}");
         }
     }
 
-    // Suppress cfg warning for esp32-nimble IDF v6 patches
+    // Suppress cfg warning for esp32-nimble IDF v6 patches (our crate only)
     println!("cargo::rustc-check-cfg=cfg(esp_idf_version_major, values(\"6\"))");
 
     // Only patch on xtensa targets
@@ -43,14 +49,20 @@ fn main() {
 
     let src = std::fs::read_to_string(&file).unwrap_or_default();
 
-    // Check if IDF v6 patch is already present
-    if src.contains("esp_idf_version_major = \"6\"") {
+    // Check if all patches are already applied
+    if src.contains("// ecotiter-patch: unexpected_cfgs") {
         return;
     }
 
-    eprintln!("[build.rs] Patching esp32-nimble {} for IDF v6...", file.display());
+    eprintln!(
+        "[build.rs] Patching esp32-nimble {} for IDF v6...",
+        file.display()
+    );
 
-    let patched = src
+    // Prepend allow(unexpected_cfgs) — rustc does not recognise "6" as valid cfg value
+    let allow = "#![allow(unexpected_cfgs)] // ecotiter-patch: unexpected_cfgs\n";
+    let patched = format!("{allow}{src}");
+    let patched = patched
         .replace(
             "all(\n      esp_idf_version_major = \"5\",\n      esp_idf_version_minor = \"5\"),",
             "all(\n      esp_idf_version_major = \"5\",\n      esp_idf_version_minor = \"5\"),\n    all(\n      esp_idf_version_major = \"6\"),",
@@ -69,13 +81,12 @@ fn main() {
 }
 
 fn find_esp32_nimble_source() -> Option<PathBuf> {
-    let cargo_home = std::env::var("CARGO_HOME")
-        .unwrap_or_else(|_| {
-            let home = std::env::var("HOME")
-                .or_else(|_| std::env::var("USERPROFILE"))
-                .unwrap_or_else(|_| ".".into());
-            format!("{}/.cargo", home)
-        });
+    let cargo_home = std::env::var("CARGO_HOME").unwrap_or_else(|_| {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".into());
+        format!("{home}/.cargo")
+    });
 
     // Check git checkouts first (git dependency)
     let checkouts = PathBuf::from(&cargo_home).join("git/checkouts");
@@ -109,7 +120,8 @@ fn find_esp32_nimble_source() -> Option<PathBuf> {
                 let rest = &trimmed[start + 8..];
                 if let Some(end) = rest.find('"') {
                     let path_str = &rest[..end];
-                    let candidate = PathBuf::from(path_str).join("src/server/ble_characteristic.rs");
+                    let candidate =
+                        PathBuf::from(path_str).join("src/server/ble_characteristic.rs");
                     if candidate.exists() {
                         return Some(candidate);
                     }

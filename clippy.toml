@@ -1,0 +1,9 @@
+too-many-arguments-threshold = 12
+type-complexity-threshold = 400
+cognitive-complexity-threshold = 25
+large-error-threshold = 128
+allow-unwrap-in-tests = true
+disallowed-types = [
+    { path = "std::vec::Vec", reason = "Use heapless::Vec in hot paths (CODING_STYLE.md §5)" },
+    { path = "std::string::String", reason = "Use heapless::String in hot paths (CODING_STYLE.md §5)" },
+]
