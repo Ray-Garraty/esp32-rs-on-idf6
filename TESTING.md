@@ -2,7 +2,7 @@
 
 ## Overview
 
-Three-tier testing strategy derived from the [ASMPL autosampler project](https://github.com/vlbes/asmpl) and adapted for the Rust + ESP-IDF v6 (`std` mode) stack with `espflash` as the runner.
+Three-tier testing strategy derived from the ASMPL autosampler project and adapted for the Rust + ESP-IDF v6 (`std` mode) stack with `espflash` as the runner.
 
 | Tier | Scope | Command | Coverage |
 |---|---|---|---|---|
@@ -464,7 +464,8 @@ def test_wifi_captive_portal(dut):
 
 ```bash
 # Build firmware first
-bash scripts/fw.sh build
+PATH="/c/Users/vlbes/.pyenv/pyenv-win/versions/3.11.9:$PATH" \
+  cargo +esp build --target xtensa-esp32-espidf
 
 # Run all HIL tests
 pytest --target esp32 --port COM5
@@ -578,7 +579,7 @@ PATH="/c/Users/vlbes/.pyenv/pyenv-win/versions/3.11.9:$PATH" \
   cargo +esp build --target xtensa-esp32-espidf
 
 # 4. (optional) Flash + smoke test
-bash scripts/fw.sh flash && timeout 30 python scripts/serial_monitor.py COM5
+espflash flash --port COM5 "target/xtensa-esp32-espidf/debug/ecotiter" && timeout 30 python scripts/serial_monitor.py COM5
 ```
 
 ### What to Check

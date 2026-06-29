@@ -46,22 +46,6 @@ Mandatory steps:
 - `PinDriver::set_low()` / `set_high()` — control EN/DIR
 - EN pin **active LOW**: call `set_low()` in constructor
 
-# GPIO Pinout
-
-| Component | Pin | Driver |
-|---|---|---|
-| TMC2209 STEP | GPIO25 | TxChannelDriver (RMT) |
-| TMC2209 DIR | GPIO26 | PinDriver::output |
-| TMC2209 EN | GPIO27 | PinDriver::output (active LOW) |
-| TMC2209 UART TX/RX | GPIO17/16 | (deferred) |
-| Valve open/close | GPIO12/13 | PinDriver::output |
-| Limit FULL | GPIO32 | PinDriver::input + ISR |
-| Limit EMPTY | GPIO35 | PinDriver::input + ISR |
-| DS18B20 | GPIO4 | OneWire bitbang |
-| ADC (pH) | GPIO34 | ADC1 |
-| LED | GPIO2 | PinDriver::output |
-| USB-Serial RX | **GPIO3 — НЕ ТРОГАТЬ** | |
-
 # Common Issues
 
 - `rst:0x8 (TG1WDT_SYS_RESET)` — WDT timeout from blocking RMT. Add `esp_task_wdt_deinit()`.

@@ -2,28 +2,9 @@
 
 Last updated: 29 Jun 2026
 
+> **Single source of truth** for hardware pinout, architecture, protocol, state machines, NVS layout, thread model, and error hierarchy.
+>
 > Firmware for a laboratory burette titrator. ESP32 microcontroller, Rust (`esp-idf-hal` std mode, ESP-IDF v6.0.1). Precision stepper-driven syringe dosing with pH/temperature sensing. Communication via USB-Serial (JSON), BLE GATT (NUS), and WiFi (REST API + SSE + WebUI). Tauri desktop application as primary host.
-
-## Quick Start
-
-```bash
-PATH="/c/Users/vlbes/.pyenv/pyenv-win/versions/3.11.9:$PATH" \
-  cargo +esp build --target xtensa-esp32-espidf     # Build firmware
-
-espflash flash --port COM5 "target/xtensa-esp32-espidf/debug/ecotiter"  # Flash
-
-timeout 60 python scripts/serial_monitor.py COM5    # Monitor (60s timeout)
-```
-
-| Command | Purpose |
-|---|---|
-| `cargo +esp build --target xtensa-esp32-espidf` | Build firmware |
-| `espflash flash --port COM5 target/.../ecotiter` | Flash binary |
-| `timeout 60 python scripts/serial_monitor.py COM5` | Monitor with timeout |
-| `cargo test --lib stepper::ramp::tests` | Host unit tests (ramp) |
-| `cargo +esp clippy -- -D warnings` | Lint (zero warnings) |
-
-> **Prerequisites:** `espup install` (xtensa toolchain), `cargo install espflash ldproxy`, Python 3.11+ in PATH. See `AGENTS.md` for full Windows setup.
 
 ## Hardware
 
@@ -489,37 +470,7 @@ embuild = { git = "https://github.com/ivmarkov/embuild", branch = "master" }
 
 > **Verified:** This combination compiles with Rust 1.95.0-nightly (esp toolchain) and ESP-IDF v6.0.1. All published crates.io versions require git patches for IDF v6 compatibility.
 
-### Build & Flash
-
-- Toolchain: `xtensa-esp32-espidf` (built into `esp` Rust toolchain)
-- Linker: `ldproxy` (installed via `embuild`)
-- Flash: `espflash` standalone (not `cargo-espflash`)
-- Monitor: `python scripts/serial_monitor.py COM5` (with timeout)
-- Python must be at a real path (not pyenv shim) in `PATH`
-
-## Testing Requirements
-
-See `TESTING.md` for full 3-tier strategy.
-
-| Tier | What | How |
-|---|---|---|
-| 1 | Ramp calculation, calibration math, DNS builder | `cargo test --lib` |
-| 2 | RMT stepper, ADC, OneWire, WiFi init | Custom test binary + `espflash` |
-| 3 | End-to-end command/response, captive portal | `pytest-embedded` via USB serial |
-
-### Key Test Scenarios
-
-| Test | Description |
-|---|---|
-| Ramp zero steps | `compute_ramp(0, ...)` returns empty vec |
-| Ramp cruise | Cruise phase stays at min_interval_us |
-| Ramp triangular | Short move: accel then immediate decel (no cruise) |
-| DNS response | Build and validate DNS response packet |
-| Burette fill | Fill to target, verify limit switch triggers |
-| Burette dose | Dose precise volume, verify step count |
-| Valve cycle | Open → close → verify GPIO states |
-| WiFi captive portal | Phone connects to AP, gets IP, redirected to /wifi |
-| SSE push | Events pushed to HTTP client, non-blocking |
+See `TESTING.md` for the testing strategy.
 
 ## Deliverables
 

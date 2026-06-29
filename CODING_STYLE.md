@@ -1,64 +1,14 @@
 # Coding Style Guide — EcoTiter Firmware
 
-Based on proven conventions from the [ASMPL autosampler project](https://github.com/vlbes/asmpl), adapted for the EcoTiter's ESP32 + Rust + ESP-IDF v6 stack, and extended with [Qwen-recommended](https://github.com/qwen-lm) architectural principles.
+Based on proven conventions from the ASMPL autosampler project, adapted for the EcoTiter's ESP32 + Rust + ESP-IDF v6 stack, and extended with [Qwen-recommended](https://github.com/qwen-lm) architectural principles.
 
 ## 1. Layered Architecture
 
-Code is organised in four layers with strict one-way dependencies:
-
-```
-src/
-├── domain/             # Business logic — NO esp-idf imports
-│   ├── burette.rs     # Burette state, dosing math
-│   ├── calibration.rs # Steps/ml, Z-factor, ADC linear regression
-│   ├── planner.rs     # Plan dose/fill/empty/rinse sequences
-│   └── types.rs       # Domain newtypes (Ml, Steps, Hz, MlMin)
-│
-├── application/        # Coordination — use-case orchestration
-│   ├── command.rs      # JSON dispatch → handler lookup
-│   ├── state_machine.rs# Burette SM + transport SM
-│   └── scheduler.rs    # Task scheduling, timing
-│
-├── infrastructure/    # Hardware & platform (imports esp-idf)
-│   ├── drivers/
-│   │   ├── stepper.rs  # RmtStepper — concrete impl
-│   │   ├── adc.rs      # ADC1 oneshot driver
-│   │   ├── onewire.rs  # DS18B20 bitbang driver
-│   │   └── valve.rs    # GPIO valve control
-│   ├── network/
-│   │   ├── wifi.rs     # EspWifi AP/STA manager
-│   │   ├── http_server.rs # EspHttpServer REST + SSE
-│   │   └── ble.rs      # esp32-nimble GATT service
-│   └── storage/
-│       └── nvs.rs      # NVS read/write wrappers
-│
-├── interface/          # External boundaries
-│   ├── serial.rs       # USB-Serial JSON line reader
-│   ├── rest_api.rs     # Route registration + handler fn's
-│   └── webui.rs        # Embedded HTML/CSS/JS files
-│
-├── main.rs             # Entry point, init, main loop
-├── lib.rs              # Module declarations
-├── config.rs           # Named constants (pins, timing, thresholds)
-└── errors.rs           # AppError hierarchy
-```
+Four layers with strict one-way dependency: `domain` → `application` → `infrastructure` → `interface`.
 
 **Golden rule:** `domain/` must NEVER import `esp-idf-*` crates. Only `infrastructure/` talks to hardware. `application/` coordinates using domain types and infrastructure traits.
 
-```rust
-// domain/types.rs — pure, no esp-idf
-pub struct Ml(pub f32);
-pub struct Steps(pub i32);
-pub struct Hz(pub u32);
-
-// domain/burette.rs — pure state machine, no hardware
-pub enum BuretteState { Idle, Homing, Filling { .. }, Dosing { .. }, Error { .. } }
-
-// infrastructure/drivers/stepper.rs — hardware impl
-use esp_idf_hal::rmt::TxChannelDriver;
-pub struct RmtStepper<'d { /* ... */ }
-impl StepperMotor for RmtStepper<'_> { /* ... */ }
-```
+See [PROJECT.md](./PROJECT.md) for the full crate structure.
 
 ## 2. Error Hierarchy
 
@@ -148,21 +98,12 @@ pub trait StepperMotor {
     fn position(&self) -> Steps;
 }
 
-// infrastructure/drivers/stepper.rs
-pub struct RmtStepper<'d> { /* ... */ }
-impl StepperMotor for RmtStepper<'_> { /* ... */ }
-
-// tests only
-#[cfg(test)]
-pub struct MockStepper { /* ... */ }
-impl StepperMotor for MockStepper { /* ... */ }
-```
-
-```rust
 // BAD: Trait for what should be an enum
 pub trait BuretteState { fn process(&self) -> Result<(), Error>; }
 struct IdleState; struct DosingState;  // Use enum instead!
 ```
+
+See [PROJECT.md](./PROJECT.md) for the concrete `RmtStepper` implementation.
 
 ## 4. State Machine: Explicit Enum + Exhaustive Match
 
@@ -265,18 +206,6 @@ The main loop (FreeRTOS `main` task) must **never** execute a blocking operation
 | BLE notify thread | `mpsc::recv()`, `server.notify()` | Main loop blocking |
 
 ### Channel-Based Communication
-
-```rust
-// domain/channels.rs — define clear channels between tasks
-pub struct SystemChannels {
-    pub cmd_tx: Sender<Command>,
-    pub cmd_rx: Receiver<Command>,
-    pub status_tx: Sender<StatusUpdate>,
-    pub status_rx: Receiver<StatusUpdate>,
-    pub log_tx: Sender<LogEntry>,
-    pub log_rx: Receiver<LogEntry>,
-}
-```
 
 ```rust
 // Motor thread reads from channel, writes atomics
@@ -427,13 +356,7 @@ pub struct RmtStepper<'d> {
 
 ## 10. Testing
 
-| Tier | Scope | When |
-|---|---|---|
-| 1 | Host-based unit tests (`cargo test --lib`) | After every logic change |
-| 2 | On-device integration (custom test bin + `espflash`) | Before merge |
-| 3 | pytest HIL (`pytest --target esp32`) | End-to-end validation |
-
-See `TESTING.md` for full strategy including property-based testing with `proptest`.
+See `TESTING.md` for the 3-tier strategy, and `PROJECT.md` for key test scenarios.
 
 ## 11. Documentation
 
@@ -515,6 +438,23 @@ stepper.move_steps(config::HOMING_STEPS, config::HOMING_SPEED_HZ);
 - [ ] `cargo test --lib` passes
 - [ ] `cargo +esp clippy -- -D warnings` passes
 - [ ] `cargo +esp build --target xtensa-esp32-espidf` passes
+
+## 14. Dependency Version Duplicates
+
+Embedded ecosystem is in transition — multiple major versions of core crates coexist:
+
+| Crate | Versions | Rationale |
+|---|---|---|
+| `embedded-hal` | 0.2 + 1.0 | `esp-idf-hal` exposes both legacy and new trait APIs |
+| `embedded-io` | 0.6 + 0.7 | `embassy` (0.6) and `embedded-svc` (0.7) on different tracks |
+| `heapless` | 0.8 + 0.9 | `embassy-sync` pins 0.8; all ESP-IDF crates use 0.9 |
+| `bitflags` | 1.3 + 2.13 | Host build tooling vs firmware deps |
+
+**Policy:**
+- Duplicates are **accepted** — ~5–10 KB binary overhead is acceptable on ESP32 (520 KB SRAM)
+- **DO NOT** `[patch]` versions without verifying API compatibility
+- Monitor binary size (`cargo bloat`), not version count
+- Warning suppressed via `#![allow(clippy::multiple_crate_versions)]`
 
 ## Summary
 
