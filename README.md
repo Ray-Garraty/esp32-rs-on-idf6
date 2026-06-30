@@ -65,8 +65,7 @@ cargo +esp clippy -- -D warnings
 | TMC2209 STEP | 25 | RMT (TxChannelDriver) |
 | TMC2209 DIR | 26 | PinDriver::output |
 | TMC2209 EN | 27 | PinDriver::output (active LOW) |
-| Valve OPEN | 12 | PinDriver::output |
-| Valve CLOSE | 13 | PinDriver::output |
+| Valve | 14 | PinDriver::output (LOW=input, HIGH=output) |
 | Limit FULL | 32 | PinDriver::input + ISR |
 | Limit EMPTY | 35 | PinDriver::input + ISR |
 | pH electrode | 34 | ADC1_CH6 (12-bit) |

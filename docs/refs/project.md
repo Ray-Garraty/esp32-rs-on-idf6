@@ -34,9 +34,8 @@ timestamp: 2026-06-29
 | Property | Value |
 |---|---|
 | Type | 2-way solenoid valve (input/output) |
-| OPEN pin | GPIO12 (PinDriver::output) |
-| CLOSE pin | GPIO13 (PinDriver::output) |
-| Positions | `input` (draw from titrant bottle), `output` (dispense into vessel) |
+| VALVE pin | GPIO14 (PinDriver::output) |
+| Positions | `input` (LOW, draw from titrant bottle), `output` (HIGH, dispense into vessel) |
 
 ### Sensors
 
@@ -66,8 +65,7 @@ timestamp: 2026-06-29
 | TMC2209 STEP | 25 | TxChannelDriver (RMT) | Pulse train, 1 us HIGH |
 | TMC2209 DIR | 26 | PinDriver::output | HIGH = CW (fill) |
 | TMC2209 EN | 27 | PinDriver::output | Active LOW |
-| Valve OPEN | 12 | PinDriver::output | Energise to open |
-| Valve CLOSE | 13 | PinDriver::output | Energise to close |
+| Valve | 14 | PinDriver::output | LOW=input, HIGH=output |
 | Limit FULL | 32 | PinDriver::input + ISR | Syringe bottom |
 | Limit EMPTY | 35 | PinDriver::input + ISR | Syringe top |
 | pH electrode | 34 | ADC1_CH6 | DB_12 atten, 12-bit |

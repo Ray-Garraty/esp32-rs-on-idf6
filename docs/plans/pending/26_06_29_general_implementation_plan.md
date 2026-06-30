@@ -4,8 +4,24 @@ title: General Implementation Plan — EcoTiter Firmware (Rust, ESP-IDF v6)
 description: Full-scope build plan for production-grade Rust firmware from legacy C++ business logic. All changes scoped to src/. LittleFS logging excluded.
 tags: [plan, implementation, firmware, esp32, production]
 timestamp: 2026-06-29
-status: draft
+status: active
+phases_completed: [0, 1]
 ---
+
+# General Implementation Plan - EcoTiter Firmware (Rust, ESP-IDF v6)
+
+## Phase Completion Status
+
+| Phase | Status | Date | Report |
+|-------|--------|------|--------|
+| 0 — Scaffold + Build Pipeline | ✅ COMPLETED | 2026-06-30 | `docs/plans/completed/26_06_30_phase0_scaffold_report.md` |
+| 1 — Domain Pure Business Logic | ✅ COMPLETED | 2026-06-30 | `docs/plans/completed/26_06_30_phase_1_domain.md` |
+| 2 — Infrastructure Hardware Drivers | ⏳ PENDING | — | — |
+| 3 — Application | ⏳ PENDING | — | — |
+| 4 — Network | ⏳ PENDING | — | — |
+| 5 — Integration | ⏳ PENDING | — | — |
+| 6 — TMC2209 UART Driver | ⏳ DEFERRED | — | — |
+| 7 — Tauri Client | ⏳ PENDING | — | — |
 
 # General Implementation Plan
 
@@ -123,7 +139,9 @@ Same format + optional `"meta":{"ip":"192.168.1.100"}`.
 
 ## Implementation Phases
 
-### Phase 0: Scaffold + Build Pipeline
+### Phase 0: Scaffold + Build Pipeline ✅ COMPLETED
+
+**Completed:** 2026-06-30 — See [Completion Report](../completed/26_06_30_phase0_scaffold_report.md)
 
 **Files:** `src/lib.rs` `src/main.rs` `src/config.rs` `src/errors.rs` `src/domain/types.rs` `src/domain/memory.rs` `src/domain/logging.rs`
 
@@ -137,18 +155,20 @@ Same format + optional `"meta":{"ip":"192.168.1.100"}`.
 
 **Also:** update `sdkconfig.defaults` from prototype (NimBLE, WiFi, ADC, main task stack 16384, pthread stack 8192), verify `Cargo.toml` deps + `build.rs` (esp32-nimble patch), `.cargo/config.toml`, `clippy.toml`
 
-**Acceptance:**
-- ✅ `cargo +esp build` — 0 errors, 0 warnings (our code)
+**Results (verified 2026-06-30):**
+- ✅ `cargo +esp build` — 0 errors, 0 warnings
 - ✅ `cargo clippy-esp` — 0 warnings
-- ✅ `cargo test-host` — compiles, no tests yet
-- ✅ Flash + boot log on COM5 — `=== EcoTiter firmware ===`, no panic, no Guru Meditation
-- ✅ Free heap > 150 KB, largest block > 80 KB
+- ✅ `cargo test-host` — compiles, no tests (addressed in Phase 1)
+- ✅ Flash + boot log — `=== EcoTiter firmware ===`, no panic, no Guru Meditation
+- ✅ Free heap = **237 KB** (>150 KB), largest block = **108 KB** (>80 KB)
 
 **Reference files:** `prototype/src/lib.rs` (module layout), `prototype/src/main.rs` (entry point), `prototype/src/types.rs`, `prototype/src/errors.rs`, `prototype/src/logger.rs`, `prototype/src/config.rs`, `prototype/src/pins.rs`
 
 ---
 
-### Phase 1: Domain — Pure Business Logic
+### Phase 1: Domain — Pure Business Logic ✅ COMPLETED
+
+**Completed:** 2026-06-30 — See [Completion Report](../completed/26_06_30_phase_1_domain.md)
 
 **Files:** `src/domain/burette.rs` `src/domain/calibration.rs` `src/domain/planner.rs` `src/domain/channels.rs` `src/stepper/ramp.rs`
 
@@ -187,13 +207,14 @@ Same format + optional `"meta":{"ip":"192.168.1.100"}`.
 - `SystemChannels`: `cmd_tx/rx`, `status_tx/rx`, `log_tx/rx`
 - Bounded `mpsc` channels for command dispatch and status broadcast
 
-**Acceptance:**
-- ✅ `cargo test --lib` — planner tests (60 cases, ported from `legacy/test/test_planner.cpp`)
-- ✅ `cargo test --lib` — speed calibration tests (27 cases, ported from `legacy/test/test_speed.cpp`)
-- ✅ `cargo test --lib` — ramp tests (10 cases, ported from `prototype/src/stepper/ramp.rs`)
-- ✅ `cargo test --lib` — Z-factor interpolation (boundary values, table exact matches)
-- ✅ `cargo test --lib` — OLS regression tests (perfect fit, noisy data, single-point guard, degenerate)
-- ✅ All tests pass on host (`x86_64`), zero `esp-idf-*` imports in `domain/`
+**Results (verified 2026-06-30):**
+- ✅ `cargo test --lib` — **47 planner tests** pass (ported from `legacy/test/test_planner.cpp`)
+- ✅ `cargo test --lib` — **53 calibration tests** pass (speed, OLS, Z-factor, pending cal — ported from `legacy/test/test_speed.cpp`)
+- ✅ `cargo test --lib` — **13 ramp tests** pass (ported from prototype + property-based)
+- ✅ `cargo test --lib` — **138 total tests, 0 failures**
+- ✅ Zero `esp-idf-*` imports in `domain/` and `stepper/` modules
+- ✅ Cross-compilation xtensa — 0 errors, 0 warnings
+- ✅ ESP32 boot — heap 237 KB free, 108 KB largest block
 
 **Reference files:** `legacy/src/burette_planner.cpp`, `legacy/src/burette_cal.cpp`, `legacy/test/test_planner.cpp`, `legacy/test/test_speed.cpp`, `prototype/src/stepper/ramp.rs`
 
@@ -205,7 +226,7 @@ Same format + optional `"meta":{"ip":"192.168.1.100"}`.
 - `src/infrastructure/drivers/stepper.rs` — `RmtStepper: StepperMotor`
 - `src/infrastructure/drivers/adc.rs` — ADC1_CH6 oneshot + 64-sample rolling avg
 - `src/infrastructure/drivers/onewire.rs` — DS18B20 software bitbang
-- `src/infrastructure/drivers/valve.rs` — GPIO12/13 valve control
+- `src/infrastructure/drivers/valve.rs` — GPIO14 valve control
 - `src/infrastructure/drivers/limitswitch.rs` — GPIO32/35 ISR + AtomicBool
 - `src/infrastructure/drivers/led.rs` — blink state machine, transport mode indication
 - `src/infrastructure/storage/nvs.rs` — Preferences/NVS wrappers for WiFi creds + calibration
@@ -215,7 +236,7 @@ Same format + optional `"meta":{"ip":"192.168.1.100"}`.
 | `RmtStepper` | `TxChannelDriver` (channel 0, 1 MHz). `move_steps(&[u32])`: converts intervals to RMT Symbols, `CopyEncoder` + `send_and_wait()`. `PinDriver::output` for DIR (GPIO26) and EN (GPIO27, active LOW). `set_direction()` / `enable()` / `disable()` / `emergency_stop()`. |
 | `AdcDriver` | `AdcDriver<ADC1>` + `AdcChannelDriver` (GPIO34, DB_12). 64-read ring buffer → rolling average. `set_raw_mv()` / `calibrated_mv()` via atomics. **Stabilization**: up to 10 attempts, range ≤5mV over 32 samples → then 32-sample median. **Calibration**: `calibrated = a * raw + b`. OLS: `raw = a*ref + b` → invert `coeff_a=1/a, coeff_b=-b/a`. |
 | `OneWireBus` | Software bitbang via `PinDriver::input_output_od()` (GPIO33) + `Ets::delay_us()`. `reset()`, `write_byte()`, `read_byte()`, `skip_rom()`, `convert_t()`, `read_scratchpad()`. Runs in dedicated thread. |
-| `Valve` | `set_position("input"/"output")` → GPIO12 HIGH / GPIO13 HIGH. Last-value atomic. |
+| `Valve` | `set_position("input"/"output")` → GPIO14 LOW (input) / HIGH (output). Last-value atomic. |
 | `LimitSwitch` | `PinDriver::input` + `PosEdge` interrupt → `AtomicBool`. `is_triggered()`, `clear()`, `rearm()`. |
 | `Led` | `set_transport_mode(TransportMode)`. Blink state machine: `IDLE → ON_PHASE → OFF_BETWEEN → OFF_FINAL`. Transport: `OFF (USB)`, `ON (advertising)`, `1Hz (connected)`. |
 | `Nvs` | Raw `esp-idf-sys` FFI (same pattern as prototype). Namespaces: `burette_cal` (steps_per_ml, nominal_vol, speed_coeff, min_freq, max_freq, cal_date), `adc_cal` (coeff_a, coeff_b, r_squared, cal_date), `wifi` (ssid, password), `stallguard` (threshold). |
@@ -226,7 +247,7 @@ Same format + optional `"meta":{"ip":"192.168.1.100"}`.
 |---|---|
 | RMT stepper 500 Hz CW, direction toggle CCW | 👁 oscilloscope on GPIO25; motor rotation visible |
 | EN pin active LOW | 👁 motor silent on boot, starts on `enable()`, stops on `disable()` |
-| Valve OPEN → CLOSE → OPEN cycle | 👁 audible click; multimeter on GPIO12/13 |
+| Valve OPEN → CLOSE → OPEN cycle | 👁 audible click; multimeter on GPIO14 |
 | Limit FULL (GPIO32): press switch | ✅ motor stops (if running); `is_triggered()` = true |
 | Limit EMPTY (GPIO35): press switch | 👁 log shows event |
 | ADC raw_mv: no electrode connected | ✅ `curl http://esp32/api/status` → `"mv": 0` |

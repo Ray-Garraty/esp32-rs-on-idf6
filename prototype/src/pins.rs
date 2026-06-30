@@ -6,5 +6,4 @@ pub const PIN_LIMIT_EMPTY: u8 = 35;
 pub const PIN_ADC: u8 = 34;
 pub const PIN_TEMP: u8 = 33;
 pub const PIN_LED: u8 = 2;
-pub const PIN_VALVE_OPEN: u8 = 12;
-pub const PIN_VALVE_CLOSE: u8 = 13;
+pub const PIN_VALVE: u8 = 14;
