@@ -9,10 +9,10 @@ pub const AP_NETMASK_BITS: u8 = 24;
 pub const AP_IP_ADDRESS: &str = "192.168.4.1";
 
 // ── WiFi Station ──────────────────────────────────────────────
-pub const STA_CONNECT_TIMEOUT_MS: u32 = 15_000;
-pub const STA_RECONNECT_INTERVAL_MS: u32 = 30_000;
-pub const STA_POLL_MS: u32 = 500;
-pub const STA_POST_CONNECT_DELAY_MS: u32 = 500;
+pub const STA_CONNECT_TIMEOUT_MS: u64 = 15_000;
+pub const STA_RECONNECT_INTERVAL_MS: u64 = 30_000;
+pub const STA_POLL_MS: u64 = 500;
+pub const STA_POST_CONNECT_DELAY_MS: u64 = 500;
 
 // ── GPIO Pin Assignments ──────────────────────────────────────
 pub const PIN_STEP: u8 = 25;

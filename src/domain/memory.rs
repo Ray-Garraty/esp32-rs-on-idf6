@@ -6,6 +6,8 @@ pub const LOG_BUFFER_SIZE: usize = 100;
 pub use super::logging::{MAX_LOG_MODULE_SIZE, MAX_LOG_MSG_SIZE};
 pub const ADC_BUF_SIZE: usize = 64;
 pub const DNS_BUF_SIZE: usize = 512;
+pub const BLE_CMD_QUEUE_SIZE: usize = 8;
+pub const HTTP_POST_BUF_SIZE: usize = 512;
 
 use crate::domain::logging::LogEntry;
 use heapless::{Deque, Vec};

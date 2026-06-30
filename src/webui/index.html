@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EcoTiter</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>EcoTiter</h1>
+            <p class="subtitle">Titration Controller</p>
+        </header>
+        <main>
+            <section id="status-cards">
+                <div class="card">
+                    <h2>Status</h2>
+                    <div id="device-status">
+                        <p>Connecting...</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <h2>Temperature</h2>
+                    <p id="temp-display">--</p>
+                </div>
+                <div class="card">
+                    <h2>ADC</h2>
+                    <p id="mv-display">-- mV</p>
+                </div>
+                <div class="card">
+                    <h2>Valve</h2>
+                    <p id="valve-display">--</p>
+                </div>
+                <div class="card">
+                    <h2>Burette</h2>
+                    <p id="burette-display">--</p>
+                </div>
+            </section>
+            <section id="connection-info">
+                <h2>Connection</h2>
+                <div id="wifi-status">
+                    <p>WiFi: <span id="wifi-detail">unknown</span></p>
+                </div>
+            </section>
+        </main>
+        <footer>
+            <p>EcoTiter Firmware v0.1.0</p>
+        </footer>
+    </div>
+    <script src="/app.js"></script>
+</body>
+</html>

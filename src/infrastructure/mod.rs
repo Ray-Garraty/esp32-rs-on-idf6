@@ -8,4 +8,5 @@
 //! See `docs/refs/project.md` for pinout and hardware design.
 
 pub mod drivers;
+pub mod network;
 pub mod storage;

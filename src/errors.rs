@@ -72,6 +72,12 @@ pub enum SensorError {
 pub enum NetworkError {
     #[error("WiFi connection failed")]
     WifiConnectionFailed,
+    #[error("BLE init failed")]
+    BleInitFailed,
+    #[error("DNS bind failed: {address}")]
+    DnsBindFailed { address: heapless::String<16> },
+    #[error("HTTP server init failed")]
+    HttpServerInitFailed,
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -176,5 +182,14 @@ impl From<esp_idf_sys::EspError> for SensorError {
 impl From<esp_idf_sys::EspError> for ResourceError {
     fn from(_e: esp_idf_sys::EspError) -> Self {
         Self::NvsOpenFailed
+    }
+}
+
+/// Convert ESP-IDF errors into NetworkError (WiFi context only).
+/// For BLE and HTTP init, construct the specific variant manually.
+#[cfg(target_arch = "xtensa")]
+impl From<esp_idf_sys::EspError> for NetworkError {
+    fn from(_e: esp_idf_sys::EspError) -> Self {
+        Self::WifiConnectionFailed
     }
 }

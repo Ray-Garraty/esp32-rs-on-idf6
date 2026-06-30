@@ -10,3 +10,5 @@ pub mod broadcast;
 pub mod rest_api;
 #[cfg(target_arch = "xtensa")]
 pub mod serial;
+#[cfg(target_arch = "xtensa")]
+pub mod webui;

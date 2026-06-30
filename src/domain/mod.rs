@@ -3,6 +3,7 @@ pub mod burette;
 pub mod calibration;
 pub mod channels;
 pub mod context;
+pub mod dns;
 pub mod driver_traits;
 pub mod logging;
 pub mod memory;
