@@ -84,6 +84,15 @@ impl BuretteState {
     pub const fn is_error(&self) -> bool {
         matches!(self, Self::Error)
     }
+
+    /// Returns a short status string for broadcast format.
+    pub const fn to_broadcast_sts(&self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Error => "error",
+            _ => "working", // Homing, Filling, Emptying, Dosing, Rinsing, Stopping
+        }
+    }
 }
 
 // ── Burette command ────────────────────────────────────────────

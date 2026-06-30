@@ -1,4 +1,5 @@
 use core::ops::{Add, Sub};
+use serde::{Deserialize, Serialize};
 
 // ── Newtype wrappers ──────────────────────────────────────────
 
@@ -63,7 +64,7 @@ pub struct SgThreshold(pub u8);
 /// Maps to legacy `LIQ_IN` / `LIQ_OUT` from stepper.cpp.
 /// - `LiqIn`:  Fill from bottle (draws liquid into syringe).
 /// - `LiqOut`: Dispense to vessel (expels liquid from syringe).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Direction {
     LiqIn,
     LiqOut,
@@ -97,7 +98,7 @@ pub enum LimitSwitchId {
 /// Maps to `VALVE_POSITION_INPUT "input"` / `VALVE_POSITION_OUTPUT "output"`.
 /// - `Input`:  Draw from titrant bottle.
 /// - `Output`: Dispense into titration vessel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ValvePosition {
     Input,
     Output,
@@ -111,6 +112,23 @@ impl ValvePosition {
             Self::Output => "out",
         }
     }
+}
+
+/// A measurement reading (raw wire-protocol representation).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Measurement {
+    /// Frequency in Hz (raw u16 for wire protocol).
+    pub freq_hz: u16,
+    /// Speed in ml/min (raw f32 for wire protocol).
+    pub speed_ml_min: f32,
+}
+
+/// Active transport connection state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportState {
+    UsbActive,
+    BleDisconnected,
+    BleConnected,
 }
 
 /// Communication transport source.

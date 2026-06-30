@@ -6,9 +6,10 @@
 //!
 //! See `docs/refs/coding_style.md §3` for trait versus enum guidance.
 
+use crate::domain::calibration::CalibrationConfig;
 use crate::domain::context::MotorContext;
 use crate::domain::types::{Hz, Steps};
-use crate::errors::StepperError;
+use crate::errors::{ResourceError, StepperError};
 
 /// Abstraction for a stepper motor with position tracking.
 ///
@@ -42,4 +43,21 @@ pub trait StepperMotor {
 
     /// Return `true` if the motor driver is powered (EN pin active LOW).
     fn enabled(&self) -> bool;
+}
+
+/// Abstraction for calibration storage (NVS).
+pub trait CalStorage {
+    /// Load calibration configuration from persistent storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ResourceError` if NVS cannot be opened or read fails.
+    fn load_calibration(&self) -> Result<CalibrationConfig, ResourceError>;
+
+    /// Save calibration configuration to persistent storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ResourceError` if NVS cannot be opened or write fails.
+    fn save_calibration(&self, cfg: &CalibrationConfig) -> Result<(), ResourceError>;
 }

@@ -45,3 +45,8 @@ pub mod logger;
 
 #[cfg(target_arch = "xtensa")]
 pub mod infrastructure;
+
+pub mod application;
+
+#[cfg(target_arch = "xtensa")]
+pub mod interface;
