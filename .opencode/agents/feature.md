@@ -7,9 +7,9 @@ mode: primary
 temperature: 0.2
 color: success
 permission:
-  edit: deny
+  edit: ask
   bash:
-    "*": deny
+    "*": ask
     "git status*": allow
     "git diff*": allow
     "git log*": allow
