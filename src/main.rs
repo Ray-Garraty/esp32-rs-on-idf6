@@ -25,8 +25,13 @@ fn main() {
     // Boot-time heap report
     unsafe {
         let free = esp_idf_sys::esp_get_free_heap_size();
-        let largest = esp_idf_sys::heap_caps_get_largest_free_block(esp_idf_sys::MALLOC_CAP_DEFAULT);
-        log::info!("Heap: free={} KB, largest={} KB", free / 1024, largest / 1024);
+        let largest =
+            esp_idf_sys::heap_caps_get_largest_free_block(esp_idf_sys::MALLOC_CAP_DEFAULT);
+        log::info!(
+            "Heap: free={} KB, largest={} KB",
+            free / 1024,
+            largest / 1024
+        );
     }
 
     // AC-005 gate: require free > 150 KB and largest > 80 KB

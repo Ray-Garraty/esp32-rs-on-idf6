@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-PYTHON_PATH="/c/Users/vlbes/.pyenv/pyenv-win/versions/3.11.9"
+PYTHON_PATH=""  # Set to pyenv path on Windows if needed
 
 fast_mode=false
 [ "$1" = "--fast" ] && fast_mode=true
@@ -12,8 +12,8 @@ cargo fmt --all -- --check
 echo "=== 2. Host unit tests ==="
 cargo test --lib
 
-echo "=== 3. Clippy (host target) ==="
-cargo clippy -- -D warnings
+echo "=== 3. Clippy (host target, lib only — binary needs xtensa) ==="
+cargo clippy --lib -- -D warnings
 
 if [ "$fast_mode" = false ]; then
     xtensa() {

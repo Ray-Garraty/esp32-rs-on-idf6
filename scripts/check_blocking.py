@@ -5,12 +5,15 @@ BLOCKING_PATTERNS = [
     r'\.send_and_wait\(',
     r'\.lock\(\)\.unwrap\(\)',
     r'\.recv\(\)',
-    r'std::thread::sleep\([^1]',
+    # Blocking sleeps >10ms; 10ms tick is the allowed heartbeat exception
+    r'std::thread::sleep\(',
     r'\.wait\(\)',
 ]
 
 FORBIDDEN_FILES = [
     'src/main.rs',
+    'src/logger.rs',
+    'src/lib.rs',
 ]
 
 def check_file(filepath):
@@ -26,6 +29,10 @@ def check_file(filepath):
             line_num = content[:match.start()].count('\n') + 1
             context_start = max(0, match.start() - 500)
             context = content[context_start:match.end() + 100]
+
+            # Allow 10ms heartbeat sleep in main loop (hardcoded or via constant)
+            if 'from_millis(10)' in context or 'MAIN_LOOP_TICK_MS' in context:
+                continue
 
             if 'std::thread::Builder' not in context and \
                'std::thread::spawn' not in context and \
