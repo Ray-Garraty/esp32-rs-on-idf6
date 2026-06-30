@@ -68,11 +68,11 @@ cargo clippy -- -D warnings
 If the code has xtensa-specific modules:
 ```bash
 # Xtensa build
-PATH="/c/Users/vlbes/.pyenv/pyenv-win/versions/3.11.9:$PATH" \
+. /home/vlabe/export-esp.sh && \
   cargo +esp build --target xtensa-esp32-espidf
 
 # Xtensa clippy
-PATH="/c/Users/vlbes/.pyenv/pyenv-win/versions/3.11.9:$PATH" \
+. /home/vlabe/export-esp.sh && \
   cargo +esp clippy --target xtensa-esp32-espidf -- -D warnings
 ```
 

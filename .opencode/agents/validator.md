@@ -70,13 +70,13 @@ For EACH AC in `verified_plan.content.acceptance_criteria`, prefer the **stronge
 This is the **strongest proof**. Perform it diligently:
 1. Build the firmware:
    ```bash
-   PATH="/c/Users/vlbes/.pyenv/pyenv-win/versions/3.11.9:$PATH" \
+   . /home/vlabe/export-esp.sh && \
      cargo +esp build --target xtensa-esp32-espidf
    ```
 2. Provide the user with exact flash + monitor command to run:
    ```bash
-   espflash flash --port COM5 "target/xtensa-esp32-espidf/debug/ecotiter" && \
-   timeout 60 python scripts/serial_monitor.py COM5
+   espflash flash --port /dev/ttyUSB0 "target/xtensa-esp32-espidf/debug/ecotiter" && \
+   timeout 60 python3 scripts/serial_monitor.py
    ```
 3. Use the `question` tool to ask the user:
    - Exact step-by-step reproduction instructions (what physical setup is needed, what buttons to press, what to observe)
@@ -98,7 +98,7 @@ Implementer may have marked some ACs as `automated` due to tool limitations. If 
 
 > "This AC was verified by host test, but the ultimate proof is on real hardware. Would you like to flash and confirm? Commands:
 > ```
-> espflash flash --port COM5 "target/xtensa-esp32-espidf/debug/ecotiter" && timeout 60 python scripts/serial_monitor.py COM5
+> espflash flash --port /dev/ttyUSB0 "target/xtensa-esp32-espidf/debug/ecotiter" && timeout 60 python3 scripts/serial_monitor.py
 > ```
 > Expected behaviour: <describe physical event>"
 
