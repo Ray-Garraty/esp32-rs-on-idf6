@@ -15,6 +15,9 @@ cargo test --lib
 echo "=== 3. Clippy (host target, lib only — binary needs xtensa) ==="
 cargo clippy --lib -- -D warnings
 
+echo "=== 3.5. Blocking check regression tests ==="
+python3 scripts/test_check_blocking.py
+
 if [ "$fast_mode" = false ]; then
     xtensa() {
         PATH="$PYTHON_PATH:$PATH" cargo "$@"

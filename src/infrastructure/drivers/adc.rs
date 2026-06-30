@@ -19,8 +19,8 @@ use esp_idf_hal::adc::oneshot::{AdcChannelDriver, AdcDriver as EspAdcDriver};
 use esp_idf_hal::adc::ADCU1;
 use esp_idf_hal::gpio::ADCPin;
 
-use crate::domain::adc_cal::{COEFF_A_X1000, COEFF_B};
 use crate::config;
+use crate::domain::adc_cal::{COEFF_A_X1000, COEFF_B};
 use crate::errors::SensorError;
 
 // Re-export calibration free functions for convenience.
