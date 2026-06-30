@@ -1,35 +1,18 @@
 #![allow(
-    clippy::disallowed_types,    // Vec/String OK in build script (not hot path)
+    clippy::disallowed_types,    // Vec<String> OK in build script (not hot path)
     clippy::if_not_else,         // build script logic fine as-is
 )]
 
 use embuild as _;
+use embuild::build::LinkArgs;
 use std::path::PathBuf;
 
 fn main() {
-    // ESP-IDF linker args (existing)
-    if let Ok(link_args) = std::env::var("DEP_ESP_IDF_EMBUILD_LINK_ARGS") {
-        let mut args = Vec::new();
-        let mut current = String::new();
-        let mut in_quotes = false;
-        for c in link_args.chars() {
-            match c {
-                '"' => in_quotes = !in_quotes,
-                ' ' if !in_quotes => {
-                    if !current.is_empty() {
-                        args.push(std::mem::take(&mut current));
-                    }
-                }
-                _ => current.push(c),
-            }
-        }
-        if !current.is_empty() {
-            args.push(current);
-        }
-        for arg in &args {
-            println!("cargo:rustc-link-arg-bins={arg}");
-        }
-    }
+    // Propagate linker arguments from esp-idf-sys
+    // NOTE: lib_name must be UPPERCASE to match cargo's env var naming (DEP_{LIB_NAME}_EMBUILD_LINK_ARGS)
+    LinkArgs::output_propagated("ESP_IDF").unwrap_or_else(|e| {
+        println!("cargo:warning=LinkArgs::output_propagated failed: {e}");
+    });
 
     // Suppress cfg warning for esp32-nimble IDF v6 patches (our crate only)
     println!("cargo::rustc-check-cfg=cfg(esp_idf_version_major, values(\"6\"))");
