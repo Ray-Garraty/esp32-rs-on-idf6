@@ -11,6 +11,9 @@ clippy-esp = "clippy --target xtensa-esp32-espidf -- -D warnings"
 test-host = "test --lib"
 build-esp = "build --target xtensa-esp32-espidf"
 
+[net]
+git-fetch-with-cli = true
+
 [build]
 rustflags = [
     # NOTE: -W flags removed — they leak into dependency crates.
@@ -20,5 +23,5 @@ rustflags = [
 [env]
 MCU = "esp32"
 ESP_IDF_VERSION = "v6.0.1"
-IDF_PATH = "D:\\ecttr\\.embuild\\espressif\\esp-idf\\v6.0.1"
-LIBCLANG_PATH = "C:\\Users\\vlbes\\.rustup\\toolchains\\esp\\xtensa-esp32-elf-clang\\esp-clang\\bin"
+IDF_PATH = "/home/vlabe/.espressif/v6.0.1/esp-idf"
+LIBCLANG_PATH = "/home/vlabe/.rustup/toolchains/esp/xtensa-esp32-elf-clang/esp-20.1.1_20250829/esp-clang/lib"

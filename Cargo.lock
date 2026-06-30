@@ -626,6 +626,7 @@ dependencies = [
 [[package]]
 name = "esp32-nimble"
 version = "0.12.0"
+source = "git+https://github.com/taks/esp32-nimble#f60d7c5f41873cdf37579655e8b1c31d78cc3cdd"
 dependencies = [
  "anyhow",
  "bitflags 2.13.0",

@@ -30,7 +30,7 @@ serde_json = "1"
 esp-idf-sys = { git = "https://github.com/esp-rs/esp-idf-sys", features = ["binstart"] }
 esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal" }
 esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc" }
-esp32-nimble = { path = "C:/Users/vlbes/esp32-nimble" }
+esp32-nimble = { git = "https://github.com/taks/esp32-nimble" }
 
 [build-dependencies]
 embuild = { git = "https://github.com/ivmarkov/embuild", branch = "master" }

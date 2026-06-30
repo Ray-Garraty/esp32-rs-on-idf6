@@ -1,9 +1,9 @@
 # Build & Check Commands
 
-- `PATH="/c/Users/vlbes/.pyenv/pyenv-win/versions/3.11.9:$PATH" cargo +esp build --target xtensa-esp32-espidf` — build firmware (pyenv fix for Windows)
+- `. /home/vlabe/export-esp.sh && cargo +esp build --target xtensa-esp32-espidf` — build firmware (source export-esp.sh first)
 - `cargo test --lib stepper::ramp::tests` — host-based ramp unit tests
-- `espflash flash --port COM5 "target/xtensa-esp32-espidf/debug/ecotiter"` — flash only
-- `timeout 30 python scripts/serial_monitor.py COM5` — monitor with 30s timeout
+- `espflash flash --port /dev/ttyUSB0 "target/xtensa-esp32-espidf/debug/ecotiter"` — flash only (adjust port as needed)
+- `timeout 30 python3 scripts/serial_monitor.py` — monitor with 30s timeout (auto-detects port)
 - WDT must be disabled during debugging: `unsafe { esp_idf_sys::esp_task_wdt_deinit(); }`
 
 # GOLDEN RULE: NEVER BLOCK THE MAIN LOOP
@@ -67,16 +67,16 @@ Mandatory steps:
 - Use LF (\n) line endings.
 - Two-strike rule: 2 attempts per task, then stop and consult user.
 
-# COM Port Safety
+# Serial Port Safety
 
-- **ABSOLUTELY FORBIDDEN to launch background processes that hold COM ports.**
-  Any blocking/serial tool (pio device monitor, serial terminal, etc.) MUST be run with an explicit timeout via the bash tool's `timeout` parameter or via `timeout <seconds>` prefix. Never leave a process occupying COM after exit.
+- **ABSOLUTELY FORBIDDEN to launch background processes that hold serial ports.**
+  Any blocking/serial tool (pio device monitor, serial terminal, etc.) MUST be run with an explicit timeout via the bash tool's `timeout` parameter or via `timeout <seconds>` prefix. Never leave a process occupying a serial port (ttyUSB/ttyACM) after exit.
 
 # Python Script Rules
 
 - NEVER use `python -c "..."` inline scripts — bash on Windows mangles quotes/backslashes.
 - ALWAYS write Python code to a temp file first, then run it.
-  Use `C:\Users\vlbes\AppData\Local\Temp\opencode` for temp scripts.
+  Use `/tmp/opencode` for temp scripts.
 - Example:
   ```bash
   # Write temp script

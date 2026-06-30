@@ -3,9 +3,9 @@
 Serial monitor for Autosampler firmware.
 Auto-detects ESP32 port, resets the chip via DTR, prints serial output with timestamps.
 Usage:
-    python scripts/serial_monitor.py          # auto-detect port
-    python scripts/serial_monitor.py COM5     # specify port manually
-    python scripts/serial_monitor.py COM5 --no-reset  # connect without reset
+    python3 scripts/serial_monitor.py           # auto-detect port
+    python3 scripts/serial_monitor.py /dev/ttyUSB0  # specify port manually
+    python3 scripts/serial_monitor.py /dev/ttyUSB0 --no-reset  # connect without reset
 """
 
 import serial
@@ -33,7 +33,7 @@ def main():
 
     port = args.port or find_esp32_port()
     if not port:
-        print("ERROR: ESP32 not found. Specify port manually: python serial_monitor.py COM5", flush=True)
+        print("ERROR: ESP32 not found. Specify port manually: python3 serial_monitor.py /dev/ttyUSB0", flush=True)
         return 1
 
     try:
