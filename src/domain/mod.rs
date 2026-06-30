@@ -1,6 +1,8 @@
+pub mod adc_cal;
 pub mod burette;
 pub mod calibration;
 pub mod channels;
+pub mod driver_traits;
 pub mod logging;
 pub mod memory;
 pub mod planner;

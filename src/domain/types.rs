@@ -122,3 +122,16 @@ pub enum TransportSource {
     Usb,
     Ble,
 }
+
+/// LED transport mode indicator.
+///
+/// Controls the status LED behaviour:
+/// - `UsbActive`:     Solid OFF (USB transport active).
+/// - `BleAdvertising`: Solid ON (BLE advertising, no connection).
+/// - `BleConnected`:   1 Hz blink (BLE connected).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportMode {
+    UsbActive,
+    BleAdvertising,
+    BleConnected,
+}

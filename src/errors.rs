@@ -47,8 +47,13 @@ pub enum StepperError {
     InitFailed { reason: &'static str },
     #[error("RMT error: code={code}")]
     Rmt { code: i32 },
+    /// FUTURE: used when merging limit switch into stepper state machine in Phase 5.
+    /// Currently, the driver uses StepperError::LimitSwitchReached for stop_flag polling.
+    #[allow(dead_code)]
     #[error("Limit switch triggered: {switch:?}")]
     LimitSwitchTriggered { switch: LimitSwitchId },
+    #[error("Limit switch reached (stop flag)")]
+    LimitSwitchReached,
     #[error("Operation timeout: {operation}")]
     Timeout { operation: &'static str },
 }
@@ -155,5 +160,21 @@ impl From<StepperError> for AppError {
 impl From<esp_idf_sys::EspError> for StepperError {
     fn from(e: esp_idf_sys::EspError) -> Self {
         Self::Rmt { code: e.code() }
+    }
+}
+
+/// Convert ESP-IDF errors into SensorError.
+#[cfg(target_arch = "xtensa")]
+impl From<esp_idf_sys::EspError> for SensorError {
+    fn from(_e: esp_idf_sys::EspError) -> Self {
+        Self::AdcReadFailed
+    }
+}
+
+/// Convert ESP-IDF errors into ResourceError.
+#[cfg(target_arch = "xtensa")]
+impl From<esp_idf_sys::EspError> for ResourceError {
+    fn from(_e: esp_idf_sys::EspError) -> Self {
+        Self::NvsOpenFailed
     }
 }

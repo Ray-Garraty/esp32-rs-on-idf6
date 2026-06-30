@@ -42,3 +42,6 @@ pub mod stepper;
 
 #[cfg(target_arch = "xtensa")]
 pub mod logger;
+
+#[cfg(target_arch = "xtensa")]
+pub mod infrastructure;

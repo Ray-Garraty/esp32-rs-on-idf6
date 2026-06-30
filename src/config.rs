@@ -77,6 +77,27 @@ pub const HTTP_SERVER_STACK: usize = 12288;
 /// RMT resolution in Hz (1 MHz → 1 tick = 1 µs).
 pub const RMT_RESOLUTION: u32 = 1_000_000;
 
+/// Maximum number of RMT symbols per transmit chunk.
+pub const RMT_CHUNK_MAX: usize = 128;
+
+/// Width of the step pulse in RMT ticks (1 tick = 1 µs at 1 MHz).
+pub const RMT_PULSE_WIDTH_TICKS: u16 = 1;
+
+/// Number of steps in the acceleration phase of the trapezoidal ramp.
+pub const RAMP_ACCEL_STEPS: u32 = 200;
+
+/// Number of steps in the deceleration phase of the trapezoidal ramp.
+pub const RAMP_DECEL_STEPS: u32 = 200;
+
+/// Minimum step frequency in Hz (start/stop speed for ramp computation).
+pub const STEPPER_MIN_HZ: u32 = 30;
+
+// ── ADC Default Calibration ───────────────────────────────────
+/// Default ADC calibration slope (a = 1.0 means raw = mV).
+pub const ADC_DEFAULT_A: f32 = 1.0;
+/// Default ADC calibration offset (b = 0.0).
+pub const ADC_DEFAULT_B: f32 = 0.0;
+
 // ── Main loop ────────────────────────────────────────────────
 /// Main loop pacing tick in milliseconds. Must NOT exceed 10 ms
 /// to keep the loop responsive (AGENTS.md golden rule).
