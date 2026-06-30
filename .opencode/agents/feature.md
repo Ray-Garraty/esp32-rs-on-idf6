@@ -6,6 +6,22 @@ description: >
 mode: primary
 temperature: 0.2
 color: success
+permission:
+  edit: deny
+  bash:
+    "*": deny
+    "git status*": allow
+    "git diff*": allow
+    "git log*": allow
+    "git show*": allow
+    "git ls-files*": allow
+    "git branch -a*": allow
+    "git branch -r*": allow
+    # git stage (after implementer)
+    "git add*": allow
+    "git commit*": ask
+  task:
+    implementer: ask
 ---
 
 # Feature Orchestrator

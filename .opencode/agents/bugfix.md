@@ -7,6 +7,50 @@ description: >
 mode: primary
 temperature: 0.2
 color: error
+permission:
+  edit: deny
+  bash:
+    "*": deny
+    # git read-only (kept)
+    "git status*": allow
+    "git diff*": allow
+    "git log*": allow
+    "git show*": allow
+    "git ls-files*": allow
+    "git branch -a*": allow
+    "git branch -r*": allow
+    # git stage (after implementer)
+    "git add*": allow
+    "git commit*": ask
+    # system diagnostics
+    "which*": allow
+    "uname*": allow
+    "lsusb*": allow
+    "dmesg*": allow
+    "journalctl*": allow
+    "lspci*": allow
+    "lsblk*": allow
+    "free*": allow
+    "df*": allow
+    "ps*": allow
+    "uptime*": allow
+    # database
+    "sqlite3*": allow
+    # python diagnostic scripts
+    "python3 *": allow
+    "python *": allow
+    # file inspection / logs
+    "file*": allow
+    "wc*": allow
+    "tail *": allow
+    "head *": allow
+    "cat *": allow
+    # network / hardware connectivity
+    "curl*": allow
+    "ping*": allow
+    "ss*": allow
+  task:
+    implementer: ask
 ---
 
 # Bugfix Orchestrator

@@ -49,7 +49,7 @@ timestamp: 2026-06-29
 
 | Signal | Pin | Behaviour |
 |---|---|---|
-| Status LED | GPIO2 | OFF (USB active), breathing (BLE connected), fast blink (advertising) |
+| Status LED | GPIO2 | OFF (USB active), breathing (BLE connected), steady light (advertising) |
 
 ### Communication
 
@@ -212,8 +212,8 @@ Custom service UUID: based on NUS (Nordic UART Service) pattern.
 | `fill` | -- | Fill burette from bottle |
 | `empty` | -- | Empty burette to vessel |
 | `rinse` | `cycles` | Rinse burette |
-| `stop` | -- | Emergency stop |
-| `emergencyStop` | -- | Immediate motor disable |
+| `stop` | -- | Soft stop with stepper position tracking|
+| `emergencyStop` | -- | Immediate motor disable with stepper position reset |
 | `stepper.getCalibration` | -- | Get steps/ml + Z-factor |
 | `stepper.calcVolume` | `steps` | Convert steps to ml |
 | `stepper.calcSpeed` | `steps_per_sec` | Convert steps/s to ml/min |
@@ -226,7 +226,7 @@ Custom service UUID: based on NUS (Nordic UART Service) pattern.
 | `valve.getState` | -- | Current valve state |
 | `system.getStatus` | -- | Full device status |
 | `system.readLog` | -- | Ring-buffer log |
-| `adc.getCalibration` | -- | Get pH calibration coeffs |
+| `adc.getCalibration` | -- | Get ADC calibration coeffs |
 | `adc.measure` | -- | Live mV reading |
 | `adc.saveCalibration` | `a`, `b` | Save to NVS |
 | `ping` | -- | Health check |
