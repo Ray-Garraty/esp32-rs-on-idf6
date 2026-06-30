@@ -38,6 +38,7 @@
 pub mod config;
 pub mod domain;
 pub mod errors;
+pub mod stepper;
 
 #[cfg(target_arch = "xtensa")]
 pub mod logger;

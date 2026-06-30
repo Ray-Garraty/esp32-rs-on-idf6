@@ -33,6 +33,9 @@ esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal" }
 esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc" }
 esp32-nimble = { git = "https://github.com/taks/esp32-nimble" }
 
+[dev-dependencies]
+proptest = "1"
+
 [build-dependencies]
 embuild = { git = "https://github.com/ivmarkov/embuild", branch = "master" }
 
