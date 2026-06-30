@@ -38,6 +38,7 @@
       "cargo clippy*": "allow",
       "cargo fmt*": "allow",
       "cargo doc*": "allow",
+      "cargo build*": "ask",
       "espflash*": "allow",
       "python -c*": "deny",
       "python3 -c*": "deny",
