@@ -140,6 +140,52 @@ impl<'d> WifiManager<'d> {
     ///
     /// This is a blocking call (init only).
     fn start_ap(&mut self) {
+        use esp_idf_svc::ipv4::{Configuration as IpConfig, Mask, RouterConfiguration, Subnet};
+        use esp_idf_svc::netif::{EspNetif, NetifConfiguration, NetifStack};
+
+        let Some(wifi) = self.wifi.as_mut() else {
+            return;
+        };
+        let _ = wifi.stop();
+
+        // Create custom AP EspNetif with 192.168.4.1/24
+        // This ensures DHCP assigns 192.168.4.x and DNS on 192.168.4.1 is reachable
+
+        let ap_ip = self.ap_ip;
+        let ap_netif_conf = NetifConfiguration {
+            flags: 0,
+            got_ip_event_id: None,
+            lost_ip_event_id: None,
+            key: str_to_heapless("WIFI_AP_CUSTOM"),
+            description: str_to_heapless("ap"),
+            route_priority: 10,
+            ip_configuration: Some(IpConfig::Router(RouterConfiguration {
+                subnet: Subnet {
+                    gateway: ap_ip,
+                    mask: Mask(config::AP_NETMASK_BITS),
+                },
+                dhcp_enabled: true,
+                dns: Some(ap_ip),
+                secondary_dns: None,
+            })),
+            stack: NetifStack::Ap,
+            custom_mac: None,
+        };
+
+        match EspNetif::new_with_conf(&ap_netif_conf) {
+            Ok(custom_ap) => {
+                if let Err(e) = wifi.wifi_mut().swap_netif_ap(custom_ap) {
+                    log::error!("WiFi: swap AP netif failed: {e}");
+                    return;
+                }
+            }
+            Err(e) => {
+                log::error!("WiFi: create AP netif failed: {e}");
+                return;
+            }
+        }
+
+        // Configure and start AP
         let ap_config = AccessPointConfiguration {
             ssid: str_to_heapless(config::AP_SSID),
             password: str_to_heapless(config::AP_PASSWORD),
@@ -149,15 +195,6 @@ impl<'d> WifiManager<'d> {
             ..Default::default()
         };
 
-        let Some(wifi) = self.wifi.as_mut() else {
-            return;
-        };
-
-        // Stop WiFi if running
-        let _ = wifi.stop();
-
-        // Configure and start AP
-        // ESP-IDF default AP netif uses 192.168.4.1/24 (matching our config)
         if wifi
             .set_configuration(&Configuration::AccessPoint(ap_config))
             .is_err()
