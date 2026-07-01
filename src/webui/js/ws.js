@@ -1,13 +1,26 @@
 /**
  * @file ws.js
- * @brief SSE connection & state synchronization
+ * @brief WebSocket connection & state synchronization
  */
-const { SSE_TIMEOUT_MS, SSE_CHECK_INTERVAL_MS, SSE_PING_INTERVAL_MS, SSE_RECONNECT_DELAY_MS, SSE_PING_THRESHOLD_MS, SSE_MAX_ENTRIES } = CONFIG;
-let currentEventSource = null;
+const { WS_TIMEOUT_MS, WS_CHECK_INTERVAL_MS, WS_PING_INTERVAL_MS, WS_RECONNECT_DELAY_MS, WS_PING_THRESHOLD_MS, WS_MAX_ENTRIES } = CONFIG;
+let currentWs = null;
 let connectionAlive = true;
 let lastMessageTime = Date.now();
 let intervals = { check: null, ping: null };
 let isReconnecting = false;
+let reconnectTimer = null;
+
+const scheduleReconnect = () => {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(initWs, WS_RECONNECT_DELAY_MS);
+};
+
+const cancelReconnect = () => {
+    if (reconnectTimer !== null) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+};
 
 const setConnectionStatus = (alive) => {
   connectionAlive = alive;
@@ -42,8 +55,8 @@ const resetUIValues = () => {
 
 const checkConnection = () => {
   const elapsed = Date.now() - lastMessageTime;
-  if (elapsed > SSE_TIMEOUT_MS && connectionAlive) setConnectionStatus(false);
-  else if (elapsed <= SSE_TIMEOUT_MS && !connectionAlive) setConnectionStatus(true);
+  if (elapsed > WS_TIMEOUT_MS && connectionAlive) setConnectionStatus(false);
+  else if (elapsed <= WS_TIMEOUT_MS && !connectionAlive) setConnectionStatus(true);
 };
 
 const pingServer = async () => {
@@ -51,9 +64,9 @@ const pingServer = async () => {
     const resp = await fetch('/api/status', { cache: 'no-cache' });
     if (resp.ok) {
       if (!connectionAlive && !isReconnecting) {
-        console.log('Server back. Reconnecting SSE...');
-        if (currentEventSource) currentEventSource.close();
-        initSse();
+        console.log('Server back. Reconnecting WS...');
+        if (currentWs && currentWs.readyState === WebSocket.OPEN) currentWs.close();
+        initWs();
       }
       return true;
     }
@@ -64,10 +77,10 @@ const pingServer = async () => {
 const startIntervals = () => {
   clearInterval(intervals.check);
   clearInterval(intervals.ping);
-  intervals.check = setInterval(checkConnection, SSE_CHECK_INTERVAL_MS);
+  intervals.check = setInterval(checkConnection, WS_CHECK_INTERVAL_MS);
   intervals.ping = setInterval(() => {
-    if (!connectionAlive || Date.now() - lastMessageTime > SSE_PING_THRESHOLD_MS) pingServer();
-  }, SSE_PING_INTERVAL_MS);
+    if (!connectionAlive || Date.now() - lastMessageTime > WS_PING_THRESHOLD_MS) pingServer();
+  }, WS_PING_INTERVAL_MS);
 };
 
 const millisToTime = (ms, base, baseMs) => {
@@ -78,7 +91,7 @@ const millisToTime = (ms, base, baseMs) => {
 
 const valveLabel = (v) => ({'in':'input','out':'output','unk':'unknown'})[v] || v || '—';
 
-const formatSseEntry = (e) => {
+const formatWsEntry = (e) => {
   const ts = e.ts ? millisToTime(e.ts, APP_STATE.logs.baseDate, APP_STATE.logs.baseMillis) : '—';
   const b = e.brt;
 
@@ -94,78 +107,124 @@ const formatSseEntry = (e) => {
   return `<tr>${cell(ts)}${cell(buretteStatus)}${cell(vol, 'Объём')}${cell(speed, 'Скорость')}${cell(tempStr)}${cell(mvStr)}${cell(valveLabel(e.vlv))}</tr>`;
 };
 
-const renderSseLog = () => {
-  const container = document.getElementById('sse-log-entries');
+const renderWsLog = () => {
+  const container = document.getElementById('ws-log-entries');
   if (!container) return;
-  if (APP_STATE.logs.sseRawJson) {
-    container.innerHTML = APP_STATE.logs.sseEntries.map(e =>
+  if (APP_STATE.logs.wsRawJson) {
+    container.innerHTML = APP_STATE.logs.wsEntries.map(e =>
       `<div class="border-bottom py-1"><pre class="mb-0"><code>${JSON.stringify(e, null, 2)}</code></pre></div>`
     ).join('');
     return;
   }
   const header = `<table class="table table-sm table-bordered mb-0"><thead class="table-dark"><tr><th>Время</th><th>Бюретка</th><th>Объём</th><th>Скорость</th><th>Темп.</th><th>Электрод</th><th>Клапан</th></tr></thead><tbody>`;
-  container.innerHTML = `${header}${APP_STATE.logs.sseEntries.map(formatSseEntry).join('')}</tbody></table>`;
+  container.innerHTML = `${header}${APP_STATE.logs.wsEntries.map(formatWsEntry).join('')}</tbody></table>`;
 };
 
-window.initSse = () => {
+window.initWs = () => {
+  cancelReconnect();
+
+  // Detach old socket handlers and close if still alive
+  if (currentWs) {
+    const old = currentWs;
+    old.onopen = null;
+    old.onmessage = null;
+    old.onclose = null;
+    old.onerror = null;
+    if (old.readyState === WebSocket.OPEN || old.readyState === WebSocket.CONNECTING) {
+      old.close();
+    }
+    currentWs = null;
+  }
+
   isReconnecting = true;
   clearInterval(intervals.check);
   clearInterval(intervals.ping);
-  const es = new EventSource('/api/events');
-  currentEventSource = es;
+  const ws = new WebSocket('ws://' + location.host + '/ws/stream');
+  currentWs = ws;
   lastMessageTime = Date.now();
-  startIntervals();
-  es.onopen = () => setConnectionStatus(true);
 
-  const handleEvent = (name, parser, handler) => {
-    es.addEventListener(name, (e) => {
-      try {
-        const data = parser(e.data);
-        lastMessageTime = Date.now();
-        if (!connectionAlive) setConnectionStatus(true);
-        handler(data);
-      } catch (err) { console.error(`SSE ${name} parse error:`, err); }
-    });
+  // Connection timeout: force close if stuck in CONNECTING
+  const connectTimeout = setTimeout(() => {
+    if (ws === currentWs && ws.readyState === WebSocket.CONNECTING) {
+      console.warn('WS connection timeout, forcing close');
+      ws.close();
+      scheduleReconnect();
+    }
+  }, WS_TIMEOUT_MS + 2000);
+
+  ws.onopen = () => {
+    clearTimeout(connectTimeout);
+    lastMessageTime = Date.now();
+    setConnectionStatus(true);
+    isReconnecting = false;
+    startIntervals();
+    ws.send('{}'); // trigger server-side session creation (push-only architecture)
   };
 
-  handleEvent('status', JSON.parse, (data) => {
-    if (!data.brt) console.error('SSE status: missing brt field', JSON.stringify(data));
-    if (data.temp === undefined) console.error('SSE status: missing temp field');
-    if (data.mv === undefined) console.error('SSE status: missing mv field');
-    if (data.vlv === undefined) console.error('SSE status: missing vlv field');
-    updateUI(data);
-    const idle = data.brt?.sts === 'idle';
-    ['bc-vol-run-btn', 'bc-sp-run-btn'].forEach(id => {
-      const btn = document.getElementById(id);
-      if (btn) btn.disabled = !idle;
-    });
-    if (APP_STATE.logs.sseAutoupdate) {
-      APP_STATE.logs.sseEntries = [data, ...APP_STATE.logs.sseEntries].slice(0, SSE_MAX_ENTRIES);
-      renderSseLog();
-    }
-  });
+  ws.onmessage = (event) => {
+    try {
+      const envelope = JSON.parse(event.data);
+      lastMessageTime = Date.now();
+      if (!connectionAlive) setConnectionStatus(true);
 
-  handleEvent('debug', JSON.parse, (data) => {
-    if (!data.stepperDrv) console.error('SSE debug: missing stepperDrv field', JSON.stringify(data));
-    if (!data.buretteSteps) console.warn('SSE debug: missing buretteSteps field');
-    updateDebugUI(data);
-  });
-  handleEvent('log', JSON.parse, addLogEntry);
-  handleEvent('limitsw', JSON.parse, (data) => {
-    if (data.full === undefined || data.empty === undefined) {
-      console.error('SSE limitsw: missing full/empty fields', JSON.stringify(data));
-    }
-    document.getElementById('hw-limit-min').textContent = data.full ? '✅ Активирован' : '—';
-    document.getElementById('hw-limit-max').textContent = data.empty ? '✅ Активирован' : '—';
-  });
+      switch (envelope.event) {
+        case 'status': {
+          const data = envelope.data;
+          if (!data.brt) console.error('WS status: missing brt field', JSON.stringify(data));
+          if (data.temp === undefined) console.error('WS status: missing temp field');
+          if (data.mv === undefined) console.error('WS status: missing mv field');
+          if (data.vlv === undefined) console.error('WS status: missing vlv field');
+          updateUI(data);
+          const idle = data.brt?.sts === 'idle';
+          ['bc-vol-run-btn', 'bc-sp-run-btn'].forEach(id => {
+            const btn = document.getElementById(id);
+            if (btn) btn.disabled = !idle;
+          });
+          if (APP_STATE.logs.wsAutoupdate) {
+            APP_STATE.logs.wsEntries = [data, ...APP_STATE.logs.wsEntries].slice(0, WS_MAX_ENTRIES);
+            renderWsLog();
+          }
+          break;
+        }
+        case 'debug': {
+          const data = envelope.data;
+          if (!data.stepperDrv) console.error('WS debug: missing stepperDrv field', JSON.stringify(data));
+          if (!data.buretteSteps) console.warn('WS debug: missing buretteSteps field');
+          updateDebugUI(data);
+          break;
+        }
+        case 'log':
+          addLogEntry(envelope.data);
+          break;
+        case 'limitsw': {
+          const data = envelope.data;
+          if (data.full === undefined || data.empty === undefined) {
+            console.error('WS limitsw: missing full/empty fields', JSON.stringify(data));
+          }
+          document.getElementById('hw-limit-min').textContent = data.full ? '✅ Активирован' : '—';
+          document.getElementById('hw-limit-max').textContent = data.empty ? '✅ Активирован' : '—';
+          break;
+        }
+        default:
+          break;
+      }
+    } catch (err) { console.error('WS message parse error:', err); }
+  };
 
-  es.onerror = (event) => {
+  ws.onclose = () => {
+    clearTimeout(connectTimeout);
     setConnectionStatus(false);
-    console.error('SSE connection lost, reconnecting in 3s...', event?.message || event);
-    es.close();
-    setTimeout(() => { if (!isReconnecting) initSse(); }, SSE_RECONNECT_DELAY_MS);
+    console.error('WS connection lost, reconnecting in 3s...');
+    scheduleReconnect();
   };
-  isReconnecting = false;
+
+  ws.onerror = () => {
+    console.error('WS error');
+    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+      ws.close();
+    }
+    scheduleReconnect();
+  };
 };
 
-window.renderSseLog = renderSseLog;
+window.renderWsLog = renderWsLog;

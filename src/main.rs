@@ -235,7 +235,7 @@ fn main() {
             }
 
             // limitsw — periodic push
-            if tick_count.is_multiple_of(config::SSE_LIMITSW_INTERVAL_TICKS) {
+            if tick_count.is_multiple_of(config::WS_LIMITSW_INTERVAL_TICKS) {
                 let mut d: heapless::String<{ ecotiter_fw::domain::memory::MAX_RESPONSE_SIZE }> =
                     heapless::String::new();
                 let _ = d.push_str(r#"{"full":false,"empty":false}"#);

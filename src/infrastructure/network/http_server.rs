@@ -23,8 +23,8 @@ pub static G_RESTART_PENDING: AtomicBool = AtomicBool::new(false);
 
 use embedded_svc::http::Method;
 use embedded_svc::ws::FrameType;
-use esp_idf_svc::http::server::ws::EspHttpWsDetachedSender;
-use esp_idf_svc::http::server::{Configuration, EspHttpServer};
+
+use esp_idf_svc::http::server::{ws::EspHttpWsConnection, Configuration, EspHttpServer};
 
 use crate::config;
 use crate::domain::memory::HTTP_POST_BUF_SIZE;
@@ -33,13 +33,17 @@ use crate::errors::NetworkError;
 use crate::infrastructure::network::wifi::WifiManager;
 use crate::interface::rest_api;
 use crate::interface::webui;
+use esp_idf_sys::{
+    httpd_handle_t, httpd_ws_frame_t, httpd_ws_send_frame_async,
+    httpd_ws_type_t_HTTPD_WS_TYPE_BINARY, httpd_ws_type_t_HTTPD_WS_TYPE_TEXT, EspError, ESP_FAIL,
+};
 
 // `WifiManager` used with `'static` lifetime for `fn_handler` `Send` bound.
 type WifiMgr = Arc<Mutex<WifiManager<'static>>>;
 
 /// WebSocket sessions: session_id -> detached sender.
 /// Wrapped in `Mutex` for interior mutability (broadcast from main loop).
-static WS_SESSIONS: Mutex<BTreeMap<i32, EspHttpWsDetachedSender>> = Mutex::new(BTreeMap::new());
+static WS_SESSIONS: Mutex<BTreeMap<i32, WsSender>> = Mutex::new(BTreeMap::new());
 
 /// Broadcast a JSON event to all connected WebSocket clients.
 ///
@@ -66,6 +70,58 @@ pub fn broadcast_websocket_event(event_type: &str, data: &str) {
                 true
             }
         });
+    }
+}
+
+/// Custom WebSocket sender using raw ESP-IDF async send.
+/// Replaces EspHttpWsDetachedSender (crate-private to esp-idf-svc).
+struct WsSender {
+    sd: httpd_handle_t,
+    fd: i32,
+    closed: Arc<AtomicBool>,
+}
+
+// SAFETY: WsSender is only used from the HTTP server task context.
+// httpd_handle_t (*mut c_void) is an opaque handle that is safe to move
+// between threads as long as only one thread accesses it at a time.
+// The Mutex on WS_SESSIONS ensures single-threaded access.
+unsafe impl Send for WsSender {}
+
+impl WsSender {
+    fn send(&self, frame_type: FrameType, frame_data: &[u8]) -> Result<(), EspError> {
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(EspError::from_infallible::<{ ESP_FAIL }>());
+        }
+
+        let type_val = match frame_type {
+            FrameType::Binary(_) => httpd_ws_type_t_HTTPD_WS_TYPE_BINARY,
+            _ => httpd_ws_type_t_HTTPD_WS_TYPE_TEXT,
+        };
+
+        let frame = httpd_ws_frame_t {
+            type_: type_val,
+            final_: true,
+            fragmented: false,
+            payload: frame_data.as_ptr().cast_mut(),
+            len: frame_data.len(),
+        };
+
+        // SAFETY: httpd_ws_send_frame_async is an async FFI call safe from any
+        // thread (posts to httpd event loop). sd and fd are valid for the
+        // lifetime of this WsSender (removed from WS_SESSIONS on close).
+        let ret = unsafe {
+            httpd_ws_send_frame_async(self.sd, self.fd, core::ptr::from_ref(&frame).cast_mut())
+        };
+
+        if ret != 0 {
+            self.closed.store(true, Ordering::SeqCst);
+        }
+
+        EspError::convert(ret)
+    }
+
+    fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
     }
 }
 
@@ -102,6 +158,7 @@ impl HttpServer {
 
         let config = Configuration {
             stack_size: config::HTTP_SERVER_STACK,
+            max_open_sockets: 5,
             ..Default::default()
         };
 
@@ -170,7 +227,7 @@ impl HttpServer {
                         }
                     }
 
-                    let mut resp = request.into_ok_response()?;
+                    let mut resp = request.into_response(200, Some("OK"), &[("Content-Type", "application/json")])?;
                     let json = r#"{"status":"ok","success":true,"message":"Credentials saved. Restarting..."}"#;
                     resp.write(json.as_bytes())?;
                     resp.flush()?;
@@ -198,7 +255,7 @@ impl HttpServer {
                     r#"{"error":"wifi_locked"}"#.to_string()
                 };
 
-                let mut resp = request.into_ok_response()?;
+                let mut resp = request.into_response(200, Some("OK"), &[("Content-Type", "application/json")])?;
                 resp.write(json.as_bytes())?;
                 resp.flush()?;
                 Ok(())
@@ -248,7 +305,11 @@ impl HttpServer {
                 Method::Get,
                 |request| -> Result<(), esp_idf_svc::io::EspIOError> {
                     let json = rest_api::handle_api_ping();
-                    let mut resp = request.into_ok_response()?;
+                    let mut resp = request.into_response(
+                        200,
+                        Some("OK"),
+                        &[("Content-Type", "application/json")],
+                    )?;
                     resp.write(json.as_bytes())?;
                     resp.flush()?;
                     Ok(())
@@ -290,7 +351,11 @@ impl HttpServer {
                         )
                     };
 
-                    let mut resp = request.into_ok_response()?;
+                    let mut resp = request.into_response(
+                        200,
+                        Some("OK"),
+                        &[("Content-Type", "application/json")],
+                    )?;
                     resp.write(json.as_bytes())?;
                     resp.flush()?;
                     Ok(())
@@ -307,7 +372,11 @@ impl HttpServer {
                     let mut body = [0u8; HTTP_POST_BUF_SIZE];
                     let n = request.read(&mut body).unwrap_or(0);
                     let json = rest_api::handle_api_command(&body[..n]);
-                    let mut resp = request.into_ok_response()?;
+                    let mut resp = request.into_response(
+                        200,
+                        Some("OK"),
+                        &[("Content-Type", "application/json")],
+                    )?;
                     resp.write(json.as_bytes())?;
                     resp.flush()?;
                     Ok(())
@@ -324,7 +393,11 @@ impl HttpServer {
                     let mut body = [0u8; HTTP_POST_BUF_SIZE];
                     let n = request.read(&mut body).unwrap_or(0);
                     let json = rest_api::handle_valve_set(&body[..n]);
-                    let mut resp = request.into_ok_response()?;
+                    let mut resp = request.into_response(
+                        200,
+                        Some("OK"),
+                        &[("Content-Type", "application/json")],
+                    )?;
                     resp.write(json.as_bytes())?;
                     resp.flush()?;
                     Ok(())
@@ -339,7 +412,11 @@ impl HttpServer {
                 Method::Get,
                 |request| -> Result<(), esp_idf_svc::io::EspIOError> {
                     let json = rest_api::handle_valve_state();
-                    let mut resp = request.into_ok_response()?;
+                    let mut resp = request.into_response(
+                        200,
+                        Some("OK"),
+                        &[("Content-Type", "application/json")],
+                    )?;
                     resp.write(json.as_bytes())?;
                     resp.flush()?;
                     Ok(())
@@ -354,7 +431,11 @@ impl HttpServer {
                 Method::Get,
                 move |request| -> Result<(), esp_idf_svc::io::EspIOError> {
                     let json = rest_api::handle_api_logs(config::LOG_DEFAULT_LIMIT);
-                    let mut resp = request.into_ok_response()?;
+                    let mut resp = request.into_response(
+                        200,
+                        Some("OK"),
+                        &[("Content-Type", "application/json")],
+                    )?;
                     resp.write(json.as_bytes())?;
                     resp.flush()?;
                     Ok(())
@@ -388,7 +469,11 @@ impl HttpServer {
                 Method::Delete,
                 |request| -> Result<(), esp_idf_svc::io::EspIOError> {
                     let json = r#"{"status":"ok"}"#;
-                    let mut resp = request.into_ok_response()?;
+                    let mut resp = request.into_response(
+                        200,
+                        Some("OK"),
+                        &[("Content-Type", "application/json")],
+                    )?;
                     resp.write(json.as_bytes())?;
                     resp.flush()?;
                     Ok(())
@@ -403,43 +488,58 @@ impl HttpServer {
 
     fn register_ws_routes(&mut self) -> Result<(), NetworkError> {
         self.server
-            .ws_handler("/ws/stream", None, move |ws| {
-                if ws.is_new() {
-                    let session_id = ws.session();
-                    match ws.create_detached_sender() {
-                        Ok(sender) => {
-                            if let Ok(mut sessions) = WS_SESSIONS.lock() {
-                                sessions.insert(session_id, sender);
+            .ws_handler(
+                "/ws/stream",
+                Some(""),
+                |connection: &mut EspHttpWsConnection| -> Result<(), EspError> {
+                    let session_id = connection.session();
+
+                    if connection.is_closed() {
+                        if let Ok(mut sessions) = WS_SESSIONS.lock() {
+                            if sessions.remove(&session_id).is_some() {
                                 log::info!(
-                                    "WS: session {session_id} connected ({} total)",
+                                    "WS: session {session_id} closed ({} remaining)",
                                     sessions.len()
                                 );
                             }
-                            let _ = ws.send(
-                                FrameType::Text(false),
-                                br#"{"event":"connected","data":{}}"#,
+                        }
+                        return Ok(());
+                    }
+
+                    // Extract server handle (httpd_handle_t is Copy)
+                    let sd = match connection {
+                        EspHttpWsConnection::New(sd, _)
+                        | EspHttpWsConnection::Receiving(sd, _, _) => *sd,
+                        EspHttpWsConnection::Closed(_) => return Ok(()),
+                    };
+
+                    // Two-phase lock: check if session is new
+                    let is_new = WS_SESSIONS
+                        .lock()
+                        .is_ok_and(|s| !s.contains_key(&session_id));
+
+                    if is_new {
+                        log::info!("WS: new session, session={session_id}");
+                        let sender = WsSender {
+                            sd,
+                            fd: session_id,
+                            closed: Arc::new(AtomicBool::new(false)),
+                        };
+                        if let Ok(mut sessions) = WS_SESSIONS.lock() {
+                            sessions.insert(session_id, sender);
+                            log::info!(
+                                "WS: session {session_id} connected ({} total)",
+                                sessions.len()
                             );
                         }
-                        Err(e) => log::warn!("WS: create_detached_sender failed: {e:?}"),
                     }
-                    return Ok(());
-                }
 
-                if ws.is_closed() {
-                    let session_id = ws.session();
-                    if let Ok(mut sessions) = WS_SESSIONS.lock() {
-                        sessions.remove(&session_id);
-                        log::info!(
-                            "WS: session {session_id} closed ({} remaining)",
-                            sessions.len()
-                        );
-                    }
-                    return Ok(());
-                }
-
-                Ok::<(), esp_idf_sys::EspError>(())
-            })
+                    Ok(())
+                },
+            )
             .map_err(|_| NetworkError::HttpServerInitFailed)?;
+
+        log::info!("Registered Httpd server WS handler for URI \"/ws/stream\"");
         Ok(())
     }
 

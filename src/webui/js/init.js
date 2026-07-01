@@ -71,9 +71,9 @@ const loadInitialLogs = () => {
 const initApp = () => {
   initTheme();
   updateDynamicInput();
-  const ac = document.getElementById('sse-autoupdate-check'); if (ac) ac.checked = APP_STATE.logs.sseAutoupdate;
-  const rc = document.getElementById('sse-raw-json'); if (rc) rc.checked = APP_STATE.logs.sseRawJson;
-  initSse();
+  const ac = document.getElementById('ws-autoupdate-check'); if (ac) ac.checked = APP_STATE.logs.wsAutoupdate;
+  const rc = document.getElementById('ws-raw-json'); if (rc) rc.checked = APP_STATE.logs.wsRawJson;
+  initWs();
   initStepperControls();
   loadCalibrationStatus();
   loadBuretteCalStatus();

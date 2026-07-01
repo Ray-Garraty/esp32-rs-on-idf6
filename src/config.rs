@@ -111,17 +111,11 @@ pub const ADC_DEFAULT_B: f32 = 0.0;
 /// to keep the loop responsive (AGENTS.md golden rule).
 pub const MAIN_LOOP_TICK_MS: u64 = 10;
 
-/// SSE channel capacity (events buffered between main loop and HTTP handler).
-pub const SSE_CHANNEL_CAPACITY: usize = 8;
-
-/// Extra buffer bytes for SSE frame overhead beyond the JSON payload.
-pub const SSE_FRAME_OVERHEAD: usize = 64;
-
 /// Default entry limit for GET /api/logs (matched to legacy JS `?limit=20`).
 pub const LOG_DEFAULT_LIMIT: usize = 20;
 
-/// Interval in ticks for limitsw SSE event pushes (100 ticks × 10 ms = 1 s).
-pub const SSE_LIMITSW_INTERVAL_TICKS: u64 = 100;
+/// Interval in ticks for limitsw WS event pushes (100 ticks × 10 ms = 1 s).
+pub const WS_LIMITSW_INTERVAL_TICKS: u64 = 100;
 
 /// Interval in ticks for periodic log output (100 ticks × 10 ms = 1 s).
 pub const LOG_INTERVAL_TICKS: u64 = 100;

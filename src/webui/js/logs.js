@@ -51,19 +51,19 @@ const downloadLogs = () => {
     .catch(e => console.error("downloadLogs error:", e));
 };
 
-const toggleSseSetting = (stateKey, checkboxId, renderFn = null) => {
+const toggleWsSetting = (stateKey, checkboxId, renderFn = null) => {
   APP_STATE.logs[stateKey] = !APP_STATE.logs[stateKey];
   const el = document.getElementById(checkboxId);
   if (el) el.checked = APP_STATE.logs[stateKey];
   if (renderFn) renderFn();
 };
 
-const toggleSseAutoupdate = () => toggleSseSetting('sseAutoupdate', 'sse-autoupdate-check');
-const toggleSseRawJson = () => toggleSseSetting('sseRawJson', 'sse-raw-json', renderSseLog);
+const toggleWsAutoupdate = () => toggleWsSetting('wsAutoupdate', 'ws-autoupdate-check');
+const toggleWsRawJson = () => toggleWsSetting('wsRawJson', 'ws-raw-json', renderWsLog);
 
 window.setLogLevelFilter = setLogLevelFilter;
 window.addLogEntry = addLogEntry;
 window.clearLogs = clearLogs;
 window.downloadLogs = downloadLogs;
-window.toggleSseAutoupdate = toggleSseAutoupdate;
-window.toggleSseRawJson = toggleSseRawJson;
+window.toggleWsAutoupdate = toggleWsAutoupdate;
+window.toggleWsRawJson = toggleWsRawJson;

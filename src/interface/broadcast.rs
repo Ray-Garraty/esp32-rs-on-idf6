@@ -1,7 +1,7 @@
-//! Broadcast event types and serialization for SSE / BLE notify.
+//! Broadcast event types and serialization for WS / BLE notify.
 //!
 //! The broadcast event is a snapshot of device state sent every 300 ms
-//! to all connected clients (SSE and BLE GATT notify).
+//! to all connected clients (WS and BLE GATT notify).
 
 #![forbid(unsafe_code)]
 use crate::domain::memory::MAX_RESPONSE_SIZE;
@@ -35,7 +35,7 @@ pub struct BroadcastEvent {
 
 /// Serialise a broadcast event into a fixed-size JSON string.
 ///
-/// The JSON format matches the SSE event data expected by the WebUI:
+/// The JSON format matches the WS event data expected by the WebUI:
 /// ```json
 /// {"ts":12345,"temp":23.5,"mv":1500,"vlv":"in","brt":{"sts":"idle","vl":0.0,"spd":0.0}}
 /// ```

@@ -92,7 +92,7 @@ Mandatory steps:
 
 # Unsafe Policy
 
-**Total unsafe blocks: 23** (Last audited: 2026-06-30, baseline in `scripts/check_unsafe.py`)
+**Total unsafe blocks: 24** (Last audited: 2026-07-01, baseline in `scripts/check_unsafe.py`)
 
 ## Modules with `#![forbid(unsafe_code)]`
 
@@ -104,7 +104,7 @@ list of safe leaf modules. These modules must never contain `unsafe` code.
 | File | Blocks | Reason |
 |------|--------|--------|
 | `infrastructure/storage/nvs.rs` | 13 | NVS FFI wrappers inside safe public API |
-| `esp_safe.rs` | 5 | Safe wrappers around ESP-IDF boot-time FFI calls |
+| `esp_safe.rs` | 6 | Safe wrappers around ESP-IDF boot-time FFI calls |
 | `infrastructure/network/http_server.rs` | 2 | SSE raw-pointer `httpd_resp_send_chunk` (blocking handler pattern) |
 | `infrastructure/drivers/limitswitch.rs` | 1 | GPIO ISR `subscribe()` callback |
 | `infrastructure/drivers/onewire.rs` | 1 | `unsafe impl Send` for MMIO-based PinDriver |

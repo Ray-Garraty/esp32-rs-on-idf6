@@ -5,7 +5,7 @@
 //! handling.
 
 #![forbid(unsafe_code)]
-/// Main dashboard HTML page with SSE connection for live status display.
+/// Main dashboard HTML page with WebSocket connection for live status display.
 pub const INDEX_HTML: &str = include_str!("../webui/index.html");
 
 /// Combined styling: style.css + theme.css (dark theme support).
@@ -13,7 +13,7 @@ pub const STYLE_CSS: &str = include_str!("../webui/style.css");
 
 /// JS: Application state and config constants.
 pub const STATE_JS: &str = include_str!("../webui/js/state.js");
-/// JS: WebSocket client (replaces SSE) for real-time events.
+/// JS: WebSocket client for real-time events (replaces legacy SSE).
 pub const WS_JS: &str = include_str!("../webui/js/ws.js");
 /// JS: DOM updates for hardware status, debug, stepper.
 pub const UI_UPDATE_JS: &str = include_str!("../webui/js/ui-update.js");

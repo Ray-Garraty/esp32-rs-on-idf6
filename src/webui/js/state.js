@@ -6,11 +6,11 @@
 // ─── Configuration Constants (YAGNI / KISS) ───
 const CONFIG = {
   LOG_MAX_ENTRIES: 100,
-  SSE_MAX_ENTRIES: 5,
-  SSE_CHECK_INTERVAL_MS: 500,
-  SSE_PING_INTERVAL_MS: 2000,
-  SSE_TIMEOUT_MS: 1500,
-  SSE_RECONNECT_DELAY_MS: 3000,
+  WS_MAX_ENTRIES: 5,
+  WS_CHECK_INTERVAL_MS: 500,
+  WS_PING_INTERVAL_MS: 2000,
+  WS_TIMEOUT_MS: 1500,
+  WS_RECONNECT_DELAY_MS: 3000,
   STEPPER: {
     DEFAULT_FREQ: 300,
     DEFAULT_STEPS: 1000,
@@ -26,14 +26,14 @@ const CONFIG = {
   },
   SG_THRESHOLD_MAX: 255,
   LOG_DEFAULT_LIMIT: 20,
-  SSE_PING_THRESHOLD_MS: 3000
+  WS_PING_THRESHOLD_MS: 3000
 };
 
 // ─── Mutable State ───
 const APP_STATE = {
   stepper: { direction: 'LIQ_OUT', busy: false, enEnabled: false, mode: 'continuous' },
   valve: { position: 'input' },
-  logs: { messages: [], sseEntries: [], sseAutoupdate: true, sseRawJson: false, baseDate: null, baseMillis: 0 },
+  logs: { messages: [], wsEntries: [], wsAutoupdate: true, wsRawJson: false, baseDate: null, baseMillis: 0 },
   ui: { sgEditMode: false, motorStoppedAt: null, logLevelFilter: 'ALL' },
   calibration: { speedRowCount: 0, adcState: null, calibratingIndex: -1 }
 };

@@ -20,7 +20,7 @@ pub struct StatusUpdate {
 /// Channel pairs for inter-task communication.
 ///
 /// - `cmd_tx` / `cmd_rx`:  Send `BuretteCommand` from main loop → motor task.
-/// - `status_tx` / `status_rx`:  Broadcast `StatusUpdate` from motor task → BLE notify / HTTP SSE.
+/// - `status_tx` / `status_rx`:  Broadcast `StatusUpdate` from motor task → BLE notify / HTTP WS.
 /// - `log_tx` / `log_rx`:  Transport `LogEntry` from any task → HTTP log endpoint.
 #[derive(Debug)]
 pub struct SystemChannels {

@@ -121,8 +121,10 @@ pub fn get_entries_json(limit: usize) -> heapless::String<MAX_RESPONSE_SIZE> {
     let total = buf.entries.len();
     let start = total.saturating_sub(limit);
     for (i, entry) in buf.entries.iter().skip(start).enumerate() {
-        if i > 0 {
-            write!(result, ",").ok();
+        let prev_len = result.len();
+        if i > 0 && write!(result, ",").is_err() {
+            result.truncate(prev_len);
+            break;
         }
         let level_str = match entry.level {
             Level::Error => "ERROR",
@@ -137,14 +139,19 @@ pub fn get_entries_json(limit: usize) -> heapless::String<MAX_RESPONSE_SIZE> {
             entry.ts_ms, level_str,
         )
         .ok();
-        json_escape(entry.msg.as_str(), &mut result);
-        write!(result, r"}}").ok();
+        if !json_escape(entry.msg.as_str(), &mut result) || write!(result, "\"}}").is_err() {
+            result.truncate(prev_len);
+            break;
+        }
     }
     // Drop the lock before the final JSON close so we don't hold it during
     // the return (the MutexGuard is no longer needed after iteration).
     drop(buf);
 
-    write!(result, r"]}}").ok();
+    let before_close = result.len();
+    if write!(result, r"]}}").is_err() {
+        result.truncate(before_close);
+    }
     result
 }
 
@@ -259,6 +266,32 @@ mod tests {
     }
 
     #[test]
+    fn json_buffer_overflow_truncates_cleanly() {
+        clear_entries();
+        // Push 4 entries with long messages to force buffer overflow
+        let long_msg = "A".repeat(200);
+        for i in 0..4 {
+            push_entry(i as u64, Level::Info, &long_msg);
+        }
+        let json = get_entries_json(10);
+        // The result must be valid JSON, even if truncated
+        let parsed: serde_json::Value =
+            serde_json::from_str(json.as_str()).expect("overflow output must be valid JSON");
+        let entries = parsed["entries"].as_array().unwrap();
+        // At least some entries should have fit
+        assert!(
+            entries.len() > 0,
+            "buffer overflow should preserve at least some entries"
+        );
+        // Each entry has valid fields
+        for entry in entries {
+            assert!(entry["ts"].as_u64().is_some());
+            assert_eq!(entry["level"], "INFO");
+            assert!(entry["msg"].as_str().is_some());
+        }
+    }
+
+    #[test]
     fn json_output_traces_through_all_levels() {
         clear_entries();
         push_entry(1, Level::Trace, "trace");
@@ -277,34 +310,69 @@ mod tests {
             .collect();
         assert_eq!(levels, ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"]);
     }
+
+    #[test]
+    fn json_full_output_is_valid() {
+        clear_entries();
+        push_entry(1, Level::Info, "Hello World");
+        push_entry(2, Level::Error, "Test msg");
+        let json = get_entries_json(10);
+        let parsed: serde_json::Value =
+            serde_json::from_str(json.as_str()).expect("Output must be valid JSON");
+        assert!(parsed["entries"].is_array());
+        assert_eq!(parsed["total"], 2);
+        let entries = parsed["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0]["level"], "INFO");
+        assert_eq!(entries[0]["msg"], "Hello World");
+        assert_eq!(entries[0]["ts"], 1);
+        assert_eq!(entries[1]["level"], "ERROR");
+        assert_eq!(entries[1]["msg"], "Test msg");
+        assert_eq!(entries[1]["ts"], 2);
+    }
 }
 
-fn json_escape(s: &str, out: &mut heapless::String<MAX_RESPONSE_SIZE>) {
+fn json_escape(s: &str, out: &mut heapless::String<MAX_RESPONSE_SIZE>) -> bool {
     for c in s.chars() {
         match c {
             '"' => {
-                out.push_str("\\\"").ok();
+                if out.push_str("\\\"").is_err() {
+                    return false;
+                }
             }
             '\\' => {
-                out.push_str("\\\\").ok();
+                if out.push_str("\\\\").is_err() {
+                    return false;
+                }
             }
             '\n' => {
-                out.push_str("\\n").ok();
+                if out.push_str("\\n").is_err() {
+                    return false;
+                }
             }
             '\r' => {
-                out.push_str("\\r").ok();
+                if out.push_str("\\r").is_err() {
+                    return false;
+                }
             }
             '\t' => {
-                out.push_str("\\t").ok();
+                if out.push_str("\\t").is_err() {
+                    return false;
+                }
             }
             c if (c as u32) < 0x20 => {
-                let _ = write!(out, "\\u{:04x}", c as u32);
+                if write!(out, "\\u{:04x}", c as u32).is_err() {
+                    return false;
+                }
             }
             c => {
                 let mut buf = [0u8; 4];
                 let s = c.encode_utf8(&mut buf);
-                out.push_str(s).ok();
+                if out.push_str(s).is_err() {
+                    return false;
+                }
             }
         }
     }
+    true
 }

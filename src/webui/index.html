@@ -302,30 +302,30 @@
           </div>
         </div>
 
-        <!-- 5. Лог SSE (свёрнут) -->
+        <!-- 5. Лог WS (свёрнут) -->
         <div class="accordion-item mb-3">
           <h2 class="accordion-header">
             <button
               class="accordion-button collapsed"
               type="button"
               data-bs-toggle="collapse"
-              data-bs-target="#collapse-sse"
-              aria-controls="collapse-sse"
+              data-bs-target="#collapse-ws"
+              aria-controls="collapse-ws"
             >
-              <span class="flex-grow-1 text-center">SSE-события</span>
+              <span class="flex-grow-1 text-center">WS-события</span>
             </button>
           </h2>
-          <div id="collapse-sse" class="accordion-collapse collapse">
+          <div id="collapse-ws" class="accordion-collapse collapse">
             <div class="accordion-body">
               <div class="d-flex justify-content-end gap-3 mb-2">
                 <div class="form-check form-check-inline mb-0">
                   <input
                     class="form-check-input"
                     type="checkbox"
-                    id="sse-raw-json"
-                    onchange="toggleSseRawJson()"
+                    id="ws-raw-json"
+                    onchange="toggleWsRawJson()"
                   />
-                  <label class="form-check-label" for="sse-raw-json"
+                  <label class="form-check-label" for="ws-raw-json"
                     >Сырой JSON</label
                   >
                 </div>
@@ -333,16 +333,16 @@
                   <input
                     class="form-check-input"
                     type="checkbox"
-                    id="sse-autoupdate-check"
+                    id="ws-autoupdate-check"
                     checked
-                    onchange="toggleSseAutoupdate()"
+                    onchange="toggleWsAutoupdate()"
                   />
-                  <label class="form-check-label" for="sse-autoupdate-check"
+                  <label class="form-check-label" for="ws-autoupdate-check"
                     >Автообновление:</label
                   >
                 </div>
               </div>
-              <div id="sse-log-entries"></div>
+              <div id="ws-log-entries"></div>
             </div>
           </div>
         </div>

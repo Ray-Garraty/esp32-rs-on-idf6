@@ -19,8 +19,8 @@
 .accordion-button:focus { box-shadow: none; border-color: transparent; }
 
 textarea#log-messages { font-size: 0.75rem; resize: none; }
-#sse-log-entries pre, #sse-log-entries code { font-size: 0.7rem; }
-#sse-log-entries { min-height: 50px; border: 1px dashed var(--border-dark); padding: 4px; }
+#ws-log-entries pre, #ws-log-entries code { font-size: 0.7rem; }
+#ws-log-entries { min-height: 50px; border: 1px dashed var(--border-dark); padding: 4px; }
 
 #stepperDrv-sg-threshold { font-size: 0.85rem; padding: 0.2rem 0.4rem; height: auto; }
 #stepperDrv-sg-threshold[readonly] { background: transparent; border: none; color: inherit; }
