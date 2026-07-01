@@ -46,7 +46,7 @@ For each rework cycle, extract:
 - Resolution
 
 ### Step 3: Generate Completion Report
-Write OKF v0.1 Markdown file at `docs/plans/completed/<filename>.md`.
+Write OKF v0.1 Markdown file in English at `docs/plans/completed/<filename>.md`.
 
 Sections:
 1. YAML frontmatter (OKF compliant: type `Plan`, title, description, tags, timestamp, status)
