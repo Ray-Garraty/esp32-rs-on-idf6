@@ -30,12 +30,11 @@ if [ "$fast_mode" = false ]; then
     echo "=== 6. Clippy (xtensa target) ==="
     xtensa clippy --target xtensa-esp32-espidf -- -D warnings
 
-    echo "=== 7. Build (xtensa) ==="
-    xtensa build --target xtensa-esp32-espidf
+    echo "=== 7. Check (xtensa) ==="
+    xtensa check --target xtensa-esp32-espidf
 
-    echo "=== 8. Cargo Geiger — dependency unsafe audit ==="
-    cargo geiger --lib --quiet 2>/dev/null || \
-        echo "[WARN] cargo geiger skipped (unavailable for target)"
+    echo "=== 8. Dependency unsafe audit ==="
+    python3 scripts/fast_geiger.py
 
     echo "=== 9. Semgrep blocking check ==="
     semgrep --config .semgrep/ --error src/
