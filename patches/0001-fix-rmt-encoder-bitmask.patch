@@ -1,0 +1,50 @@
+From: Aleksei Balandin <aleksei.balandin@protonmail.com>
+Date: Thu, 2 Jul 2026 16:52:54 +0300
+Subject: [PATCH] fix(rmt): use bitwise checks for rmt_encode_state_t (bitmask type)
+
+`rmt_encode_state_t` is a bitmask type (RESET=0, COMPLETE=1, MEM_FULL=2,
+WITH_EOF=4) where multiple flags can be set simultaneously, e.g. COMPLETE|MEM_FULL
+(value 3) when the signal exactly fills one RMT memory block (~1024 symbols).
+
+The previous `match` with exact-value matching would fall through to the
+`_ => panic!()` arm for combined states. Use bitwise `&` checks instead.
+
+---
+ src/rmt/encoder.rs | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/src/rmt/encoder.rs b/src/rmt/encoder.rs
+index abcdef1..1234567 100644
+--- a/src/rmt/encoder.rs
++++ b/src/rmt/encoder.rs
+@@ -76,15 +76,19 @@ impl From<EncoderState> for rmt_encode_state_t {
+ }
+ 
+ impl From<rmt_encode_state_t> for EncoderState {
++    #[allow(non_upper_case_globals)]
+     fn from(value: rmt_encode_state_t) -> Self {
+-        #[allow(non_upper_case_globals)]
+-        match value {
+-            rmt_encode_state_t_RMT_ENCODING_RESET => Self::EncodingReset,
+-            rmt_encode_state_t_RMT_ENCODING_COMPLETE => Self::EncodingComplete,
+-            rmt_encode_state_t_RMT_ENCODING_MEM_FULL => Self::EncodingMemoryFull,
+-            #[cfg(esp_idf_version_at_least_5_5_0)]
+-            rmt_encode_state_t_RMT_ENCODING_WITH_EOF => Self::EncodingWithEof,
+-            _ => panic!("Unknown rmt_encode_state_t value: {value}"),
++        // ecotiter-patch: rmt_encoder_bitmask — use bitwise checks for bitmask type
++        #[cfg(esp_idf_version_at_least_5_5_0)]
++        if value & rmt_encode_state_t_RMT_ENCODING_WITH_EOF != 0 {
++            return Self::EncodingWithEof;
+         }
++        if value & rmt_encode_state_t_RMT_ENCODING_MEM_FULL != 0 {
++            return Self::EncodingMemoryFull;
++        }
++        if value & rmt_encode_state_t_RMT_ENCODING_COMPLETE != 0 {
++            return Self::EncodingComplete;
++        }
++        Self::EncodingReset
+     }
+ }
+ 
+-- 
+2.34.1

@@ -30,10 +30,24 @@ lessons:
     trigger_patterns:
       - "Unknown rmt_encode_state_t"
     lesson: >
-      RMT encoder panic in esp-idf-hal v0.46. The CopyEncoder has a
-      non-exhaustive match on rmt_encode_state_t and panics on value 3.
-      This is a known esp-idf-hal bug. Workaround: ensure the RMT signal
-      buffer does not exceed 1024 symbols, or use a custom encoder.
-    diagnostic: none (known dependency bug)
-    fix: "Use signal.len() <= 1024 or implement custom RMT encoder"
-    refs: []
+      RMT encoder panic in esp-idf-hal v0.46 (commit 24e99b86).
+      rmt_encode_state_t is a BITMASK type (values: RESET=0, COMPLETE=1,
+      MEM_FULL=2, WITH_EOF=4) where multiple flags can be set at once.
+      The esp-idf-hal From<rmt_encode_state_t> implementation uses exact
+      match on individual values instead of bitwise tests, so combined
+      states like COMPLETE | MEM_FULL (value 3) fall through to panic.
+      Value 3 is NOT RMT_ENCODING_WITH_EOF (which is 4). The cfg guard
+      #[cfg(esp_idf_version_at_least_5_5_0)] works correctly — it handles
+      value 4; the issue is that value 3 is a different combined state.
+      This is triggered when the RMT signal size exactly fills one memory
+      block (~1024 symbols), causing the driver to return both COMPLETE
+      and MEM_FULL simultaneously.
+    diagnostic: none (known dependency bug in esp-idf-hal upstream code)
+    fix: >
+      Patch esp-idf-hal's From<rmt_encode_state_t> to use bitwise AND
+      instead of exact match, or update esp-idf-hal to a newer revision
+      that fixes this. APPLIED 2026-07-02: bitwise patch confirmed working
+      in git checkout at
+      ~/.cargo/git/checkouts/esp-idf-hal-*/24e99b8/src/rmt/encoder.rs.
+    refs:
+      - docs/crash_reports/rmt_encode_state_panic.md
