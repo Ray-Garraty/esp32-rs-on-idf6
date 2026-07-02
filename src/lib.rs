@@ -48,12 +48,18 @@ pub mod logger;
 pub mod infrastructure;
 
 #[cfg(target_arch = "xtensa")]
+pub mod esp_mutex;
+
+#[cfg(target_arch = "xtensa")]
 pub mod esp_safe;
 
 pub mod application;
 
 #[cfg(target_arch = "xtensa")]
 pub mod interface;
+
+#[cfg(target_arch = "xtensa")]
+pub mod motor_task;
 
 #[cfg(test)]
 mod regression_tests {

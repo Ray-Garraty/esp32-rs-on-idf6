@@ -29,14 +29,15 @@ Violation of this rule — any blocking call added to main loop — invalidates 
 
 # ESP32 Crash Investigation
 
-Any ESP32 crash (Guru Meditation, StoreProhibited, LoadProhibited, stack overflow, abort) requires **immediate investigation and fix** using tools described in [ESP-IDF Core Dump Guide](https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32/api-guides/core_dump.html).
+Any ESP32 crash (Guru Meditation, StoreProhibited, LoadProhibited, stack overflow, abort) is a RED ALERT situation and requires **immediate investigation and fix** using tools described in [ESP-IDF Core Dump Guide](https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32/api-guides/core_dump.html).
 
 Mandatory steps:
 1. Record EXCCAUSE, EXCVADDR, registers A0–A15, PC.
-2. Decode backtrace via `xtensa-esp32-elf-addr2line` or `espcoredump.py`.
+2. Decode backtrace via `xtensa-esp32-elf-addr2line` or `espcoredump.py`:
+` ~/.espressif/tools/xtensa-esp-elf/esp-15.2.0_20251204/xtensa-esp-elf/bin/xtensa-esp32-elf-addr2line -pfiaC -e target/xtensa-esp32-espidf/debug/ecotiter <insert backtrace code here>`
 3. If backtrace is corrupted — analyze registers: typical patterns are use-after-free (EXCVADDR = 0xFFFFFFA0, i.e. NULL + offset), stack overflow, buffer overflow.
 4. If crash is related to HTTP server — always check `stack_size` in `EspHttpServer::Configuration` first.
-5. Guru Meditation is never "one-time" or "pre-existing" — root cause must be found and fixed.
+5. Guru Meditation is never "one-time" or "pre-existing" — root cause must be found and fixed at once.
 
 # RMT Stepper API (esp-idf-hal v0.46, IDF v6)
 
@@ -92,7 +93,7 @@ Mandatory steps:
 
 # Unsafe Policy
 
-**Total unsafe blocks: 24** (Last audited: 2026-07-01, baseline in `scripts/check_unsafe.py`)
+**Total unsafe blocks: 30** (Last audited: 2026-07-02, baseline in `scripts/check_unsafe.py`)
 
 ## Modules with `#![forbid(unsafe_code)]`
 
@@ -104,7 +105,8 @@ list of safe leaf modules. These modules must never contain `unsafe` code.
 | File | Blocks | Reason |
 |------|--------|--------|
 | `infrastructure/storage/nvs.rs` | 13 | NVS FFI wrappers inside safe public API |
-| `esp_safe.rs` | 6 | Safe wrappers around ESP-IDF boot-time FFI calls |
+| `esp_mutex.rs` | 7 | ESP-IDF-safe mutex: `pthread_mutex_lock`/`unlock`/`trylock` + `unsafe impl Sync/Send` + `UnsafeCell` deref |
+| `esp_safe.rs` | 7 | Safe wrappers around ESP-IDF boot-time FFI calls |
 | `infrastructure/network/http_server.rs` | 2 | SSE raw-pointer `httpd_resp_send_chunk` (blocking handler pattern) |
 | `infrastructure/drivers/limitswitch.rs` | 1 | GPIO ISR `subscribe()` callback |
 | `infrastructure/drivers/onewire.rs` | 1 | `unsafe impl Send` for MMIO-based PinDriver |
@@ -118,5 +120,6 @@ list of safe leaf modules. These modules must never contain `unsafe` code.
 3. `cargo clippy --lib -- -D warnings` must pass (includes
    `undocumented_unsafe_blocks` lint and `unsafe_op_in_unsafe_fn`).
 4. `scripts/check_unsafe.py` runs on every commit — checks documentation + count baseline.
-6. Do NOT add `#[allow(unsafe_code)]` to override `forbid(unsafe_code)` in safe
+5. Do NOT add `#[allow(unsafe_code)]` to override `forbid(unsafe_code)` in safe
    modules.
+6. Avoid using unsafe code at all whenever possible

@@ -11,9 +11,8 @@
 //! - Captive portal routes redirect common probe URLs to /wifi.
 //! - WebUI routes serve the embedded HTML dashboard.
 
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// Global restart flag set by captive portal when WiFi credentials are saved.
 ///
@@ -22,108 +21,40 @@ use std::sync::{Arc, Mutex};
 pub static G_RESTART_PENDING: AtomicBool = AtomicBool::new(false);
 
 use embedded_svc::http::Method;
-use embedded_svc::ws::FrameType;
 
-use esp_idf_svc::http::server::{ws::EspHttpWsConnection, Configuration, EspHttpServer};
+use esp_idf_svc::http::server::{Configuration, EspHttpServer};
 
 use crate::config;
 use crate::domain::memory::HTTP_POST_BUF_SIZE;
-use crate::domain::memory::MAX_RESPONSE_SIZE;
 use crate::errors::NetworkError;
 use crate::infrastructure::network::wifi::WifiManager;
 use crate::interface::rest_api;
 use crate::interface::webui;
-use esp_idf_sys::{
-    httpd_handle_t, httpd_ws_frame_t, httpd_ws_send_frame_async,
-    httpd_ws_type_t_HTTPD_WS_TYPE_BINARY, httpd_ws_type_t_HTTPD_WS_TYPE_TEXT, EspError, ESP_FAIL,
-};
+
+// WS imports disabled for debugging — suspected cause of heap corruption.
+// If heap is stable, re-enable CONFIG_HTTPD_WS_SUPPORT=y and uncomment below:
+// use std::collections::BTreeMap;
+// use embedded_svc::ws::FrameType;
+// use esp_idf_svc::http::server::{ws::EspHttpWsConnection, Configuration, EspHttpServer};
+// use esp_idf_sys::{
+//     httpd_handle_t, httpd_ws_frame_t, httpd_ws_send_frame_async,
+//     httpd_ws_type_t_HTTPD_WS_TYPE_BINARY, httpd_ws_type_t_HTTPD_WS_TYPE_TEXT, EspError, ESP_FAIL,
+// };
 
 // `WifiManager` used with `'static` lifetime for `fn_handler` `Send` bound.
-type WifiMgr = Arc<Mutex<WifiManager<'static>>>;
+type WifiMgr = Arc<crate::esp_mutex::EspMutex<WifiManager<'static>>>;
 
-/// WebSocket sessions: session_id -> detached sender.
-/// Wrapped in `Mutex` for interior mutability (broadcast from main loop).
-static WS_SESSIONS: Mutex<BTreeMap<i32, WsSender>> = Mutex::new(BTreeMap::new());
+// WS_SESSIONS disabled for debugging — suspected cause of heap corruption.
+// static WS_SESSIONS: Mutex<BTreeMap<i32, WsSender>> = Mutex::new(BTreeMap::new());
 
 /// Broadcast a JSON event to all connected WebSocket clients.
-///
-/// Called from main loop (non-blocking — uses `try_lock()` per AGENTS.md
-/// Golden Rule). The event is wrapped in a JSON envelope:
-/// `{"event":"<type>","data":<payload>}`
-pub fn broadcast_websocket_event(event_type: &str, data: &str) {
-    let mut msg: heapless::String<{ MAX_RESPONSE_SIZE + 64 }> = heapless::String::new();
-    let _ = core::fmt::write(
-        &mut msg,
-        format_args!(r#"{{"event":"{event_type}","data":{data}}}"#),
-    );
-
-    if let Ok(mut sessions) = WS_SESSIONS.try_lock() {
-        // Remove closed sessions as we iterate
-        sessions.retain(|session_id, sender| {
-            if sender.is_closed() {
-                log::info!("WS: session {session_id} stale, removing");
-                false
-            } else if let Err(e) = sender.send(FrameType::Text(false), msg.as_bytes()) {
-                log::warn!("WS: session {session_id} send failed: {e:?}");
-                true // keep — might recover
-            } else {
-                true
-            }
-        });
-    }
+/// STUB — no-op while WebSocket is disabled for heap corruption debugging.
+pub const fn broadcast_websocket_event(_event_type: &str, _data: &str) {
+    // Intentionally empty: WS disabled for debugging.
 }
 
-/// Custom WebSocket sender using raw ESP-IDF async send.
-/// Replaces EspHttpWsDetachedSender (crate-private to esp-idf-svc).
-struct WsSender {
-    sd: httpd_handle_t,
-    fd: i32,
-    closed: Arc<AtomicBool>,
-}
-
-// SAFETY: WsSender is only used from the HTTP server task context.
-// httpd_handle_t (*mut c_void) is an opaque handle that is safe to move
-// between threads as long as only one thread accesses it at a time.
-// The Mutex on WS_SESSIONS ensures single-threaded access.
-unsafe impl Send for WsSender {}
-
-impl WsSender {
-    fn send(&self, frame_type: FrameType, frame_data: &[u8]) -> Result<(), EspError> {
-        if self.closed.load(Ordering::SeqCst) {
-            return Err(EspError::from_infallible::<{ ESP_FAIL }>());
-        }
-
-        let type_val = match frame_type {
-            FrameType::Binary(_) => httpd_ws_type_t_HTTPD_WS_TYPE_BINARY,
-            _ => httpd_ws_type_t_HTTPD_WS_TYPE_TEXT,
-        };
-
-        let frame = httpd_ws_frame_t {
-            type_: type_val,
-            final_: true,
-            fragmented: false,
-            payload: frame_data.as_ptr().cast_mut(),
-            len: frame_data.len(),
-        };
-
-        // SAFETY: httpd_ws_send_frame_async is an async FFI call safe from any
-        // thread (posts to httpd event loop). sd and fd are valid for the
-        // lifetime of this WsSender (removed from WS_SESSIONS on close).
-        let ret = unsafe {
-            httpd_ws_send_frame_async(self.sd, self.fd, core::ptr::from_ref(&frame).cast_mut())
-        };
-
-        if ret != 0 {
-            self.closed.store(true, Ordering::SeqCst);
-        }
-
-        EspError::convert(ret)
-    }
-
-    fn is_closed(&self) -> bool {
-        self.closed.load(Ordering::SeqCst)
-    }
-}
+// WsSender struct disabled for debugging.
+// struct WsSender { ... }
 
 /// HTTP server wrapper.
 pub struct HttpServer {
@@ -171,7 +102,8 @@ impl HttpServer {
 
         http.register_captive_routes(Arc::clone(&wifi_mgr))?;
         http.register_api_routes(Arc::clone(&wifi_mgr))?;
-        http.register_ws_routes()?;
+        // WS routes disabled for debugging — suspected cause of heap corruption.
+        // http.register_ws_routes()?;
         http.register_webui_routes()?;
 
         log::info!("HTTP: server started on port {}", config::HTTP_PORT);
@@ -487,62 +419,17 @@ impl HttpServer {
         Ok(())
     }
 
-    // ── WebSocket routes ──────────────────────────────────────────
+    // ── WebSocket routes (DISABLED for heap corruption debugging) ──
 
+    #[allow(
+        clippy::unnecessary_wraps,
+        clippy::needless_pass_by_ref_mut,
+        clippy::unused_self,
+        dead_code
+    )]
     fn register_ws_routes(&mut self) -> Result<(), NetworkError> {
-        self.server
-            .ws_handler(
-                "/ws/stream",
-                Some(""),
-                |connection: &mut EspHttpWsConnection| -> Result<(), EspError> {
-                    let session_id = connection.session();
-
-                    if connection.is_closed() {
-                        if let Ok(mut sessions) = WS_SESSIONS.lock() {
-                            if sessions.remove(&session_id).is_some() {
-                                log::info!(
-                                    "WS: session {session_id} closed ({} remaining)",
-                                    sessions.len()
-                                );
-                            }
-                        }
-                        return Ok(());
-                    }
-
-                    // Extract server handle (httpd_handle_t is Copy)
-                    let sd = match connection {
-                        EspHttpWsConnection::New(sd, _)
-                        | EspHttpWsConnection::Receiving(sd, _, _) => *sd,
-                        EspHttpWsConnection::Closed(_) => return Ok(()),
-                    };
-
-                    // Two-phase lock: check if session is new
-                    let is_new = WS_SESSIONS
-                        .lock()
-                        .is_ok_and(|s| !s.contains_key(&session_id));
-
-                    if is_new {
-                        log::info!("WS: new session, session={session_id}");
-                        let sender = WsSender {
-                            sd,
-                            fd: session_id,
-                            closed: Arc::new(AtomicBool::new(false)),
-                        };
-                        if let Ok(mut sessions) = WS_SESSIONS.lock() {
-                            sessions.insert(session_id, sender);
-                            log::info!(
-                                "WS: session {session_id} connected ({} total)",
-                                sessions.len()
-                            );
-                        }
-                    }
-
-                    Ok(())
-                },
-            )
-            .map_err(|_| NetworkError::HttpServerInitFailed)?;
-
-        log::info!("Registered Httpd server WS handler for URI \"/ws/stream\"");
+        // STUB: WS disabled. If heap is stable, re-enable WS and remove this.
+        log::warn!("register_ws_routes: WS disabled for debugging");
         Ok(())
     }
 

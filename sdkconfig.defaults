@@ -19,7 +19,7 @@ CONFIG_BT_NIMBLE_ACL_BUF_SIZE=256
 CONFIG_BT_NIMBLE_LOG_LEVEL_INFO=y
 CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768
 CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288
 
 # pthreads (Rust std::thread needs more stack for TLS init)
@@ -51,7 +51,8 @@ CONFIG_ESP_COEX_ENABLED=y
 # HTTP server — suppress WARN-level noise from client disconnects
 CONFIG_HTTPD_LOG_LEVEL=1
 CONFIG_ESP_HTTP_SERVER_LOG_LEVEL=1
-CONFIG_HTTPD_WS_SUPPORT=y
+# CONFIG_HTTPD_WS_SUPPORT is disabled — suspected cause of heap corruption at boot
+# CONFIG_HTTPD_WS_SUPPORT=y
 
 # TCP/IP (LWIP)
 CONFIG_LWIP_ENABLE_IPV6=n
@@ -60,3 +61,9 @@ CONFIG_ESP_NETIF_TCPIP_LWIP=y
 
 # BLE GAP device name (overrides NimBLE default "nimble")
 CONFIG_BT_NIMBLE_SVC_GAP_DEVICE_NAME="EcoTiter-"
+
+#
+# Exclude BT controller DRAM from heap to prevent TLSF metadata corruption.
+# BT region 0x3FFB0000-0x3FFBDB5C overlaps with DRAM heap A in memory_layout.c.
+# CONFIG_ESP32_IRAM_AS_DRAM=y restructures memory so this overlap doesn't occur.
+CONFIG_ESP32_IRAM_AS_DRAM=y

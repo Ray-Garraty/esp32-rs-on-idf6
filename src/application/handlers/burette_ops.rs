@@ -2,11 +2,20 @@
 //!
 //! Commands: fill, empty, doseVolume, rinse, stop, emergencyStop,
 //! getStatus, moveSteps, moveToStop, setDirection.
+//!
+//! Two-phase protocol:
+//! 1. Planner validates params.
+//! 2. If valid, send `BuretteCommand` via `cmd_tx` to the motor task.
+//! 3. Return `AckThen` immediately.
+//! 4. Motor task executes and sends completion response on `response_tx`.
 
 #![forbid(unsafe_code)]
 use crate::application::command::{
     Command, CommandHandler, CommandResponse, CompactJson, HandlerContext,
 };
+use crate::domain::burette::BuretteCommand;
+use crate::domain::channels::CommandWithId;
+use crate::domain::motor_state;
 use crate::domain::planner;
 use crate::domain::types::{Direction, Ml, MlMin};
 use crate::errors::AppError;
@@ -15,9 +24,6 @@ use core::fmt::Write as CoreWrite;
 /// Handler for burette operation commands.
 pub struct BuretteOpsHandler;
 
-// Handler trait requires Result<_, AppError>. All Phase 3 return Ok(stub);
-// Phase 5 will wire real hardware that can return Err.
-#[allow(clippy::unnecessary_wraps)]
 impl CommandHandler for BuretteOpsHandler {
     fn handle(
         &self,
@@ -26,17 +32,17 @@ impl CommandHandler for BuretteOpsHandler {
         id: u64,
     ) -> Result<CommandResponse, AppError> {
         match cmd {
-            Command::BuretteFill { speed_ml_min } => Ok(handle_fill(*speed_ml_min, id)),
-            Command::BuretteEmpty { speed_ml_min } => Ok(handle_empty(*speed_ml_min, id)),
+            Command::BuretteFill { speed_ml_min } => Ok(handle_fill(ctx, *speed_ml_min, id)),
+            Command::BuretteEmpty { speed_ml_min } => Ok(handle_empty(ctx, *speed_ml_min, id)),
             Command::BuretteDoseVolume { ml, speed_ml_min } => {
                 Ok(handle_dose_volume(ctx, *ml, *speed_ml_min, id))
             }
             Command::BuretteRinse {
                 cycles,
                 speed_ml_min,
-            } => Ok(handle_rinse(*cycles, *speed_ml_min, id)),
-            Command::BuretteStop => Ok(handle_stop(id)),
-            Command::BuretteEmergencyStop => Ok(handle_emergency_stop(id)),
+            } => Ok(handle_rinse(ctx, *cycles, *speed_ml_min, id)),
+            Command::BuretteStop => Ok(handle_stop(ctx, id)),
+            Command::BuretteEmergencyStop => Ok(handle_emergency_stop(ctx, id)),
             Command::BuretteGetStatus => Ok(handle_get_status(id)),
             Command::BuretteMoveSteps { .. } => Ok(handle_move_steps(id)),
             Command::BuretteMoveToStop { .. } => Ok(handle_move_to_stop(id)),
@@ -48,7 +54,18 @@ impl CommandHandler for BuretteOpsHandler {
     }
 }
 
-fn handle_fill(speed_ml_min: f32, id: u64) -> CommandResponse {
+/// Send a `BuretteCommand` with its request ID via `cmd_tx`.
+///
+/// Returns `true` if the command was sent successfully, `false` otherwise.
+fn send_command(ctx: &HandlerContext<'_>, cmd: &BuretteCommand, id: u64) -> bool {
+    let wrapped = CommandWithId {
+        cmd: cmd.clone(),
+        id,
+    };
+    ctx.channels.cmd_tx.send(wrapped).is_ok()
+}
+
+fn handle_fill(ctx: &HandlerContext<'_>, speed_ml_min: f32, id: u64) -> CommandResponse {
     let plan = planner::plan_fill(MlMin(speed_ml_min), false);
     if plan.action == planner::SimpleAction::Reject {
         let reason = plan.reject_reason.unwrap_or("invalid_params");
@@ -57,18 +74,43 @@ fn handle_fill(speed_ml_min: f32, id: u64) -> CommandResponse {
             message: reason,
         };
     }
+    // Send command to motor task (best-effort on host where no motor task exists)
+    if !send_command(
+        ctx,
+        &BuretteCommand::Fill {
+            speed: MlMin(speed_ml_min),
+        },
+        id,
+    ) {
+        return CommandResponse::Error {
+            id,
+            message: "motor_channel_full",
+        };
+    }
     let mut ack: CompactJson = CompactJson::new();
     let _ = write!(ack, r#"{{"action":"fill"}}"#);
     CommandResponse::AckThen { id, ack }
 }
 
-fn handle_empty(speed_ml_min: f32, id: u64) -> CommandResponse {
+fn handle_empty(ctx: &HandlerContext<'_>, speed_ml_min: f32, id: u64) -> CommandResponse {
     let plan = planner::plan_empty(MlMin(speed_ml_min), false);
     if plan.action == planner::SimpleAction::Reject {
         let reason = plan.reject_reason.unwrap_or("invalid_params");
         return CommandResponse::Error {
             id,
             message: reason,
+        };
+    }
+    if !send_command(
+        ctx,
+        &BuretteCommand::Empty {
+            speed: MlMin(speed_ml_min),
+        },
+        id,
+    ) {
+        return CommandResponse::Error {
+            id,
+            message: "motor_channel_full",
         };
     }
     let mut ack: CompactJson = CompactJson::new();
@@ -96,6 +138,19 @@ fn handle_dose_volume(
             message: reason,
         };
     }
+    if !send_command(
+        ctx,
+        &BuretteCommand::Dose {
+            volume: Ml(ml),
+            speed: MlMin(speed_ml_min),
+        },
+        id,
+    ) {
+        return CommandResponse::Error {
+            id,
+            message: "motor_channel_full",
+        };
+    }
     let action_label = if plan.action == planner::DoseAction::FillFirst {
         "fill_first"
     } else {
@@ -110,7 +165,12 @@ fn handle_dose_volume(
     CommandResponse::AckThen { id, ack }
 }
 
-fn handle_rinse(cycles: u8, speed_ml_min: f32, id: u64) -> CommandResponse {
+fn handle_rinse(
+    ctx: &HandlerContext<'_>,
+    cycles: u8,
+    speed_ml_min: f32,
+    id: u64,
+) -> CommandResponse {
     let plan = planner::plan_rinse(cycles, MlMin(speed_ml_min), false);
     if plan.action == planner::SimpleAction::Reject {
         let reason = plan.reject_reason.unwrap_or("invalid_params");
@@ -119,12 +179,29 @@ fn handle_rinse(cycles: u8, speed_ml_min: f32, id: u64) -> CommandResponse {
             message: reason,
         };
     }
+    if !send_command(
+        ctx,
+        &BuretteCommand::Rinse {
+            cycles,
+            speed: MlMin(speed_ml_min),
+        },
+        id,
+    ) {
+        return CommandResponse::Error {
+            id,
+            message: "motor_channel_full",
+        };
+    }
     let mut ack: CompactJson = CompactJson::new();
     let _ = write!(ack, r#"{{"action":"rinse","cycles":{}}}"#, plan.cycles);
     CommandResponse::AckThen { id, ack }
 }
 
-fn handle_stop(id: u64) -> CommandResponse {
+fn handle_stop(ctx: &HandlerContext<'_>, id: u64) -> CommandResponse {
+    let _ = ctx.channels.cmd_tx.send(CommandWithId {
+        cmd: BuretteCommand::Stop,
+        id,
+    });
     let mut data: CompactJson = CompactJson::new();
     let _ = write!(data, r#"{{"action":"stopping"}}"#);
     CommandResponse::Single {
@@ -134,7 +211,11 @@ fn handle_stop(id: u64) -> CommandResponse {
     }
 }
 
-fn handle_emergency_stop(id: u64) -> CommandResponse {
+fn handle_emergency_stop(ctx: &HandlerContext<'_>, id: u64) -> CommandResponse {
+    let _ = ctx.channels.cmd_tx.send(CommandWithId {
+        cmd: BuretteCommand::EmergencyStop,
+        id,
+    });
     let mut data: CompactJson = CompactJson::new();
     let _ = write!(data, r#"{{"action":"emergency_stopped"}}"#);
     CommandResponse::Single {
@@ -145,10 +226,12 @@ fn handle_emergency_stop(id: u64) -> CommandResponse {
 }
 
 fn handle_get_status(id: u64) -> CommandResponse {
+    let sts = motor_state::get_broadcast_sts();
+    let vol = motor_state::get_current_volume_ml();
     let mut data: CompactJson = CompactJson::new();
     let _ = write!(
         data,
-        r#"{{"state":"idle","vol_ml":0.0,"operation":"none"}}"#
+        r#"{{"state":"{sts}","vol_ml":{vol:.2},"operation":"unknown"}}"#,
     );
     CommandResponse::Single {
         id,
@@ -202,13 +285,18 @@ mod tests {
     use super::*;
     use crate::domain::calibration::CalibrationConfig;
     use crate::domain::channels::SystemChannels;
+    use std::sync::mpsc;
 
     fn test_ctx() -> HandlerContext<'static> {
         let channels = Box::leak(Box::new(SystemChannels::new()));
         let cal_config = Box::leak(Box::new(CalibrationConfig::new()));
+        let (tx, _rx) = mpsc::sync_channel(1);
+        let response_tx: &'static mpsc::SyncSender<(u64, CommandResponse)> =
+            Box::leak(Box::new(tx));
         HandlerContext {
             channels,
             cal_config,
+            response_tx,
         }
     }
 

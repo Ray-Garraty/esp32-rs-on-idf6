@@ -45,6 +45,22 @@ pub fn suppress_httpd_txrx_logs() {
     }
 }
 
+/// Check integrity of all heap regions using `heap_caps_check_integrity_all`.
+///
+/// Prints errors if corruption is found.
+pub fn check_heap_integrity() {
+    // SAFETY:
+    //   Invariant: heap_caps_check_integrity_all is a read-only diagnostic call.
+    //   Context: safe after FreeRTOS scheduler init.
+    //   Risk: none — read-only traversal, no side effects.
+    let ok = unsafe { esp_idf_sys::heap_caps_check_integrity_all(true) };
+    if ok {
+        log::info!("Heap integrity OK");
+    } else {
+        log::error!("HEAP CORRUPTION DETECTED!");
+    }
+}
+
 /// Read boot-time heap statistics.
 ///
 /// Returns `(free_heap_bytes, largest_free_block_bytes)`.

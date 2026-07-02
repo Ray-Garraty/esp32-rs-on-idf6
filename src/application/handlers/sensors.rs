@@ -44,6 +44,13 @@ impl CommandHandler for SensorsHandler {
 
 fn handle_temp_read(id: u64) -> CommandResponse {
     let mut data: CompactJson = CompactJson::new();
+    #[cfg(target_arch = "xtensa")]
+    if let Some(t) = crate::infrastructure::drivers::onewire::temp_celsius() {
+        let _ = write!(data, r#"{{"celsius":{t:.1}}}"#);
+    } else {
+        let _ = write!(data, r#"{{"celsius":null}}"#);
+    }
+    #[cfg(not(target_arch = "xtensa"))]
     let _ = write!(data, r#"{{"celsius":null}}"#);
     CommandResponse::Single {
         id,
@@ -151,13 +158,18 @@ mod tests {
     use super::*;
     use crate::domain::calibration::CalibrationConfig;
     use crate::domain::channels::SystemChannels;
+    use std::sync::mpsc;
 
     fn test_ctx() -> HandlerContext<'static> {
         let channels = Box::leak(Box::new(SystemChannels::new()));
         let cal_config = Box::leak(Box::new(CalibrationConfig::new()));
+        let (tx, _rx) = mpsc::sync_channel(1);
+        let response_tx: &'static mpsc::SyncSender<(u64, CommandResponse)> =
+            Box::leak(Box::new(tx));
         HandlerContext {
             channels,
             cal_config,
+            response_tx,
         }
     }
 

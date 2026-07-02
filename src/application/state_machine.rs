@@ -17,6 +17,9 @@ pub struct ApplicationStateMachine {
     pub burette: BuretteState,
     /// Current transport state.
     pub transport: TransportState,
+    /// Monotonic timestamp (ms) when the last pending operation started.
+    /// `0` means no operation is pending / timestamp unset.
+    pub started_at_ms: u64,
 }
 
 impl ApplicationStateMachine {
@@ -25,6 +28,7 @@ impl ApplicationStateMachine {
         Self {
             burette: BuretteState::Idle,
             transport: TransportState::UsbActive,
+            started_at_ms: 0,
         }
     }
 
@@ -41,6 +45,23 @@ impl ApplicationStateMachine {
     /// Returns `true` if the application is in a ready state (burette idle).
     pub const fn is_ready(&self) -> bool {
         self.burette.is_idle()
+    }
+
+    /// Record the timestamp when a pending operation started.
+    pub const fn update_timestamp(&mut self, ms: u64) {
+        self.started_at_ms = ms;
+    }
+
+    /// Check whether the pending operation has exceeded `timeout_ms`.
+    ///
+    /// Returns `false` if `started_at_ms` is 0 (no pending operation).
+    pub const fn is_expired(&self, now_ms: u64, timeout_ms: u64) -> bool {
+        self.started_at_ms != 0 && now_ms.wrapping_sub(self.started_at_ms) > timeout_ms
+    }
+
+    /// Reset the timestamp to 0 (no pending operation).
+    pub const fn reset_timestamp(&mut self) {
+        self.started_at_ms = 0;
     }
 }
 

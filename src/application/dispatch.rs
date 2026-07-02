@@ -88,14 +88,19 @@ mod tests {
     use super::*;
     use crate::domain::calibration::CalibrationConfig;
     use crate::domain::channels::SystemChannels;
+    use std::sync::mpsc;
 
     /// Helper: create a minimal HandlerContext for testing.
     fn test_ctx() -> HandlerContext<'static> {
         let channels = Box::leak(Box::new(SystemChannels::new()));
         let cal_config = Box::leak(Box::new(CalibrationConfig::new()));
+        let (tx, _rx) = mpsc::sync_channel(1);
+        let response_tx: &'static mpsc::SyncSender<(u64, CommandResponse)> =
+            Box::leak(Box::new(tx));
         HandlerContext {
             channels,
             cal_config,
+            response_tx,
         }
     }
 

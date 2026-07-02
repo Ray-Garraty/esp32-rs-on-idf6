@@ -7,7 +7,7 @@
 
 use core::fmt::Write as FmtWrite;
 use log::{Level, LevelFilter, Log, Metadata, Record};
-use std::sync::Mutex;
+use crate::esp_mutex::EspMutex;
 
 use heapless::Deque;
 
@@ -48,11 +48,11 @@ impl Default for RingBuffer {
 }
 
 static LOGGER: Logger = Logger {
-    inner: Mutex::new(RingBuffer::new()),
+    inner: EspMutex::new(RingBuffer::new()),
 };
 
 struct Logger {
-    inner: Mutex<RingBuffer>,
+    inner: EspMutex<RingBuffer>,
 }
 
 impl Log for Logger {

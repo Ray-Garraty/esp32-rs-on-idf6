@@ -42,6 +42,7 @@ Cross-reference implementation against `docs/refs/coding_style.md` — specifica
 - **Types**: newtype wrappers (`Steps`, `Hz`, `Ml`), named constants, no magic numbers
 - **Unsafe**: every `unsafe` block has a `// SAFETY:` comment (see Step 4 below)
 - **Thread stacks**: motor 4KB, main 16KB, temp 16KB, BLE 8KB, HTTP 12KB
+- **Linter and Compiler Warnings Suppressions** - suppression should be avoided. If not possible, they must be provided with clear justification comment. No uncommented suppressions are allowed!
 
 ### Step 4: Safety & Correctness
 

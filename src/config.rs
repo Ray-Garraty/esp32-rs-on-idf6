@@ -67,7 +67,7 @@ pub const ZOMBIE_NOTIFY_FAIL_LIMIT: u32 = 5;
 /// Main loop task (FreeRTOS `main`). Set via sdkconfig CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384.
 pub const MAIN_TASK_STACK: usize = 16384;
 /// Dedicated motor thread (RMT stepper control).
-pub const MOTOR_THREAD_STACK: usize = 4096;
+pub const MOTOR_THREAD_STACK: usize = 8192;
 /// DS18B20 bitbang temperature thread.
 pub const TEMP_THREAD_STACK: usize = 16384;
 /// BLE GATT notify thread (recv + conditionally notify — simple loop).
@@ -120,6 +120,24 @@ pub const WS_LIMITSW_INTERVAL_TICKS: u64 = 100;
 
 /// Interval in ticks for periodic log output (100 ticks × 10 ms = 1 s).
 pub const LOG_INTERVAL_TICKS: u64 = 100;
+
+// ── Motor task ────────────────────────────────────────────────
+/// Homing timeout in milliseconds (120 seconds).
+pub const HOMING_TIMEOUT_MS: u64 = 120_000;
+/// Maximum steps for homing ramp. Homing only needs to reach the limit
+/// switch, not traverse the full burette volume. This caps the `Vec`
+/// allocation at ~40 KB (10 000 × 4 bytes) instead of ~250 KB.
+pub const HOMING_MAX_STEPS: u32 = 10_000;
+/// Command watchdog timeout in milliseconds (60 seconds).
+pub const WATCHDOG_CMD_TIMEOUT_MS: u64 = 60_000;
+/// USB alive timeout in milliseconds (10 seconds without data → fallback).
+pub const USB_ALIVE_TIMEOUT_MS: u64 = 10_000;
+/// Motor task idle sleep in milliseconds.
+pub const MOTOR_IDLE_SLEEP_MS: u64 = 10;
+/// Homing step frequency in Hz.
+pub const HOMING_SPEED_HZ: u32 = 1500;
+/// Maximum number of pending responses (backpressure limit).
+pub const MAX_PENDING_RESPONSES: usize = 4;
 
 #[cfg(test)]
 mod tests {

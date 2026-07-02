@@ -7,5 +7,6 @@ pub mod dns;
 pub mod driver_traits;
 pub mod logging;
 pub mod memory;
+pub mod motor_state;
 pub mod planner;
 pub mod types;

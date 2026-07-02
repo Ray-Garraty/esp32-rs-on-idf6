@@ -1,6 +1,10 @@
 //! Handlers for valve commands (2 commands).
 //!
 //! Commands: valve.setPosition, valve.getState.
+//!
+//! Uses the global valve state from `infrastructure::drivers::valve` for
+//! lock-free reads and GPIO writes (xtensa-only). On host, uses local
+//! stubs for testing.
 
 #![forbid(unsafe_code)]
 use crate::application::command::{
@@ -10,12 +14,37 @@ use crate::domain::types::ValvePosition;
 use crate::errors::AppError;
 use core::fmt::Write as CoreWrite;
 
+// Import real valve globals on xtensa; use local stubs on host.
+#[cfg(target_arch = "xtensa")]
+use crate::infrastructure::drivers::valve as valve_drv;
+
+#[cfg(not(target_arch = "xtensa"))]
+mod valve_drv {
+    use crate::domain::types::ValvePosition;
+    use core::sync::atomic::{AtomicU8, Ordering};
+
+    static GLOBAL_VALVE_POSITION: AtomicU8 = AtomicU8::new(0);
+
+    pub fn set_global_valve_position(pos: ValvePosition) {
+        let disc: u8 = match pos {
+            ValvePosition::Input => 0,
+            ValvePosition::Output => 1,
+        };
+        GLOBAL_VALVE_POSITION.store(disc, Ordering::Release);
+    }
+
+    pub fn get_global_valve_position() -> ValvePosition {
+        let disc = GLOBAL_VALVE_POSITION.load(Ordering::Acquire);
+        match disc {
+            0 => ValvePosition::Input,
+            _ => ValvePosition::Output,
+        }
+    }
+}
+
 /// Handler for valve commands.
 pub struct ValveHandler;
 
-// Handler trait requires Result<_, AppError>. All Phase 3 return Ok(stub);
-// Phase 5 will wire real hardware that can return Err.
-#[allow(clippy::unnecessary_wraps)]
 impl CommandHandler for ValveHandler {
     fn handle(
         &self,
@@ -40,6 +69,8 @@ fn handle_set_position(position: Option<ValvePosition>, id: u64) -> CommandRespo
             message: "missing position",
         };
     };
+    // Update global valve state (atomic + GPIO via try_lock)
+    valve_drv::set_global_valve_position(pos);
     let pos_str = pos.as_str();
     let mut data: CompactJson = CompactJson::new();
     let _ = write!(data, r#"{{"position":"{pos_str}"}}"#);
@@ -51,8 +82,10 @@ fn handle_set_position(position: Option<ValvePosition>, id: u64) -> CommandRespo
 }
 
 fn handle_get_state(id: u64) -> CommandResponse {
+    let pos = valve_drv::get_global_valve_position();
+    let pos_str = pos.as_str();
     let mut data: CompactJson = CompactJson::new();
-    let _ = write!(data, r#"{{"position":"input"}}"#);
+    let _ = write!(data, r#"{{"position":"{pos_str}"}}"#);
     CommandResponse::Single {
         id,
         status: "ok",
@@ -65,13 +98,18 @@ mod tests {
     use super::*;
     use crate::domain::calibration::CalibrationConfig;
     use crate::domain::channels::SystemChannels;
+    use std::sync::mpsc;
 
     fn test_ctx() -> HandlerContext<'static> {
         let channels = Box::leak(Box::new(SystemChannels::new()));
         let cal_config = Box::leak(Box::new(CalibrationConfig::new()));
+        let (tx, _rx) = mpsc::sync_channel(1);
+        let response_tx: &'static mpsc::SyncSender<(u64, CommandResponse)> =
+            Box::leak(Box::new(tx));
         HandlerContext {
             channels,
             cal_config,
+            response_tx,
         }
     }
 

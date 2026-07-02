@@ -14,6 +14,7 @@ use crate::errors::AppError;
 use core::fmt::Write as CoreWrite;
 use heapless::String as HString;
 use serde::Deserialize;
+use std::sync::mpsc;
 
 // ── Compact JSON buffer ───────────────────────────────────────
 
@@ -211,12 +212,16 @@ impl CommandResponse {
 
 /// Shared context passed to every command handler.
 ///
-/// Provides access to system channels and calibration configuration.
+/// Provides access to system channels, calibration configuration,
+/// and the response channel for two-phase command completion.
 pub struct HandlerContext<'a> {
     /// Inter-task communication channels.
     pub channels: &'a SystemChannels,
     /// Current calibration configuration.
     pub cal_config: &'a CalibrationConfig,
+    /// Response sender for two-phase command completion.
+    /// The motor task sends `(cmd_id, CommandResponse)` here after execution.
+    pub response_tx: &'a mpsc::SyncSender<(u64, CommandResponse)>,
 }
 
 // ── Command handler trait ─────────────────────────────────────
