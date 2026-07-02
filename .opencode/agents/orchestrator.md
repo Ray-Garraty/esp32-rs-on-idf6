@@ -163,6 +163,33 @@ The AC will have `requires_hardware: true` with `user_instructions`:
 3. Record user's own words as evidence
 4. If user declines → mark as `deferred` with reason
 
+### Step 4.6: Crash Investigation
+
+If hardware validation reveals a crash (Guru Meditation, WDT reset, Rust panic,
+stack overflow, boot failure), invoke @debugger for systematic root cause analysis:
+
+```
+Task(@debugger, "ROOT CAUSE ANALYSIS — edits allowed for diagnostics
+Crash dump:
+<paste Guru Meditation or Rust panic dump>
+known_good: <commit hash of last known-good build>")
+```
+
+**IMPORTANT:** Always include "edits allowed for diagnostics" in the task
+description — @debugger needs to insert `[INVESTIGATION]` instrumentation,
+modify sdkconfig, create smoke test binaries, etc.
+
+The @debugger agent will:
+1. Run `scripts/crash_analyzer.py` on the crash dump
+2. Execute S1–S5 Occam's Razor Protocol (see `protocols/embedded_boot_crash.md`)
+3. Isolate root cause via systematic elimination
+4. If trivial fix (<10 lines) — apply it directly with `[INVESTIGATION]` markers
+5. If complex fix — produce a CrashReport with spec for @implementer
+6. Write a CrashReport to `docs/crash_reports/`
+7. Update `docs/lessons_learned.yaml` with new findings
+
+**Do NOT** attempt to diagnose the crash yourself — delegate entirely to @debugger.
+
 ### Step 5: Code Review
 
 Invoke `reviewer` with implementation and validation reports:
@@ -216,6 +243,6 @@ Present the commit message and completion summary. Ask if the user wants to proc
 | @validator | ImplementationReport from @implementer |
 | @reviewer  | ValidationReport from @validator |
 | @reporter  | ALL previous artifacts |
-| @debugger  | Guru Meditation dump or symptom description |
+| @debugger  | Crash dump or symptom description (see Step 4.6 for calling convention) |
 
 ❌ If prerequisite is missing → DO NOT CALL the agent.
