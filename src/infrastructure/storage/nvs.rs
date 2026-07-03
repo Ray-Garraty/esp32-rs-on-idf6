@@ -17,6 +17,7 @@
 //! | `adc` | `coeff_b` | f32 (→ u32) | ADC calibration offset |
 //! | `wifi` | `ssid` | string | WiFi SSID (max 32 bytes) |
 //! | `wifi` | `password` | string | WiFi password (max 64 bytes) |
+//! | `stallguard` | `threshold` | u32 | StallGuard threshold (0-255) |
 //!
 //! # Error Handling
 //!
@@ -366,6 +367,31 @@ impl Drop for NvsManager {
             nvs_close(self.handle);
         }
     }
+}
+
+// ── Namespace convenience functions ──────────────────────────────
+
+const NS_STALLGUARD: &str = "stallguard";
+const KEY_SG_THRESHOLD: &str = "threshold";
+const DEFAULT_SG_THRESHOLD: u32 = 0;
+
+/// Read the StallGuard threshold from NVS.
+///
+/// Returns `DEFAULT_SG_THRESHOLD` (0) if not set.
+pub fn stallguard_read_threshold() -> u8 {
+    // Threshold is always 0-255, safe to truncate from u32
+    #[allow(clippy::cast_possible_truncation)]
+    let threshold = NvsManager::open(NS_STALLGUARD, false)
+        .ok()
+        .and_then(|mgr| mgr.read_u32(KEY_SG_THRESHOLD).ok().flatten())
+        .unwrap_or(DEFAULT_SG_THRESHOLD) as u8;
+    threshold
+}
+
+/// Write the StallGuard threshold to NVS.
+pub fn stallguard_write_threshold(value: u8) -> Result<(), ResourceError> {
+    let mgr = NvsManager::open(NS_STALLGUARD, true)?;
+    mgr.write_u32(KEY_SG_THRESHOLD, u32::from(value))
 }
 
 // ── Tests ──────────────────────────────────────────────────────

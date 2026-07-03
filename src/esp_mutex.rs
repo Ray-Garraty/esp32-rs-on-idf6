@@ -51,9 +51,7 @@ impl<T> EspMutex<T> {
     pub fn lock(&self) -> Result<EspMutexGuard<'_, T>, ()> {
         // SAFETY: `handle` is a valid `pthread_mutex_t` initialized to the
         // ESP-IDF sentinel `0xFFFFFFFF`. The first lock triggers lazy init.
-        let r = unsafe {
-            esp_idf_sys::pthread_mutex_lock(self.handle.get().cast())
-        };
+        let r = unsafe { esp_idf_sys::pthread_mutex_lock(self.handle.get().cast()) };
         if r == 0 {
             Ok(EspMutexGuard { mutex: self })
         } else {
@@ -64,9 +62,7 @@ impl<T> EspMutex<T> {
     /// Non-blocking lock attempt. Returns `Err(())` if the mutex is already held.
     pub fn try_lock(&self) -> Result<EspMutexGuard<'_, T>, ()> {
         // SAFETY: Same as `lock()` — valid sentinel-initialized handle.
-        let r = unsafe {
-            esp_idf_sys::pthread_mutex_trylock(self.handle.get().cast())
-        };
+        let r = unsafe { esp_idf_sys::pthread_mutex_trylock(self.handle.get().cast()) };
         if r == 0 {
             Ok(EspMutexGuard { mutex: self })
         } else {
@@ -85,9 +81,7 @@ impl<T> Drop for EspMutexGuard<'_, T> {
         // SAFETY: We hold the lock, so the mutex is in a valid locked state
         // and `pthread_mutex_unlock` is safe to call.
         unsafe {
-            esp_idf_sys::pthread_mutex_unlock(
-                self.mutex.handle.get().cast(),
-            );
+            esp_idf_sys::pthread_mutex_unlock(self.mutex.handle.get().cast());
         }
     }
 }

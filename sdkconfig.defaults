@@ -51,8 +51,7 @@ CONFIG_ESP_COEX_ENABLED=y
 # HTTP server — suppress WARN-level noise from client disconnects
 CONFIG_HTTPD_LOG_LEVEL=1
 CONFIG_ESP_HTTP_SERVER_LOG_LEVEL=1
-# CONFIG_HTTPD_WS_SUPPORT is disabled — suspected cause of heap corruption at boot
-# CONFIG_HTTPD_WS_SUPPORT=y
+CONFIG_HTTPD_WS_SUPPORT=y
 
 # TCP/IP (LWIP)
 CONFIG_LWIP_ENABLE_IPV6=n

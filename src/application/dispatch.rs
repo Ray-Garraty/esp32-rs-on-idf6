@@ -42,9 +42,9 @@ pub fn dispatch(
         Command::SerialPing => serial.handle(ctx, cmd, id),
 
         // ── System ──
-        Command::SystemGetStatus | Command::SystemGetFormattedLogs | Command::SystemReadLog => {
-            system.handle(ctx, cmd, id)
-        }
+        Command::SystemGetStatus
+        | Command::SystemGetFormattedLogs { .. }
+        | Command::SystemReadLog { .. } => system.handle(ctx, cmd, id),
 
         // ── Burette operations ──
         Command::BuretteFill { .. }

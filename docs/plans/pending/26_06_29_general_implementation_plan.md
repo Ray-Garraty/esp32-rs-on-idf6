@@ -6,6 +6,7 @@ tags: [plan, implementation, firmware, esp32, production, audit]
 timestamp: 2026-06-29
 status: active
 audit_date: 2026-07-03
+last_session: 2026-07-03
 phases_completed: [0, 1, 2]
 phases_partial: [3]
 phases_implemented_ahead: [4, 5]
@@ -20,30 +21,31 @@ phases_implemented_ahead: [4, 5]
 | 0 — Scaffold + Build Pipeline | ✅ COMPLETED | 2026-06-30 | `docs/plans/completed/26_06_30_phase0_scaffold_report.md`. Minor: brownout via `sdkconfig`, not `WRITE_PERI_REG`. |
 | 1 — Domain Pure Business Logic | ✅ COMPLETED | 2026-06-30 | `docs/plans/completed/26_06_30_phase_1_domain.md`. Minor: `calculate_speed_calibration()` uses OLS-through-mean (legacy-compat), not OLS-through-origin as described. |
 | 2 — Infrastructure Hardware Drivers | ✅ COMPLETED | 2026-06-30 | `docs/plans/completed/26_06_30_phase2_infrastructure_report.md`. **Gaps:** ADC stabilization logic not implemented; `stallguard` NVS namespace not wired. |
-| 3 — Application | ⚠️ PARTIAL | 2026-07-03 | **Major gaps:** SSE `/api/events` = no-op; REST stubs (`/api/command`, `/api/valve/*`); 5 command param mismatches with frozen API; pending cal state machines missing; Homing SM missing from state_machine.rs; `panic!()` in production code (4 violations). |
-| 4 — Network | ✅ IMPLEMENTED (ahead) | 2026-07-03 | WiFi (AP/STA/DNS/captive portal), BLE (NUS, zombie defense, coexistence) all functional. Minor: BLE notify thread body is TODO stub. |
+| 3 — Application | ⚠️ PARTIAL | 2026-07-03 | **Fixed 2026-07-03:** 5 command param mismatches ✅, `panic!()` removed ✅, `DELETE /api/logs` wired ✅, `stallguard` NVS wired ✅, build.rs clippy fixed ✅. **Remaining:** REST stubs (`/api/command`, `/api/valve/*`), pending cal state machines, Homing SM. |
+| 4 — Network | ✅ IMPLEMENTED (ahead) | 2026-07-03 | WiFi (AP/STA/DNS/captive portal), BLE (NUS, zombie defense, coexistence) all functional. **WebSocket restored 2026-07-03** from commit `08c0cab` — `CONFIG_HTTPD_WS_SUPPORT=y` re-enabled, `broadcast_websocket_event()` functional, `WsSender` with session-ID tracking. Minor: BLE notify thread body is TODO stub. |
 | 5 — Integration | ✅ IMPLEMENTED (ahead) | 2026-07-03 | `motor_task.rs` (fill/empty/dose/rinse/stop/emergencyStop), full main loop (ADC, UART, WiFi, BLE, transport SM, watchdog, LED). Homing at boot implemented (but as hardcoded sequence, not SM). PendingOpsManager + 60s watchdog present. |
 | 6 — TMC2209 UART Driver | ⏳ DEFERRED | — | Files not created (expected). |
 | 7 — Tauri Client | ⏳ PENDING | — | Separate repo — no firmware-side code required per plan. |
 
 ## Audit Results (2026-07-03)
 
-Codebase audit conducted via `explore` sub-agent reviewing all `src/` files against plan items. Full report in agent output (task: `ses_0d824890cffeTdqNhmUVMcVt2P`). **279 total `#[test]` attributes** found.
+Codebase audit conducted via `explore` sub-agent reviewing all `src/` files against plan items. Full report in agent output (task: `ses_0d824890cffeTdqNhmUVMcVt2P`). **245 total tests** (as of 2026-07-03 session end).
 
 ### Key Gaps (must fix before production)
 
-| # | Issue | Severity | File(s) |
-|---|-------|----------|---------|
-| 1 | **SSE `/api/events` is no-op** — `broadcast_websocket_event()` does nothing. SSE streaming non-functional. | 🔴 CRITICAL | `interface/rest_api.rs` |
-| 2 | **5 command param signatures deviate from frozen Serial API**: `cal.calcVolume`, `cal.calcSpeed`, `system.getFormattedLogs`, `system.readLog`, `burette.moveToStop` | 🔴 CRITICAL | `application/command.rs` |
-| 3 | **REST handlers are stubs** — `/api/command`, `/api/valve/set`, `/api/valve/state` return placeholder responses, don't call real dispatch/drivers | 🔴 CRITICAL | `interface/rest_api.rs` |
-| 4 | **Pending calibration state machines missing** — `PENDING_CAL_DOSE`, `PENDING_CAL_SPEED`, `PENDING_CAL_SPEED_SEQ` not modelled | 🟡 MAJOR | `application/state_machine.rs` |
-| 5 | **ADC stabilization logic not implemented** — plan describes 10-attempt, 5mV-window, 32-sample median | 🟡 MAJOR | `infrastructure/drivers/adc.rs` |
-| 6 | **`panic!()` in production code** — 4 violations (main.rs:300, 314 channel disconnect panics) | 🟡 MAJOR | `main.rs` |
-| 7 | **BLE notify thread body is TODO** — notifications not sent | 🟡 MAJOR | `infrastructure/network/ble.rs` |
-| 8 | **Homing not a state machine** — hardcoded in main.rs instead of `state_machine.rs` | 🟢 MINOR | `main.rs` |
-| 9 | **`stallguard` NVS namespace not wired** — no read/write code for threshold | 🟢 MINOR | `infrastructure/storage/nvs.rs` |
-| 10 | **`DELETE /api/logs` stub** — returns ok but doesn't clear buffer | 🟢 MINOR | `interface/rest_api.rs` |
+| # | Issue | Severity | Status | File(s) |
+|---|-------|----------|--------|---------|
+| 1 | **WebSocket `/ws/stream` was no-op** — `broadcast_websocket_event()` did nothing | 🔴 CRITICAL | ✅ **FIXED 2026-07-03** — restored from `08c0cab`, `CONFIG_HTTPD_WS_SUPPORT=y` re-enabled | `infrastructure/network/http_server.rs` |
+| 2 | **5 command param signatures deviate from frozen Serial API**: `cal.calcVolume`, `cal.calcSpeed`, `system.getFormattedLogs`, `system.readLog`, `burette.moveToStop` | 🔴 CRITICAL | ✅ **FIXED 2026-07-03** — all 5 variants updated, handlers wired to domain functions | `application/command.rs`, `application/handlers/` |
+| 3 | **REST handlers are stubs** — `/api/command`, `/api/valve/set`, `/api/valve/state` return placeholder responses, don't call real dispatch/drivers | 🔴 CRITICAL | ⏳ PENDING | `interface/rest_api.rs` |
+| 4 | **Pending calibration state machines missing** — `PENDING_CAL_DOSE`, `PENDING_CAL_SPEED`, `PENDING_CAL_SPEED_SEQ` not modelled | 🟡 MAJOR | ⏳ PENDING | `application/state_machine.rs` |
+| 5 | **ADC stabilization logic not implemented** — plan describes 10-attempt, 5mV-window, 32-sample median | 🟡 MAJOR | ⏳ PENDING | `infrastructure/drivers/adc.rs` |
+| 6 | **`panic!()` in production code** — 4 violations (main.rs:300, 314 channel disconnect panics) | 🟡 MAJOR | ✅ **FIXED 2026-07-03** — replaced with `log::error!` + `std::process::exit(1)` | `main.rs` |
+| 7 | **BLE notify thread body is TODO** — notifications not sent | 🟡 MAJOR | ⏳ PENDING | `infrastructure/network/ble.rs` |
+| 8 | **Homing not a state machine** — hardcoded in main.rs instead of `state_machine.rs` | 🟢 MINOR | ⏳ PENDING | `main.rs` |
+| 9 | **`stallguard` NVS namespace not wired** — no read/write code for threshold | 🟢 MINOR | ✅ **FIXED 2026-07-03** — `stallguard_read_threshold()` / `stallguard_write_threshold()` added, handlers wired | `infrastructure/storage/nvs.rs` |
+| 10 | **`DELETE /api/logs` stub** — returns ok but doesn't clear buffer | 🟢 MINOR | ✅ **FIXED 2026-07-03** — `logger::clear_entries()` added, `rest_api::handle_api_logs_clear()` wired | `logger.rs`, `interface/rest_api.rs` |
+| 11 | **build.rs clippy errors** — `items_after_statements`, `needless_raw_string_hashes` | 🟢 MINOR | ✅ **FIXED 2026-07-03** — const' moved above statements, `#[allow]` for false-positive raw string hashes | `build.rs` |
 
 ### Verification Requirements Status
 
@@ -51,12 +53,24 @@ Codebase audit conducted via `explore` sub-agent reviewing all `src/` files agai
 |-------------|--------|-------|
 | No `unwrap()` in production code | ✅ PASS | Enforced by `lib.rs` lint |
 | No `expect()` in production code | ✅ PASS | Enforced by `lib.rs` lint |
-| No `panic!()` in production code | ❌ **4 violations** | main.rs:300, 314 — channel disconnect panics |
+| No `panic!()` in production code | ✅ PASS | **FIXED 2026-07-03** — 4 violations removed |
 | No `todo!()` / `unreachable!()` in production | ✅ PASS | Zero occurrences |
 | No `esp-idf-*` in `domain/` layer | ✅ PASS | Verified |
 | `heapless` used in hot paths | ✅ PASS | Enforced by `clippy.toml` |
-| Commands match frozen `SERIAL_API.md` | ❌ **5 violations** | See Key Gaps #2 |
+| Commands match frozen `SERIAL_API.md` | ✅ PASS | **FIXED 2026-07-03** — all 5 violations resolved |
 | `emergencyStop` remains public | ✅ PASS | Variant is public |
+
+### Session 2026-07-03 — Fixes Applied
+
+| # | Fix | Files Changed | Verified |
+|---|-----|---------------|----------|
+| 1 | `panic!()` → `log::error!` + `exit(1)` | `main.rs:300,314` | ✅ build + flash + 30s smoke |
+| 2 | `DELETE /api/logs` — `logger::clear_entries()` + `rest_api::handle_api_logs_clear()` | `logger.rs`, `rest_api.rs`, `http_server.rs` | ✅ build + flash + 30s smoke |
+| 3 | `build.rs` clippy — const' moved above `let src`, `#[allow(needless_raw_string_hashes)]` | `build.rs` | ✅ clippy-host + clippy-xtensa pass |
+| 4 | `stallguard` NVS — `stallguard_read_threshold()` / `stallguard_write_threshold()` + handlers wired | `nvs.rs`, `sensors.rs` | ✅ build + flash + 30s smoke |
+| 5 | 5 frozen API commands — `cal.calcVolume` (gravimetric), `cal.calcSpeed` (OLS), `moveToStop` (dir+speed), `getFormattedLogs`/`readLog` (params) | `command.rs`, `burette_cal.rs`, `burette_ops.rs`, `system.rs`, `burette.rs`, `motor_task.rs`, `dispatch.rs` | ✅ 245 tests pass + build + flash + 30s smoke |
+| 6 | WebSocket restored — `CONFIG_HTTPD_WS_SUPPORT=y`, `WsSender` with session-ID tracking, `broadcast_websocket_event()` functional | `http_server.rs`, `sdkconfig.defaults`, `main.rs` | ✅ build + flash + 30s smoke |
+| 7 | `scripts/build.sh` created — ESP toolchain setup + cargo dispatch | `scripts/build.sh` | ✅ all modes tested |
 
 # General Implementation Plan
 
@@ -299,7 +313,7 @@ Same format + optional `"meta":{"ip":"192.168.1.100"}`.
 
 **⚠️ Gaps identified (2026-07-03 audit):**
 - **ADC stabilization logic** not implemented: plan describes up to 10 attempts, range ≤5mV over 32 samples → 32-sample median. Actual code reads raw ADC and applies rolling average only.
-- **`stallguard` NVS namespace** not wired: NVS layout comment mentions `stallguard (threshold)` but no read/write code exists.
+- ~~**`stallguard` NVS namespace** not wired~~ → **FIXED 2026-07-03** — `stallguard_read_threshold()` / `stallguard_write_threshold()` added, handlers wired.
 - **ADC calibration model** differs: actual code uses `calibrated = a * raw + b` directly; plan describes `raw = a*ref + b` → invert `coeff_a=1/a, coeff_b=-b/a`.
 
 **Reference files:** `prototype/src/stepper/rmt_stepper.rs`, `prototype/src/limitswitch.rs`, `prototype/src/temperature.rs`, `prototype/src/adc.rs`, `prototype/src/main.rs` (hardware init pattern)
@@ -435,14 +449,14 @@ main loop (every tick):
 | HTTP blocks for long ops | ❌ NOT IMPLEMENTED | `POST /api/command` is stub, doesn't block |
 | All 32 commands respond (via serial/BLE) | ⚠️ PARTIAL | Commands dispatch to correct handlers, but `system.getFormattedLogs`/`system.readLog` accept wrong params |
 
-**⚠️ Gaps identified (2026-07-03 audit):**
-- **SSE endpoint completely non-functional:** `broadcast_websocket_event()` is a no-op — no socket writing, no `event: status/debug/log` frames.
-- **REST API stubs:** `/api/command`, `/api/valve/set`, `/api/valve/state`, `/api/status` all return placeholder data, don't wire to real drivers.
-- **5 command variant param mismatches** vs frozen Serial API: `cal.calcVolume`, `cal.calcSpeed`, `system.getFormattedLogs`, `system.readLog`, `burette.moveToStop`.
-- **Pending calibration state machines not implemented:** `PENDING_CAL_DOSE`, `PENDING_CAL_SPEED`, `PENDING_CAL_SPEED_SEQ` absent from `state_machine.rs`.
-- **Homing SM not in state_machine.rs:** hardcoded in `main.rs` as imperative sequence.
-- **`DELETE /api/logs` stub:** returns `{"status":"ok"}` but doesn't clear ring buffer.
-- **`panic!()` in production:** 4 violations at `main.rs:300,314` (channel disconnect panics).
+**⚠️ Gaps identified (2026-07-03 audit) — status after session:**
+- ~~**SSE endpoint completely non-functional**~~ → **FIXED** — WebSocket `/ws/stream` restored from `08c0cab`, `CONFIG_HTTPD_WS_SUPPORT=y` re-enabled, `broadcast_websocket_event()` functional.
+- **REST API stubs:** `/api/command`, `/api/valve/set`, `/api/valve/state`, `/api/status` all return placeholder data, don't wire to real drivers. ⏳ PENDING
+- ~~**5 command variant param mismatches**~~ → **FIXED** — all 5 variants updated, handlers wired to domain functions.
+- **Pending calibration state machines not implemented:** `PENDING_CAL_DOSE`, `PENDING_CAL_SPEED`, `PENDING_CAL_SPEED_SEQ` absent from `state_machine.rs`. ⏳ PENDING
+- **Homing SM not in state_machine.rs:** hardcoded in `main.rs` as imperative sequence. ⏳ PENDING
+- ~~**`DELETE /api/logs` stub**~~ → **FIXED** — `logger::clear_entries()` + `rest_api::handle_api_logs_clear()` wired.
+- ~~**`panic!()` in production**~~ → **FIXED** — replaced with `log::error!` + `std::process::exit(1)`.
 
 **Reference files:** `legacy/src/command.cpp`, `legacy/src/handlers/`, `prototype/src/webserver.rs`, `prototype/src/status.rs`, `prototype/src/logger.rs`
 
@@ -488,12 +502,12 @@ main loop (every tick):
 | `esp_restart()` → STA reconnect | ✅ code | STA connect on boot with saved creds |
 | DNS responder | ✅ code | `UdpSocket` on port 53, non-blocking |
 | `/api/status` from browser | ⚠️ stub response | Returns hardcoded values (Phase 3 gap) |
-| SSE from browser | ❌ not working | `broadcast_websocket_event()` is no-op (Phase 3 gap) |
+| WebSocket from browser | ✅ code | **RESTORED 2026-07-03** — `WsSender` with session-ID tracking, `broadcast_websocket_event()` functional |
 | BLE advertising `EcoTiter-XXXX` | ✅ code | NUS service, custom UUIDs, connectable |
 | BLE connect + write JSON command | ⚠️ partial | RX callback writes to `cmd_tx`, but BLE notify thread body is TODO |
 | USB heartbeat timeout → BLE takeover | ✅ code | Transport SM in main loop handles handoff |
 | LED: advertising (ON), connected (1Hz) | ✅ code | `Led` driver fully implemented |
-| No Guru Meditation | ⏳ unverified | Requires hardware test |
+| No Guru Meditation | ✅ verified | **2026-07-03** — 30s smoke test, 0 crashes |
 
 **Reference files:** `prototype/src/wifi.rs`, `prototype/src/webserver.rs`
 

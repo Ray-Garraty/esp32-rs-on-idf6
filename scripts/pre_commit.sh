@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# ESP toolchain paths (bypasses broken .cargo/bin symlinks)
+ESP_BASE="$HOME/.rustup/toolchains/esp"
+export PATH="$ESP_BASE/bin:$PATH"
+
 PYTHON_PATH=""  # Set to pyenv path on Windows if needed
 export PATH="$HOME/.local/bin:$PATH"
 

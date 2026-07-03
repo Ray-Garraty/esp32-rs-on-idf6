@@ -49,8 +49,17 @@ impl CommandHandler for SystemHandler {
     ) -> Result<CommandResponse, AppError> {
         match cmd {
             Command::SystemGetStatus => Ok(handle_get_status(ctx, id)),
-            Command::SystemGetFormattedLogs => Ok(handle_get_formatted_logs(id)),
-            Command::SystemReadLog => Ok(handle_read_log(id)),
+            Command::SystemGetFormattedLogs {
+                start,
+                limit,
+                level,
+            } => Ok(handle_get_formatted_logs(
+                *start,
+                *limit,
+                level.as_deref(),
+                id,
+            )),
+            Command::SystemReadLog { start, limit } => Ok(handle_read_log(*start, *limit, id)),
             _ => Err(AppError::Protocol(
                 crate::errors::ProtocolError::UnknownCommand,
             )),
@@ -100,9 +109,24 @@ fn display_temp() -> heapless::String<8> {
     s
 }
 
-fn handle_get_formatted_logs(id: u64) -> CommandResponse {
+fn handle_get_formatted_logs(
+    _start: Option<u32>,
+    limit: Option<u8>,
+    _level: Option<&str>,
+    id: u64,
+) -> CommandResponse {
+    let limit_val = limit.unwrap_or(50) as usize;
     let mut data: CompactJson = CompactJson::new();
-    let _ = write!(data, r#"{{"logs":[]}}"#);
+    #[cfg(target_arch = "xtensa")]
+    {
+        let logs_json = crate::logger::get_entries_json(limit_val);
+        let _ = write!(data, r#"{{"logs":{}}}"#, logs_json.as_str());
+    }
+    #[cfg(not(target_arch = "xtensa"))]
+    {
+        let _ = write!(data, r#"{{"logs":[]}}"#);
+        let _ = limit_val;
+    }
     CommandResponse::Single {
         id,
         status: "ok",
@@ -110,9 +134,19 @@ fn handle_get_formatted_logs(id: u64) -> CommandResponse {
     }
 }
 
-fn handle_read_log(id: u64) -> CommandResponse {
+fn handle_read_log(_start: Option<u32>, limit: Option<u8>, id: u64) -> CommandResponse {
+    let limit_val = limit.unwrap_or(50) as usize;
     let mut data: CompactJson = CompactJson::new();
-    let _ = write!(data, r#"{{"entries":[]}}"#);
+    #[cfg(target_arch = "xtensa")]
+    {
+        let logs_json = crate::logger::get_entries_json(limit_val);
+        let _ = write!(data, r#"{{"entries":{}}}"#, logs_json.as_str());
+    }
+    #[cfg(not(target_arch = "xtensa"))]
+    {
+        let _ = write!(data, r#"{{"entries":[]}}"#);
+        let _ = limit_val;
+    }
     CommandResponse::Single {
         id,
         status: "ok",
@@ -151,16 +185,50 @@ mod tests {
     #[test]
     fn test_get_formatted_logs() {
         let ctx = test_ctx();
-        let cmd = Command::SystemGetFormattedLogs;
+        let cmd = Command::SystemGetFormattedLogs {
+            start: None,
+            limit: None,
+            level: None,
+        };
         let result = SystemHandler.handle(&ctx, &cmd, 1).unwrap();
         assert!(result.serialize().contains(r#""status":"ok""#));
     }
 
     #[test]
+    fn test_get_formatted_logs_with_limit() {
+        let ctx = test_ctx();
+        let cmd = Command::SystemGetFormattedLogs {
+            start: None,
+            limit: Some(10),
+            level: None,
+        };
+        let result = SystemHandler.handle(&ctx, &cmd, 1).unwrap();
+        let json = result.serialize();
+        assert!(json.contains(r#""status":"ok""#));
+        assert!(json.contains("logs"));
+    }
+
+    #[test]
     fn test_read_log() {
         let ctx = test_ctx();
-        let cmd = Command::SystemReadLog;
+        let cmd = Command::SystemReadLog {
+            start: None,
+            limit: None,
+        };
         let result = SystemHandler.handle(&ctx, &cmd, 1).unwrap();
         assert!(result.serialize().contains(r#""status":"ok""#));
+    }
+
+    #[test]
+    fn test_read_log_with_limit() {
+        let ctx = test_ctx();
+        let cmd = Command::SystemReadLog {
+            start: None,
+            limit: Some(5),
+        };
+        let result = SystemHandler.handle(&ctx, &cmd, 1).unwrap();
+        let json = result.serialize();
+        assert!(json.contains(r#""status":"ok""#));
+        assert!(json.contains("entries"));
     }
 }

@@ -149,6 +149,14 @@ pub const fn handle_api_logs_download() -> String<MAX_RESPONSE_SIZE> {
     String::new()
 }
 
+/// Handle DELETE /api/logs — clear all log entries from the ring buffer.
+pub fn handle_api_logs_clear() -> String<MAX_RESPONSE_SIZE> {
+    crate::logger::clear_entries();
+    let mut resp: String<MAX_RESPONSE_SIZE> = String::new();
+    let _ = write!(resp, r#"{{"status":"ok"}}"#);
+    resp
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

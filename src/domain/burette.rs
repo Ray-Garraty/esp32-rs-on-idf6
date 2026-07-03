@@ -5,7 +5,7 @@
 //! This module is pure domain logic — no ESP-IDF imports.
 
 #![forbid(unsafe_code)]
-use crate::domain::types::{Ml, MlMin};
+use crate::domain::types::{Direction, Ml, MlMin};
 use crate::errors::StateError;
 
 // ── Volume bounds ──────────────────────────────────────────────
@@ -113,6 +113,8 @@ pub enum BuretteCommand {
     Stop,
     /// Emergency stop — disable motor immediately.
     EmergencyStop,
+    /// Move to a limit switch position.
+    MoveToStop { dir: Direction, speed_hz: u16 },
     /// Reset from error state.
     Reset,
 }

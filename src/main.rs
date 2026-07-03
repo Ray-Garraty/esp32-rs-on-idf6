@@ -10,7 +10,6 @@ use log::info;
 use esp_idf_hal::gpio::Pull;
 
 use ecotiter_fw::config;
-use ecotiter_fw::esp_mutex::EspMutex;
 use ecotiter_fw::infrastructure::drivers::adc::AdcDriver;
 use ecotiter_fw::infrastructure::drivers::led::Led;
 use ecotiter_fw::infrastructure::drivers::limitswitch::{LimitSwitch, STOP_EMPTY, STOP_FULL};
@@ -260,7 +259,7 @@ fn main() {
                 let wifi_mgr = WifiManager::new(modem, sys_loop, Some(nvs), ble_active_clone)
                     .expect("WifiManager::new()");
 
-                let wifi_mgr = Arc::new(EspMutex::new(wifi_mgr));
+                let wifi_mgr = Arc::new(std::sync::Mutex::new(wifi_mgr));
                 let wifi_mgr_for_init = Arc::clone(&wifi_mgr);
                 let wifi_mgr_for_http = Arc::clone(&wifi_mgr);
                 wifi_tx.send(wifi_mgr).expect("send wifi_mgr to main");
@@ -297,7 +296,8 @@ fn main() {
                 std::thread::sleep(Duration::from_millis(10));
             }
             Err(TryRecvError::Disconnected) => {
-                panic!("wifi_mgr channel disconnected");
+                log::error!("FATAL: wifi_mgr channel disconnected during init");
+                std::process::exit(1);
             }
         }
     };
@@ -311,7 +311,8 @@ fn main() {
                 std::thread::sleep(Duration::from_millis(10));
             }
             Err(TryRecvError::Disconnected) => {
-                panic!("ble_mgr channel disconnected");
+                log::error!("FATAL: ble_mgr channel disconnected during init");
+                std::process::exit(1);
             }
         }
     };

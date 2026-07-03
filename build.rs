@@ -75,13 +75,11 @@ fn patch_esp32_nimble(file: &Path) {
 }
 
 fn patch_rmt_encoder(file: &Path) {
-    let src = std::fs::read_to_string(file).unwrap_or_default();
-
-    if src.contains("// ecotiter-patch: rmt_encoder_bitmask") {
-        return;
-    }
+    // Strings must use r#"..."# because they contain `"` characters.
+    // Clippy's needless_raw_string_hashes is a false positive here.
 
     // Original upstream: match with exact values (breaks for bitmask combinations)
+    #[allow(clippy::needless_raw_string_hashes)]
     const OLD: &str = r#"impl From<rmt_encode_state_t> for EncoderState {
     fn from(value: rmt_encode_state_t) -> Self {
         #[allow(non_upper_case_globals)]
@@ -97,6 +95,7 @@ fn patch_rmt_encoder(file: &Path) {
 }"#;
 
     // Fixed code: bitwise checks + marker
+    #[allow(clippy::needless_raw_string_hashes)]
     const NEW: &str = r#"impl From<rmt_encode_state_t> for EncoderState {
     #[allow(non_upper_case_globals)]
     fn from(value: rmt_encode_state_t) -> Self {
@@ -114,6 +113,8 @@ fn patch_rmt_encoder(file: &Path) {
         Self::EncodingReset
     }
 }"#;
+
+    let src = std::fs::read_to_string(file).unwrap_or_default();
 
     if src.contains(OLD) {
         let patched = src.replace(OLD, NEW);

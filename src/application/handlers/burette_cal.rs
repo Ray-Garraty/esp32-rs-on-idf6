@@ -8,7 +8,7 @@ use crate::application::command::{
 };
 use crate::domain::calibration;
 use crate::domain::planner;
-use crate::domain::types::{Ml, MlMin, Steps};
+use crate::domain::types::{Measurement, Ml, MlMin};
 use crate::errors::AppError;
 use core::fmt::Write as CoreWrite;
 
@@ -24,9 +24,13 @@ impl CommandHandler for BuretteCalHandler {
     ) -> Result<CommandResponse, AppError> {
         match cmd {
             Command::BuretteCalGet => Ok(handle_cal_get(ctx, id)),
-            Command::BuretteCalCalcVolume { steps } => Ok(handle_cal_calc_volume(*steps, id)),
-            Command::BuretteCalCalcSpeed { steps_per_sec } => {
-                Ok(handle_cal_calc_speed(*steps_per_sec, id))
+            Command::BuretteCalCalcVolume {
+                mass_g,
+                temp_c,
+                pressure_kpa,
+            } => Ok(handle_cal_calc_volume(*mass_g, *temp_c, *pressure_kpa, id)),
+            Command::BuretteCalCalcSpeed { measurements } => {
+                Ok(handle_cal_calc_speed(measurements, id))
             }
             Command::BuretteCalSave => Ok(handle_cal_save(ctx, id)),
             Command::BuretteCalReset => Ok(handle_cal_reset(id)),
@@ -67,15 +71,26 @@ fn handle_cal_get(ctx: &HandlerContext<'_>, id: u64) -> CommandResponse {
     }
 }
 
-fn handle_cal_calc_volume(steps: i32, id: u64) -> CommandResponse {
-    let vol = calibration::steps_to_volume(
-        Steps(steps),
-        Steps(0),
-        calibration::DEFAULT_STEPS_PER_ML,
-        Ml(calibration::DEFAULT_NOMINAL_VOL),
-    );
+fn handle_cal_calc_volume(
+    mass_g: f32,
+    temp_c: Option<f32>,
+    pressure_kpa: Option<f32>,
+    id: u64,
+) -> CommandResponse {
+    let temp = temp_c.unwrap_or(20.0);
+    let pressure = pressure_kpa.unwrap_or(101.3);
+    let z_factor = calibration::get_z_factor(temp, pressure);
+    let actual_vol_ml = mass_g * z_factor;
+    let current_spm = calibration::DEFAULT_STEPS_PER_ML;
+    let target_vol = Ml(calibration::DEFAULT_NOMINAL_VOL);
+    let new_spm =
+        calibration::calculate_new_steps_per_ml(current_spm, target_vol, Ml(actual_vol_ml));
+    let relative_error_pct = ((new_spm - current_spm) / current_spm * 100.0).abs();
     let mut data: CompactJson = CompactJson::new();
-    let _ = write!(data, r#"{{"volume_ml":{:.3},"steps":{steps}}}"#, vol.0);
+    let _ = write!(
+        data,
+        r#"{{"z_factor":{z_factor:.6},"actual_volume_ml":{actual_vol_ml:.4},"new_steps_per_ml":{new_spm:.1},"relative_error_pct":{relative_error_pct:.2}}}"#,
+    );
     CommandResponse::Single {
         id,
         status: "ok",
@@ -83,13 +98,19 @@ fn handle_cal_calc_volume(steps: i32, id: u64) -> CommandResponse {
     }
 }
 
-fn handle_cal_calc_speed(steps_per_sec: u16, id: u64) -> CommandResponse {
-    let speed = calibration::frequency_to_speed(steps_per_sec, calibration::DEFAULT_SPEED_COEFF);
+fn handle_cal_calc_speed(measurements: &[Measurement], id: u64) -> CommandResponse {
+    let mut freqs: heapless::Vec<f32, 8> = heapless::Vec::new();
+    let mut speeds: heapless::Vec<f32, 8> = heapless::Vec::new();
+    for m in measurements {
+        let _ = freqs.push(f32::from(m.freq_hz));
+        let _ = speeds.push(m.speed_ml_min);
+    }
+    let result = calibration::calculate_speed_calibration(&freqs, &speeds);
     let mut data: CompactJson = CompactJson::new();
     let _ = write!(
         data,
-        r#"{{"speed_ml_min":{:.3},"freq_hz":{steps_per_sec}}}"#,
-        speed.0
+        r#"{{"k":{:.6},"r_squared":{:.4}}}"#,
+        result.k, result.r_squared,
     );
     CommandResponse::Single {
         id,
@@ -244,22 +265,57 @@ mod tests {
     #[test]
     fn test_cal_calc_volume() {
         let ctx = test_ctx();
-        let cmd = Command::BuretteCalCalcVolume { steps: 7730 };
+        let cmd = Command::BuretteCalCalcVolume {
+            mass_g: 5.0,
+            temp_c: Some(22.5),
+            pressure_kpa: Some(101.3),
+        };
         let result = BuretteCalHandler.handle(&ctx, &cmd, 1).unwrap();
         let json = result.serialize();
         assert!(json.contains(r#""status":"ok""#));
-        assert!(json.contains("volume_ml"));
+        assert!(json.contains("z_factor"));
+        assert!(json.contains("actual_volume_ml"));
+        assert!(json.contains("new_steps_per_ml"));
+        assert!(json.contains("relative_error_pct"));
+    }
+
+    #[test]
+    fn test_cal_calc_volume_defaults() {
+        let ctx = test_ctx();
+        let cmd = Command::BuretteCalCalcVolume {
+            mass_g: 5.0,
+            temp_c: None,
+            pressure_kpa: None,
+        };
+        let result = BuretteCalHandler.handle(&ctx, &cmd, 1).unwrap();
+        let json = result.serialize();
+        assert!(json.contains(r#""status":"ok""#));
     }
 
     #[test]
     fn test_cal_calc_speed() {
         let ctx = test_ctx();
         let cmd = Command::BuretteCalCalcSpeed {
-            steps_per_sec: 1000,
+            measurements: vec![
+                Measurement {
+                    freq_hz: 500,
+                    speed_ml_min: 15.26,
+                },
+                Measurement {
+                    freq_hz: 1000,
+                    speed_ml_min: 30.52,
+                },
+                Measurement {
+                    freq_hz: 1500,
+                    speed_ml_min: 45.78,
+                },
+            ],
         };
         let result = BuretteCalHandler.handle(&ctx, &cmd, 1).unwrap();
         let json = result.serialize();
         assert!(json.contains(r#""status":"ok""#));
+        assert!(json.contains("k"));
+        assert!(json.contains("r_squared"));
     }
 
     #[test]

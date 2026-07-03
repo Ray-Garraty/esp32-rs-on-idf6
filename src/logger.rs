@@ -5,9 +5,9 @@
 
 #![allow(clippy::module_name_repetitions)]
 
+use crate::esp_mutex::EspMutex;
 use core::fmt::Write as FmtWrite;
 use log::{Level, LevelFilter, Log, Metadata, Record};
-use crate::esp_mutex::EspMutex;
 
 use heapless::Deque;
 
@@ -101,6 +101,13 @@ impl Log for Logger {
 pub fn init() {
     log::set_logger(&LOGGER).ok();
     log::set_max_level(LevelFilter::Info);
+}
+
+/// Clear all log entries from the ring buffer.
+pub fn clear_entries() {
+    if let Ok(mut buf) = LOGGER.inner.lock() {
+        while buf.entries.pop_front().is_some() {}
+    }
 }
 
 /// Return the most recent log entries as a JSON string (bounded to 512 bytes).

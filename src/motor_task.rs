@@ -375,6 +375,48 @@ fn handle_command(
             };
             let _ = response_tx.send((cmd_id, response));
         }
+        BuretteCommand::MoveToStop { dir, speed_hz } => {
+            log::info!("Motor: move to stop (dir={dir:?}, speed={speed_hz} Hz)");
+            stepper.set_direction(*dir);
+            let freq = u32::from(*speed_hz);
+            let direction_steps = if dir.is_liq_in() {
+                Steps(1_000_000)
+            } else {
+                Steps(-1_000_000)
+            };
+            motor_state::set_burette_state_tag(&BuretteState::Homing);
+            if let Err(e) = stepper.move_steps(ctx, direction_steps, Hz(freq)) {
+                log::error!("Motor: move_to_stop failed: {e:?}");
+            }
+            motor_state::set_burette_state_tag(&BuretteState::Idle);
+            let current_pos = stepper.position();
+            motor_state::CURRENT_POSITION
+                .store(current_pos.0, std::sync::atomic::Ordering::Release);
+            let status = StatusUpdate {
+                state: BuretteState::Idle,
+                volume_ml: Ml(0.0),
+                operation: BuretteOperation::None,
+                details: {
+                    let mut s: heapless::String<64> = heapless::String::new();
+                    let _ = s.push_str("move_to_stop_complete");
+                    s
+                },
+                cmd_id,
+            };
+            let _ = status_tx.send(status);
+            let mut data: crate::application::command::CompactJson =
+                crate::application::command::CompactJson::new();
+            let _ = core::fmt::Write::write_fmt(
+                &mut data,
+                format_args!(r#"{{"action":"move_to_stop_complete"}}"#),
+            );
+            let response = CommandResponse::Single {
+                id: cmd_id,
+                status: "ok",
+                data,
+            };
+            let _ = response_tx.send((cmd_id, response));
+        }
         BuretteCommand::Reset => {
             log::info!("Motor: reset");
             if let Err(e) = stepper.enable() {
@@ -520,8 +562,9 @@ const fn cmd_operation(cmd: &BuretteCommand) -> BuretteOperation {
         BuretteCommand::Empty { .. } => BuretteOperation::Empty,
         BuretteCommand::Dose { .. } => BuretteOperation::Dose,
         BuretteCommand::Rinse { .. } => BuretteOperation::Rinse,
-        BuretteCommand::Stop | BuretteCommand::EmergencyStop | BuretteCommand::Reset => {
-            BuretteOperation::None
-        }
+        BuretteCommand::Stop
+        | BuretteCommand::EmergencyStop
+        | BuretteCommand::MoveToStop { .. }
+        | BuretteCommand::Reset => BuretteOperation::None,
     }
 }

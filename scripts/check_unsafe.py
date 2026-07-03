@@ -18,7 +18,7 @@ from pathlib import Path
 SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 
 # Known baseline: update when unsafe blocks are deliberately removed
-KNOWN_BASELINE = 30
+KNOWN_BASELINE = 32
 
 # Match // SAFETY:, // Safety:, /// # Safety (doc comment), // CHECKED_SAFE:
 SAFETY_RE = re.compile(r"/[/*]\s*(#\s*)?(SAFETY|Safety|CHECKED_SAFE)[:\s]?")

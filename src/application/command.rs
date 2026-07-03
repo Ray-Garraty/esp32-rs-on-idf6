@@ -68,8 +68,9 @@ pub enum Command {
     },
     #[serde(rename = "burette.moveToStop")]
     BuretteMoveToStop {
+        dir: crate::domain::types::Direction,
         #[serde(default)]
-        speed_hz: u32,
+        speed_hz: u16,
     },
     #[serde(rename = "burette.setDirection")]
     BuretteSetDirection {
@@ -81,13 +82,15 @@ pub enum Command {
     BuretteCalGet,
     #[serde(rename = "burette.cal.calcVolume")]
     BuretteCalCalcVolume {
+        mass_g: f32,
         #[serde(default)]
-        steps: i32,
+        temp_c: Option<f32>,
+        #[serde(default)]
+        pressure_kpa: Option<f32>,
     },
     #[serde(rename = "burette.cal.calcSpeed")]
     BuretteCalCalcSpeed {
-        #[serde(default)]
-        steps_per_sec: u16,
+        measurements: Vec<crate::domain::types::Measurement>,
     },
     #[serde(rename = "burette.cal.save")]
     BuretteCalSave,
@@ -141,9 +144,21 @@ pub enum Command {
     #[serde(rename = "system.getStatus")]
     SystemGetStatus,
     #[serde(rename = "system.getFormattedLogs")]
-    SystemGetFormattedLogs,
+    SystemGetFormattedLogs {
+        #[serde(default)]
+        start: Option<u32>,
+        #[serde(default)]
+        limit: Option<u8>,
+        #[serde(default)]
+        level: Option<String>,
+    },
     #[serde(rename = "system.readLog")]
-    SystemReadLog,
+    SystemReadLog {
+        #[serde(default)]
+        start: Option<u32>,
+        #[serde(default)]
+        limit: Option<u8>,
+    },
 
     // ── Serial (1) ─────────────────────────────────────────────
     #[serde(rename = "serial.ping")]
@@ -348,7 +363,9 @@ mod tests {
 
     #[test]
     fn test_cmd_burette_move_to_stop() {
-        let env = parse_envelope(r#"{"id":10,"cmd":"burette.moveToStop","speed_hz":300}"#).unwrap();
+        let env =
+            parse_envelope(r#"{"id":10,"cmd":"burette.moveToStop","dir":"LiqIn","speed_hz":300}"#)
+                .unwrap();
         assert!(matches!(env.cmd, Command::BuretteMoveToStop { .. }));
     }
 
@@ -367,15 +384,26 @@ mod tests {
 
     #[test]
     fn test_cmd_burette_cal_calc_volume() {
+        let env = parse_envelope(
+            r#"{"id":13,"cmd":"burette.cal.calcVolume","mass_g":5.0,"temp_c":22.5,"pressure_kpa":101.3}"#,
+        )
+        .unwrap();
+        assert!(matches!(env.cmd, Command::BuretteCalCalcVolume { .. }));
+    }
+
+    #[test]
+    fn test_cmd_burette_cal_calc_volume_defaults() {
         let env =
-            parse_envelope(r#"{"id":13,"cmd":"burette.cal.calcVolume","steps":10000}"#).unwrap();
+            parse_envelope(r#"{"id":13,"cmd":"burette.cal.calcVolume","mass_g":5.0}"#).unwrap();
         assert!(matches!(env.cmd, Command::BuretteCalCalcVolume { .. }));
     }
 
     #[test]
     fn test_cmd_burette_cal_calc_speed() {
-        let env = parse_envelope(r#"{"id":14,"cmd":"burette.cal.calcSpeed","steps_per_sec":1000}"#)
-            .unwrap();
+        let env = parse_envelope(
+            r#"{"id":14,"cmd":"burette.cal.calcSpeed","measurements":[{"freq_hz":1000,"speed_ml_min":30.52}]}"#,
+        )
+        .unwrap();
         assert!(matches!(env.cmd, Command::BuretteCalCalcSpeed { .. }));
     }
 
@@ -486,13 +514,29 @@ mod tests {
     #[test]
     fn test_cmd_system_get_formatted_logs() {
         let env = parse_envelope(r#"{"id":31,"cmd":"system.getFormattedLogs"}"#).unwrap();
-        assert!(matches!(env.cmd, Command::SystemGetFormattedLogs));
+        assert!(matches!(env.cmd, Command::SystemGetFormattedLogs { .. }));
+    }
+
+    #[test]
+    fn test_cmd_system_get_formatted_logs_with_params() {
+        let env = parse_envelope(
+            r#"{"id":31,"cmd":"system.getFormattedLogs","start":0,"limit":10,"level":"INFO"}"#,
+        )
+        .unwrap();
+        assert!(matches!(env.cmd, Command::SystemGetFormattedLogs { .. }));
     }
 
     #[test]
     fn test_cmd_system_read_log() {
         let env = parse_envelope(r#"{"id":32,"cmd":"system.readLog"}"#).unwrap();
-        assert!(matches!(env.cmd, Command::SystemReadLog));
+        assert!(matches!(env.cmd, Command::SystemReadLog { .. }));
+    }
+
+    #[test]
+    fn test_cmd_system_read_log_with_params() {
+        let env =
+            parse_envelope(r#"{"id":32,"cmd":"system.readLog","start":0,"limit":20}"#).unwrap();
+        assert!(matches!(env.cmd, Command::SystemReadLog { .. }));
     }
 
     // ════════════════════════════════════════════════════════════

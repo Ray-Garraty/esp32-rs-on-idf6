@@ -4,8 +4,7 @@
 - After sourcing `scripts/build.sh` or running build, use `type <tool>` to verify correct paths (e.g., `type esptool`, `type cargo`). Do NOT guess command names.
 - `scripts/build.sh flash /dev/ttyUSB0` — flash firmware (timeout >= 180s, must wait for "Flashing has completed!" or boot loop results)
 - `scripts/build.sh test` — host unit tests (stepper::ramp::tests)
-- `timeout 30 python3 scripts/serial_monitor.py` — monitor with 30s timeout (auto-detects port)
-- **`git commit` runs pre-commit hook with xtensa build — requires timeout >= 600s.**
+- "smoke-test": `timeout 30 python3 scripts/serial_monitor.py` — monitor with 30s timeout (auto-detects port) - look for ESP32 crashes
 - WDT must be disabled during debugging: `ecotiter_fw::esp_safe::disable_wdt()` (safe wrapper)
 
 # GOLDEN RULE: NEVER BLOCK THE MAIN LOOP
@@ -126,7 +125,7 @@ Retained for reference only. Use @debugger instead.
 
 # Unsafe Policy
 
-**Total unsafe blocks: 30** (Last audited: 2026-07-02, baseline in `scripts/check_unsafe.py`)
+**Total unsafe blocks: 32** (Last audited: 2026-07-03, baseline in `scripts/check_unsafe.py`)
 
 ## Modules with `#![forbid(unsafe_code)]`
 

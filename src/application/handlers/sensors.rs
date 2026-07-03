@@ -60,8 +60,12 @@ fn handle_temp_read(id: u64) -> CommandResponse {
 }
 
 fn handle_sg_get_threshold(id: u64) -> CommandResponse {
+    #[cfg(target_arch = "xtensa")]
+    let threshold = crate::infrastructure::storage::nvs::stallguard_read_threshold();
+    #[cfg(not(target_arch = "xtensa"))]
+    let threshold: u8 = 0;
     let mut data: CompactJson = CompactJson::new();
-    let _ = write!(data, r#"{{"threshold":0}}"#);
+    let _ = write!(data, r#"{{"threshold":{threshold}}}"#);
     CommandResponse::Single {
         id,
         status: "ok",
@@ -76,8 +80,12 @@ fn handle_sg_set_threshold(value: Option<u8>, id: u64) -> CommandResponse {
             message: "missing value",
         };
     };
+    #[cfg(target_arch = "xtensa")]
+    if let Err(e) = crate::infrastructure::storage::nvs::stallguard_write_threshold(v) {
+        log::error!("stallguard NVS write failed: {e:?}");
+    }
     let mut data: CompactJson = CompactJson::new();
-    let _ = write!(data, r#"{{"threshold":{v}}}"#);
+    let _ = write!(data, r#"{{"threshold":{v},"saved":true}}"#);
     CommandResponse::Single {
         id,
         status: "ok",

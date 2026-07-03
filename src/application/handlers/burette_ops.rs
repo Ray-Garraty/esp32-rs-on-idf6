@@ -45,7 +45,9 @@ impl CommandHandler for BuretteOpsHandler {
             Command::BuretteEmergencyStop => Ok(handle_emergency_stop(ctx, id)),
             Command::BuretteGetStatus => Ok(handle_get_status(id)),
             Command::BuretteMoveSteps { .. } => Ok(handle_move_steps(id)),
-            Command::BuretteMoveToStop { .. } => Ok(handle_move_to_stop(id)),
+            Command::BuretteMoveToStop { dir, speed_hz } => {
+                Ok(handle_move_to_stop(ctx, *dir, *speed_hz, id))
+            }
             Command::BuretteSetDirection { direction } => Ok(handle_set_direction(*direction, id)),
             _ => Err(AppError::Protocol(
                 crate::errors::ProtocolError::UnknownCommand,
@@ -250,14 +252,28 @@ fn handle_move_steps(id: u64) -> CommandResponse {
     }
 }
 
-fn handle_move_to_stop(id: u64) -> CommandResponse {
-    let mut data: CompactJson = CompactJson::new();
-    let _ = write!(data, r#"{{"action":"moving_to_stop"}}"#);
-    CommandResponse::Single {
-        id,
-        status: "ok",
-        data,
+fn handle_move_to_stop(
+    ctx: &HandlerContext<'_>,
+    dir: Direction,
+    speed_hz: u16,
+    id: u64,
+) -> CommandResponse {
+    if !send_command(ctx, &BuretteCommand::MoveToStop { dir, speed_hz }, id) {
+        return CommandResponse::Error {
+            id,
+            message: "motor_channel_full",
+        };
     }
+    let dir_str = match dir {
+        Direction::LiqIn => "LiqIn",
+        Direction::LiqOut => "LiqOut",
+    };
+    let mut ack: CompactJson = CompactJson::new();
+    let _ = write!(
+        ack,
+        r#"{{"action":"moving_to_stop","dir":"{dir_str}","speed_hz":{speed_hz}}}"#,
+    );
+    CommandResponse::AckThen { id, ack }
 }
 
 fn handle_set_direction(direction: Option<Direction>, id: u64) -> CommandResponse {
