@@ -1,3 +1,14 @@
+---
+type: ESP32 Reference
+title: "Protocol: Heap Corruption"
+description: >
+  Debugging protocol for heap corruption on ESP32 with ESP-IDF v6 (TLSF allocator).
+  Covers TLSF metadata corruption, misaligned addresses, and the critical insight
+  that >90% of boot-time "heap corruption" is actually main task stack overflow.
+tags: [esp32, debug, heap-corruption, protocol]
+timestamp: 2026-07-03
+---
+
 # Protocol: Heap Corruption
 
 ## Trigger

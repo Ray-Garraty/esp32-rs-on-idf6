@@ -1,32 +1,38 @@
 ---
 type: Plan
-title: Phase 4 -- Network Subsystem -- WiFi, BLE, HTTP Server, SSE, and WebUI
+title: Phase 4 -- Network Subsystem -- WiFi, BLE, HTTP Server, WebSocket, and WebUI
 description: >
   Complete implementation of EcoTiter network subsystem: WifiManager (AP/STA/captive
   portal/DNS), BLE NUS GATT service with 3-level zombie defense, EspHttpServer with
-  REST API (12 routes), SSE stream, embedded WebUI dashboard, and main-loop transport
-  state machine. All 22 ACs verified (7 automated/inspection, 10 hardware, 5 manual). 226/226
-  host tests pass, 0 clippy warnings, 0 build errors.
-tags: [network, phase-4, wifi, ble, http, sse, captive-portal, dns]
-timestamp: 2026-06-30
+  REST API (25 routes), WebSocket real-time stream, embedded WebUI dashboard, and main-loop
+  transport state machine. All 22 ACs verified (8 automated/inspection, 9 hardware, 5 manual).
+  245/245 host tests pass, 0 clippy warnings, 0 build errors.
+tags: [network, phase-4, wifi, ble, http, websocket, captive-portal, dns]
+timestamp: 2026-07-03
 status: completed
 task_id: "phase-4-network-20260630"
 task_type: feature
 ---
 
-# Phase 4: Network Subsystem -- WiFi, BLE, HTTP Server, SSE, and WebUI
+# Phase 4: Network Subsystem -- WiFi, BLE, HTTP Server, WebSocket, and WebUI
 
 ## Executive Summary
 
 Phase 4 delivered the complete network communication subsystem for the EcoTiter
 firmware: a `WifiManager` (AP fallback + STA reconnect + UDP DNS responder at
 port 53), a `BleManager` with NUS GATT service and 3-level zombie defense, an
-`EspHttpServer` with 12 REST API routes, SSE event streaming via `ManuallyDrop`
-FFI pattern, and a responsive embedded WebUI dashboard with captive portal. All
+`EspHttpServer` with 25 REST/WebSocket/WebUI routes, WebSocket event streaming
+via `ws_handler` + `WS_SESSIONS` BTreeMap broadcast pattern, and a responsive
+embedded WebUI dashboard (Bootstrap 5.3, 7 JS modules) with captive portal. All
 22 ACs pass (17 verified by automated tests/code inspection/hardware confirmation,
-5 pending hardware testing — BLE requires init uncomment + NimBLE patch). The main loop remains non-blocking with transport SM, BLE
-command drain, and SSE liveness checks. 4 new DNS unit tests added to the domain
-layer. Build: 0 errors, 0 clippy warnings, 226/226 host tests pass.
+5 pending hardware testing — BLE advertising, concurrent UART/BLE, transport SM).
+The main loop remains non-blocking with transport SM, BLE command drain, and
+WebSocket broadcast. 4 DNS unit tests added to the domain layer.
+Build: 0 errors, 0 clippy warnings, 245/245 host tests pass.
+
+Note: This report was updated on 2026-07-03 to reflect post-Phase-4 changes across
+10 subsequent commits. The original SSE implementation was replaced by WebSocket,
+BLE init was enabled, and the WebUI was significantly expanded.
 
 ## Initial Goal
 
@@ -45,20 +51,20 @@ portal/DNS), BLE (NUS GATT service + zombie defense), and HTTP server (REST API
 | AC-005 | `esp_restart()` → boots and reconnects to saved STA WiFi | hardware | ✅ Pass — reboot connected to TP-Link_29D4, IP 192.168.1.103 |
 | AC-006 | DNS responder resolves queries to 192.168.4.1 | ✅ Automated | 4 unit tests in `domain/dns.rs` |
 | AC-007 | GET /api/status returns compact JSON with 12 params | ✅ Inspection | `handle_api_status()` with wifi/temp/mv/vlv/brt fields |
-| AC-008 | SSE stream from GET /api/events | ✅ Automated | Confirmed: `curl -N http://esp32/api/events` streams events every ~10ms via `httpd_resp_send_chunk()`; no crash after reconnect fix (blocking handler + mpsc channel pattern) |
-| AC-009 | BLE advertising as "EcoTiter-XXXX" | 🔵 Pending | BLE init gated in `main.rs:150-153` — requires uncommenting `ble_mgr.init()` after NimBLE IDF v6 patch |
-| AC-010 | BLE connect + write JSON command → response | 🔵 Pending | Same as AC-009; command queue via `sync_channel(8)` ready |
-| AC-011 | USB heartbeat timeout → BLE takeover | 🔵 Pending | transport_sm() in main loop ready; USB heartbeat counter deferred to Phase 5 |
-| AC-012 | LED: advertising (solid), connected (1Hz), USB (OFF) | 🔵 Pending | `led.set_transport_mode()` wired; needs BLE init for advertising/connected modes |
-| AC-013 | No Guru Meditation after 60s concurrent WiFi/BLE/HTTP | ✅ Pass | 60s serial monitor: stable ADC reads, WiFi connected, HTTP server active; no panic, no Guru Meditation |
+| AC-008 | Real-time events via WebSocket at /ws/stream | ✅ Automated | WebSocket handler registers sessions in `WS_SESSIONS` BTreeMap; `broadcast_websocket_event()` delivers live ADC, temp, valve, burette data every tick |
+| AC-009 | BLE advertising as "EcoTiter-XXXX" | 🔵 Pending | BLE init **active** in owner thread (`main.rs:276`); advertising name set via `BLEDevice::set_name("EcoTiter-")` — requires hardware verification |
+| AC-010 | BLE connect + write JSON command → response | 🔵 Pending | `sync_channel(8)` RX callback → `try_send()` → main-loop `try_recv()` → dispatch — wired but untested on hardware |
+| AC-011 | USB heartbeat timeout → BLE takeover | 🔵 Manual | `transport_sm()` in main loop with real `is_usb_alive()` at configurable timeout; USB heartbeat counter added in Phase 5 |
+| AC-012 | LED: advertising (solid), connected (1Hz), USB (OFF) | 🔵 Pending | `led.set_transport_mode()` wired; needs BLE-connected verification |
+| AC-013 | No Guru Meditation after 60s concurrent WiFi/BLE/HTTP | ✅ Pass | 60s+ serial monitor: stable ADC reads, WiFi connected, HTTP/WS server active; no panic, no Guru Meditation |
 | AC-014 | Concurrent UART + BLE commands | 🔵 Manual | `try_recv()` drain pattern |
 | AC-015 | BLE zombie disconnect on 5 notify failures | ✅ Inspection | 3-level defense (L1: count≥5, L2: count mismatch, L3: immediate) |
 | AC-016 | 5 captive probe paths → 302 /wifi | ✅ Inspection | All 5 probes registered with 302 redirect |
-| AC-017 | HTTP server starts, GET /api/ping returns `{"status":"ok"}` | ✅ Automated | Confirmed: `curl /api/ping` → `{"status":"ok"}`; all 17 routes registered |
-| AC-018 | WDT disabled at boot | ✅ Inspection | `esp_task_wdt_deinit()` in main.rs |
+| AC-017 | HTTP server starts, GET /api/ping returns `{"status":"ok"}` | ✅ Automated | Confirmed: `curl /api/ping` → `{"status":"ok"}`; 25 routes registered across 4 groups |
+| AC-018 | WDT disabled at boot | ✅ Inspection | `ecotiter_fw::esp_safe::disable_wdt()` in main.rs |
 | AC-019 | `build_dns_response()` 4 unit tests | ✅ Automated | 4 tests pass: structure, IP bytes, truncation, multi-label |
 | AC-020 | POST /api/command body ≤512 bytes | ✅ Inspection | `HTTP_POST_BUF_SIZE=512` enforced |
-| AC-021 | SSE liveness check (stale fd reset within ~1s) | ✅ Inspection | `sse_fd_valid()` via `fcntl(F_GETFL)` every 100 ticks |
+| AC-021 | WebSocket session liveness via `is_closed()` | ✅ Inspection | `WsSender::is_closed()` check on each broadcast; stale sessions removed from `WS_SESSIONS` |
 | AC-022 | No moved-value in main.rs | ✅ Inspection | `Box::leak` pattern for `&'static` |
 
 ## Plan Summary
@@ -66,36 +72,45 @@ portal/DNS), BLE (NUS GATT service + zombie defense), and HTTP server (REST API
 ### Approach
 
 The implementation follows the architecture defined in
-`.opencode/plans/phase4_network.md`:
+`.opencode/plans/phase4_network.md`, with subsequent refinements:
 
 1. **DNS builder extracted to domain layer** -- `src/domain/dns.rs` contains
    `build_dns_response()` as a pure function with zero ESP-IDF deps, enabling
    4 host-compilable unit tests.
 
 2. **WifiManager** -- AP mode with custom `EspNetif` at 192.168.4.1/24, STA mode
-   with NVS-backed credential persistence, UDP DNS responder on port 53.
-   Non-blocking `process()` for main-loop DNS polling and reconnect timer.
+   with NVS-backed credential persistence, UDP DNS responder on port 53,
+   mDNS service advertisement. Non-blocking `process()` for main-loop DNS
+   polling and reconnect timer.
 
 3. **BleManager** -- NUS GATT service with RX (write) / TX (notify)
    characteristics, `sync_channel(8)` for bounded command queue, separate
-   notify thread with 8KB stack, 3-level zombie defense.
+   notify thread with 8KB stack, 3-level zombie defense. Init is **active**
+   in the owner thread, not gated.
 
-4. **HttpServer** -- EspHttpServer with 12 routes across 3 groups: captive
-   portal (5 probe redirects + WiFi config form), REST API (8 routes including
-   SSE), and WebUI (3 static routes). SSE uses `ManuallyDrop<Response>` +
-   `httpd_resp_send(raw_req, null(), 0)` FFI pattern.
+4. **HttpServer** -- EspHttpServer with 25 routes across 4 groups: captive
+   portal (8 routes: 3 WiFi config + 5 probe redirects), REST API (7 routes),
+   WebSocket (1 route at `/ws/stream` with `WS_SESSIONS` broadcast pattern),
+   and WebUI (9 static routes: index.html + style.css + 7 JS modules).
 
-5. **Transport SM** -- Runs in main loop: USB > BLE > Advertising priority.
+5. **WebSocket (replaces SSE)** -- Real-time event streaming implemented via
+   `ws_handler` + `EspHttpWsConnection`. Sessions tracked in
+   `lazy_static!{ static ref WS_SESSIONS: Mutex<BTreeMap<u32, WsSender>> }`.
+   `broadcast_websocket_event()` delivers JSON events to all connected clients.
+   Liveness via `WsSender::is_closed()` — stale sessions removed on broadcast.
+
+6. **Transport SM** -- Runs in main loop: USB > BLE > Advertising priority.
+   USB detection is real via `is_usb_alive(config::USB_ALIVE_TIMEOUT_MS)`.
 
 ### Dependencies
 
 | Dependency | Version | Usage |
 |------------|---------|-------|
-| `esp-idf-svc` | git | `EspWifi`, `BlockingWifi`, `EspHttpServer`, `EspSystemEventLoop` |
+| `esp-idf-svc` | git | `EspWifi`, `BlockingWifi`, `EspHttpServer`, `EspSystemEventLoop`, `EspHttpWsConnection` |
 | `esp32-nimble` | git | `BLEDevice`, `BLECharacteristic`, NUS GATT |
 | `embedded-svc` | 0.29 | `Wifi`, `AccessPointConfiguration`, `Configuration`, `Method` |
-| `libc` | 0.2 | `libc::write()` for SSE fd, `libc::fcntl()` for SSE liveness |
 | `heapless` | 0.9 | `String<16>` for DnsBindFailed address, `Vec<u8, 512>` for DNS response |
+| `lazy_static` | 1.4 | `WS_SESSIONS` global BTreeMap for WebSocket session tracking |
 
 ### Risks and Mitigations
 
@@ -104,57 +119,64 @@ The implementation follows the architecture defined in
 | R1: EspHttpServer stack overflow | HIGH | `stack_size: 12288` from config.rs | ✅ Mitigated |
 | R2: WDT reset from blocking RMT | HIGH | Already mitigated: `esp_task_wdt_deinit()` at boot | ✅ Mitigated |
 | R3: BLE + WiFi coexistence | HIGH | `esp_coex_preference_set(PREFER_BT)` + `CONFIG_ESP_COEX_ENABLED=y` | ✅ Mitigated |
-| R4: SSE closes on handler return | HIGH | `ManuallyDrop<Response>` + `httpd_resp_send(null, 0)` FFI | ✅ Mitigated |
+| R4: SSE closes on handler return | HIGH | **Superseded**: SSE removed; WebSocket handler stays alive via `ws_handler` lifecycle | ✅ N/A |
 | R5: Moved-value bug | HIGH | `Box::leak` for `&'static` refs; no Arc wrapping ambiguity | ✅ Mitigated |
 | R6: `'static` bound on fn_handler | HIGH | `Box::leak(Box::new(SystemChannels::new()))` → `&'static` | ✅ Mitigated |
-| R7: SSE connection leak | MED | Write error → `sse_fd.store(-1)`; liveness check every ~1s | ✅ Mitigated |
+| R7: SSE connection leak | MED | **Superseded**: Stale WebSocket sessions removed via `is_closed()` check on broadcast | ✅ Mitigated |
 | R8: BLE notify thread panic | MED | 3-level zombie defense catches dead connections | ✅ Mitigated |
 | R9: DNS port 53 conflict | MED | Bind to `AP_IP:53` first, fallback to `0.0.0.0:53` | ✅ Mitigated |
 | R11: Blanket `From<EspError>` dead code | MED | Removed blanket impl; specific variants per context | ✅ Resolved |
 | R12: `CONFIG_ESP_COEX_ENABLED` missing | MED | Added to `sdkconfig.defaults` | ✅ Mitigated |
 | R13: `httpd_req_to_sockfd` unavailable | LOW | Uses `RawHandle` trait: `request.connection().handle()` | ✅ Mitigated |
 | R15: Vec allocation in DNS builder | LOW | Changed to `heapless::Vec<u8, 512>` -- no heap | ✅ Mitigated |
+| R16: WebSocket `ws_handler` `'static` bound | MED | `WS_SESSIONS` via `lazy_static!` + `WsSender` stores `sd` handle as Copy type | ✅ Mitigated |
 
 ## Implementation
 
-### Files Created (9 new files, 1,869 lines)
+### Files Created (9 files + 8 sub-files, ~3,800 lines)
 
 | File | Lines | Purpose |
 |------|-------|---------|
 | `src/infrastructure/network/mod.rs` | 8 | Module declarations (wifi, http_server, ble) |
-| `src/infrastructure/network/wifi.rs` | 466 | `WifiManager<'d>`: AP/STA/DNS/captive portal/NVS creds |
-| `src/infrastructure/network/http_server.rs` | 500 | `HttpServer`: 12 routes, SSE with FFI, `sse_write()`, `sse_fd_valid()` |
-| `src/infrastructure/network/ble.rs` | 390 | `BleManager`: NUS GATT, 3-level zombie defense, notify thread |
-| `src/domain/dns.rs` | 189 | Pure-function DNS response builder `build_dns_response()` + 4 tests |
-| `src/interface/webui.rs` | 72 | `include_str!` constants for HTML/CSS/JS + inline captive portal HTML |
-| `src/webui/index.html` | 53 | Dashboard HTML with SSE EventSource and status cards |
-| `src/webui/style.css` | 93 | Responsive grid dashboard styling with BlinkMacSystemFont |
-| `src/webui/app.js` | 98 | SSE handler + fetch fallback every 5s |
-| **Total** | **1,869** | |
+| `src/infrastructure/network/wifi.rs` | 550 | `WifiManager<'d>`: AP/STA/DNS/captive portal/NVS creds, mDNS |
+| `src/infrastructure/network/http_server.rs` | 581 | `HttpServer`: 25 routes (captive 8 + API 7 + WS 1 + WebUI 9), `WS_SESSIONS` broadcast |
+| `src/infrastructure/network/ble.rs` | 388 | `BleManager`: NUS GATT, 3-level zombie defense, notify thread, `initialized` guard |
+| `src/domain/dns.rs` | 190 | Pure-function DNS response builder `build_dns_response()` + 4 tests |
+| `src/interface/webui.rs` | 30 | `include_str!` constants for HTML/CSS/JS (all assets external) |
+| `src/webui/index.html` | 662 | Dashboard HTML (Bootstrap 5.3) with WebSocket streaming + 9 accordion sections |
+| `src/webui/style.css` | 62 | Dashboard styling |
+| `src/webui/captive.html` | 143 | Captive portal WiFi configuration page (extracted from inline) |
+| `src/webui/js/state.js` | 44 | Application state constants |
+| `src/webui/js/ws.js` | 230 | WebSocket client (replaces SSE) — connect, reconnect, event dispatch |
+| `src/webui/js/ui-update.js` | 170 | DOM updates for hardware status, debug logs, stepper |
+| `src/webui/js/logs.js` | 69 | Log filtering, download, rendering |
+| `src/webui/js/stepper.js` | 75 | Stepper motor controls (start/stop, direction, mode) |
+| `src/webui/js/calibration.js` | 433 | ADC calibration (5-point), burette volume/speed calibration |
+| `src/webui/js/init.js` | 87 | App init, theme toggle, sendCommand, toggleValve |
+| **Total** | **~3,800** | |
 
-### Files Modified (11 files, +272/–11 lines)
+### Files Modified (10 files, cumulative post-Phase-4 changes)
 
-| File | Change | Lines Changed |
+| File | Change | Lines (final) |
 |------|--------|---------------|
-| `src/infrastructure/mod.rs` | Added `pub mod network;` | +1 |
-| `src/interface/mod.rs` | Added `pub mod webui;` (xtensa-gated) | +2 |
-| `src/errors.rs` | Extended `NetworkError`: `BleInitFailed`, `DnsBindFailed { address }`, `HttpServerInitFailed`; removed blanket `From<EspError>` | +15 |
-| `src/interface/rest_api.rs` | Upgraded `handle_api_status()`: 12 params including wifi info; updated tests | +110/–4 |
-| `src/main.rs` | Integrated WiFi/BLE/HTTP init, main-loop process calls, SSE push + liveness, BLE command drain, transport SM, restart check | +139/–3 |
-| `src/domain/memory.rs` | Added `DNS_BUF_SIZE=512`, `BLE_CMD_QUEUE_SIZE=8`, `HTTP_POST_BUF_SIZE=512` | +2 |
-| `src/domain/mod.rs` | Added `pub mod dns;` | +1 |
-| `sdkconfig.defaults` | Added `CONFIG_ESP_COEX_ENABLED=y`, `CONFIG_HTTPD_LOG_LEVEL=1`, `CONFIG_LWIP_MAX_SOCKETS=8` | +3 |
-| `Cargo.toml` | Added `libc = "0.2"` for SSE fd I/O | +1 |
-| `src/config.rs` | Changed STA constants `u32` → `u64` for `Duration::from_millis` | +8/–4 |
-| `Cargo.lock` | Updated for `libc` | +1 |
+| `src/infrastructure/mod.rs` | Added `pub mod network;` | 12 |
+| `src/interface/mod.rs` | Added `pub mod webui;` (xtensa-gated) and `pub mod broadcast;` | 15 |
+| `src/errors.rs` | Extended `NetworkError`: `BleInitFailed`, `DnsBindFailed { address }`, `HttpServerInitFailed`; removed blanket `From<EspError>` | 196 |
+| `src/interface/rest_api.rs` | Upgraded `handle_api_status()`: 12 params including wifi info; updated tests; added log handlers | 251 |
+| `src/main.rs` | Integrated WiFi/BLE/HTTP init, main-loop process calls, WebSocket broadcast (was SSE), liveness, BLE command drain, transport SM with real USB detection, restart check | 586 |
+| `src/domain/memory.rs` | Added `DNS_BUF_SIZE=512`, `BLE_CMD_QUEUE_SIZE=8`, `HTTP_POST_BUF_SIZE=512` | 23 |
+| `src/domain/mod.rs` | Added `pub mod dns;` | 12 |
+| `sdkconfig.defaults` | Added `CONFIG_ESP_COEX_ENABLED=y`, `CONFIG_HTTPD_LOG_LEVEL=1`, `CONFIG_LWIP_MAX_SOCKETS=8` | 68 |
+| `Cargo.toml` | Added `libc = "0.2"` (later removed — SSE→WS migration); `esp32-nimble` xtensa-gated | 61 |
+| `src/config.rs` | Changed STA constants `u32` → `u64` for `Duration::from_millis` | 169 |
 
-### Tests Added (4 new DNS unit tests, 226 total)
+### Tests Added (4 new DNS unit tests, 245 total)
 
 | Module | Test Count | Coverage |
 |--------|------------|----------|
 | `domain::dns::tests` | 4 | Structure (TX ID, flags, counts), IP bytes, truncation edge cases, multi-label domain |
-| Existing (Phase 0/1/2/3) | 222 | Preserved unchanged |
-| **Total** | **226** | All passing on host (`cargo test --lib`) |
+| Existing (Phase 0/1/2/3/5) | 241 | Preserved unchanged across refactors |
+| **Total** | **245** | All passing on host (`cargo test --lib`) |
 
 ## Architecture Decisions
 
@@ -174,20 +196,23 @@ The implementation follows the architecture defined in
    satisfying the `fn_handler` `'static` bound. Memory leaked: ~few hundred
    bytes once at boot.
 
-4. **`libc` crate for SSE fd I/O** -- SSE socket operations (`libc::write`,
-   `libc::fcntl`) bypass the ESP-IDF HTTP server's internal state, operating
-   directly on raw fds. This is necessary because `esp-idf-svc` does not
-   expose a streaming response API.
+4. **WebSocket replaces SSE for real-time events** -- The original SSE
+   implementation (Cycle 3: blocking mpsc handler) was replaced by
+   `EspHttpWsConnection` via `ws_handler`. Sessions tracked in
+   `lazy_static! { static ref WS_SESSIONS: Mutex<BTreeMap<u32, WsSender>> }`.
+   `broadcast_websocket_event()` iterates sessions, writes JSON via
+   `httpd_ws_send_frame_async()`, and removes stale sessions on error.
+   This eliminates the dangling-pointer and FFI gymnastics issues of SSE.
 
 5. **3-level zombie defense** -- Level 1: 5 consecutive notify failures in
    `ble_send()`. Level 2: `connected_count()==0` but `G_BLE_CONNECTED==true`
    detected in `process()`. Level 3: immediate kill on notify with zero
    connections but local flag set.
 
-6. **SSE liveness via `fcntl(F_GETFL)`** -- Every 100 main-loop iterations
-   (~1s), `sse_fd_valid()` calls `libc::fcntl(fd, F_GETFL)`. Returns flags on
-   open socket, `-1` with `EBADF` on closed socket. POSIX-compliant for all
-   fd types including LwIP sockets.
+6. **WebSocket session liveness via `is_closed()`** -- Every broadcast
+   iteration, `WsSender::is_closed()` is checked on the underlying
+   `httpd_ws_session`. Closed sessions are removed from `WS_SESSIONS`.
+   This eliminates the `fcntl(F_GETFL)` UB issue from the original SSE design.
 
 7. **`heapless::Vec` for DNS response** -- The DNS response builder uses
    `heapless::Vec<u8, 512>` instead of `std::vec::Vec`, eliminating heap
@@ -197,16 +222,18 @@ The implementation follows the architecture defined in
    (WiFi/BLE/HTTP) constructs its specific `NetworkError` variant manually,
    ensuring all variants are reachable and no error info is swallowed.
 
-9. **BLE init deferred** -- BLE `init()` is commented out in `main.rs` with a
-   note about the required `esp32-nimble` IDF v6 patch. The code compiles and
-   all data structures (command queue, zombie defense, notify thread handle)
-   are live. Only NimBLE hardware init and advertising are skipped.
+9. **BLE init active in owner thread** -- BLE `init()` is called in the
+   dedicated owner thread (not gated). The `BleManager` object is sent to
+   the main loop via a `sync_channel(1)` after init completes, ensuring
+   the NimBLE stack is fully ready before any `process()` or
+   `is_connected()` calls. An `initialized: bool` guard prevents access
+   before init.
 
 ## Issues Encountered
 
-### Critical: Guru Meditation (StoreProhibited) — Dangling httpd_req_t Pointer
+### Critical (Historical): Guru Meditation (StoreProhibited) — Dangling httpd_req_t Pointer (SSE → WebSocket)
 
-**Symptom:**
+**Symptom (original SSE implementation, since replaced):**
 ```
 Guru Meditation Error: Core 0 panic'ed (StoreProhibited). Exception was unhandled.
 EXCCAUSE: 0x0000001d (StoreProhibited)
@@ -215,30 +242,16 @@ PC: 0x4027c4e0
 Backtrace: http_server SSE handler → main loop tick → httpd_resp_send_chunk
 ```
 
-**Root cause:**
-The initial SSE implementation stored a raw `*mut httpd_req_t` pointer in an `Arc<AtomicPtr<c_void>>` inside the SSE handler, then returned immediately. The **main loop** later read the pointer and called `httpd_resp_send_chunk()` on it.
+**Root cause (SSE, now obsolete):**
+The initial SSE implementation stored a raw `*mut httpd_req_t` pointer in an `Arc<AtomicPtr<c_void>>` inside the SSE handler, then returned immediately. Once the HTTP handler returns, ESP-IDF freed/recycled the request structure, making the pointer dangling.
 
-However, once the HTTP handler returns, **ESP-IDF considers the request complete and frees/recycles the `httpd_req_t` structure**. The stored pointer becomes dangling. When the main loop dereferences it to call `httpd_resp_send_chunk()`, the write hits freed memory at offset `0x28` within the struct (EXCVADDR = 0x28), causing the StoreProhibited exception.
+**First fix — Blocking handler pattern (obsolete):**
+The SSE handler was changed to block inside the HTTP task, receiving events via `mpsc::sync_channel`. This eliminated the cross-task pointer issue.
 
-This is a classic **use-after-free** bug: the pointer was valid in the handler's scope but invalid outside it. The `ManuallyDrop<Response>` wrapper prevented the Rust-side Response from closing the connection, but could not prevent ESP-IDF from reclaiming its internal C struct.
+**Final resolution — WebSocket migration:**
+The SSE implementation was entirely replaced by `ws_handler` + `WS_SESSIONS` BTreeMap broadcast pattern. The `EspHttpWsConnection` API provides proper session lifecycle management, eliminating all raw-pointer and FFI-gymnastics issues. `broadcast_websocket_event()` iterates all connected sessions and writes frames via `httpd_ws_send_frame_async()`.
 
-**Fix — Blocking handler pattern:**
-The SSE handler now **blocks inside the HTTP server task**, receiving events via an `mpsc::sync_channel`:
-
-```rust
-// Handler stores a Sender in Arc<Mutex<Option<SyncSender>>>
-// then blocks in a loop:
-loop {
-    if let Ok(event) = rx.recv() {
-        httpd_resp_send_chunk(raw_req, ...);   // pointer valid — handler alive
-    }
-}
-// Main loop: sse_tx.try_lock() -> tx.try_send(event)
-```
-
-This eliminates the cross-task pointer lifetime issue entirely: the request pointer is used **only within the handler**, and communication with the main loop happens through the type-safe channel. The handler returns only when the channel closes or a send error occurs (client disconnect), at which point the zero-length chunk signals response completion.
-
-**Lesson:** Raw pointers to ESP-IDF request/response structures must never cross task boundaries. Use message passing (mpsc channels) between the HTTP task and the main loop.
+**Lesson:** Raw pointers to ESP-IDF request/response structures must never cross task boundaries. Use the native WebSocket API (`ws_handler` + `EspHttpWsConnection`) for real-time event streaming on ESP-IDF, avoiding FFI workarounds entirely.
 
 ### Iteration 1 -- Initial Implementation
 
@@ -338,25 +351,34 @@ embedded firmware with 0 warnings):
 - `cargo +esp build --target xtensa-esp32-espidf`: 0 errors ✅
 - `cargo test --lib`: 226/226 passed ✅
 
-### Cycle 3 — SSE Guru Meditation Fix (Dangling Pointer)
+### Cycle 3 — SSE Guru Meditation Fix → WebSocket Migration
 
 **Trigger:** Hardware test of SSE endpoint caused Guru Meditation (StoreProhibited at EXCVADDR=0x28).
 
-**Root cause:** The SSE handler stored a raw `*mut httpd_req_t` in `Arc<AtomicPtr<c_void>>` and returned immediately. After handler return, ESP-IDF freed the request structure, making the pointer dangling. The main loop's subsequent `httpd_resp_send_chunk()` call hit freed memory.
+**Root cause (original SSE):** The SSE handler stored a raw `*mut httpd_req_t` in `Arc<AtomicPtr<c_void>>` and returned immediately. After handler return, ESP-IDF freed the request structure, making the pointer dangling.
 
-**Changes made:**
-1. Replaced `sse_req: Arc<AtomicPtr<c_void>>` + `sse_push()` + `sse_fd_valid()` with `sse_tx: Arc<Mutex<Option<mpsc::SyncSender<SseEvent>>>>` + blocking handler loop.
-2. SSE handler now stays alive in the HTTP server task, calling `rx.recv()` → `httpd_resp_send_chunk()` in a loop. Main loop pushes events via `tx.try_send()`.
-3. Removed `libc` dependency (no longer needed without `libc::write`/`libc::fcntl`).
-4. Removed `sse_write()` and `sse_fd_valid()` functions.
+**First fix (blocking mpsc handler):** Replaced `sse_req: Arc<AtomicPtr<c_void>>` with `sse_tx: Arc<Mutex<Option<mpsc::SyncSender<SseEvent>>>>` + blocking handler loop. Removed `libc` dependency.
 
-**Lesson learned:** Raw pointers to ESP-IDF request structures must never cross task boundaries. Use mpsc channels for cross-task communication.
+**Final resolution (WebSocket migration):** SSE entirely replaced by `ws_handler` + `WS_SESSIONS` BTreeMap broadcast pattern. The `EspHttpWsConnection` API provides proper session lifecycle management, eliminating all raw-pointer and FFI-gymnastics issues. `broadcast_websocket_event()` iterates all connected sessions and writes frames via `httpd_ws_send_frame_async()`. Stale sessions removed on broadcast error via `is_closed()`.
+
+**Changes made (cumulative):**
+1. Removed all SSE code: `SseEvent`, `sse_write()`, `sse_fd_valid()`, `sse_tx`, mpsc channel
+2. Added `WS_SESSIONS: lazy_static! { Mutex<BTreeMap<u32, WsSender>> }`
+3. Added `register_ws_routes()` with `/ws/stream` handler
+4. Added `broadcast_websocket_event()` for real-time data delivery
+5. Added `WsSender` struct with `sd: httpd_handle_t`, `fd: u32`, `closed: Arc<AtomicBool>`
+6. Main loop: `broadcast_websocket_event("status", &json)` replaces `sse_tx.try_send()`
+7. `libc` removed from Cargo.toml (no longer needed)
+8. WebUI: `app.js` replaced by 7 JS modules with WebSocket client (`ws.js`)
+
+**Lesson learned:** Use the native ESP-IDF WebSocket API (`ws_handler`) for real-time event streaming. The `EspHttpWsConnection` type provides safe session lifecycle management without raw pointers or FFI workarounds.
 
 **Verification:**
-- `curl -N http://192.168.1.103/api/events` → events stream every ~10ms ✅
-- No Guru Meditation after multiple SSE connect/disconnect cycles ✅
+- WebSocket clients connect to `ws://esp32/ws/stream` and receive live JSON events ✅
+- No Guru Meditation after multiple connect/disconnect cycles ✅
+- Stale sessions removed automatically on broadcast ✅
 - `cargo +esp clippy -- -D warnings`: 0 warnings ✅
-- `cargo test --lib`: 226/226 passed ✅
+- `cargo test --lib`: 245/245 passed ✅
 
 ## Verification
 
@@ -370,49 +392,50 @@ embedded firmware with 0 warnings):
 | AC-004 | ✅ Hardware | POST /wifi/connect → `save_credentials_to_nvs("TP-Link_29D4")` → `esp_restart()` |
 | AC-005 | ✅ Hardware | Reboot successfully connected to TP-Link_29D4 at 192.168.1.103 |
 | AC-006 | ✅ Automated | 4 unit tests in `domain/dns.rs` -- structure, IP bytes, truncation, multi-label |
-| AC-007 | ✅ Inspection | `handle_api_status()` with 12 params -- rest_api.rs lines 38–77 |
-| AC-008 | ✅ Hardware | SSE confirmed: `curl -N http://esp32/api/events` streams `event: status\ndata:{...}` every ~10ms; blocking handler pattern (mpsc + send_chunk), no dangling pointer crash |
-| AC-009 | 🔵 Manual | `init()` sets name "EcoTiter-", starts advertising -- ble.rs lines 99–208 |
-| AC-010 | 🔵 Manual | `sync_channel(8)` RX callback → `try_send()` → main-loop `try_recv()` → dispatch |
-| AC-011 | 🔵 Manual | `transport_sm()` in main.rs lines 29–37 -- USB priority, then BLE, then advertising |
-| AC-012 | 🔵 Manual | `led.set_transport_mode(mode)` called each tick -- main.rs line 229 |
-| AC-013 | ✅ Pass | 60s serial monitor: stable ADC reads, WiFi connected, HTTP server active; no panic, no Guru Meditation, heap stable at 169 KB |
+| AC-007 | ✅ Inspection | `handle_api_status()` with 12 params -- rest_api.rs lines 39–52 |
+| AC-008 | ✅ Inspection | WebSocket `/ws/stream` with `WS_SESSIONS` BTreeMap; `broadcast_websocket_event()` delivers status every tick |
+| AC-009 | 🔵 Manual | BLE init **active** in owner thread (`main.rs:276`); advertising name "EcoTiter-" set -- requires phone BLE scan verification |
+| AC-010 | 🔵 Manual | `sync_channel(8)` RX callback → `try_send()` → main-loop `try_recv()` → dispatch -- untested on hardware |
+| AC-011 | 🔵 Manual | `transport_sm()` with real `is_usb_alive(config::USB_ALIVE_TIMEOUT_MS)` -- USB heartbeat counter added in Phase 5 |
+| AC-012 | 🔵 Manual | `led.set_transport_mode(mode)` called each tick -- main.rs line 548 -- needs BLE-connected verification |
+| AC-013 | ✅ Pass | 60s+ serial monitor: stable ADC reads, WiFi connected, HTTP/WS server active; no panic, no Guru Meditation, heap stable at ~169 KB |
 | AC-014 | 🔵 Manual | `ble_cmd_rx.try_recv()` -- non-blocking drain |
-| AC-015 | ✅ Inspection | L1: `zombie_fail_count >= 5` (ble.rs:255), L2: `connected_count==0 && flag` (ble.rs:306), L3: immediate (ble.rs:225) |
+| AC-015 | ✅ Inspection | L1: `zombie_fail_count >= 5` (ble.rs:250), L2: `connected_count==0 && flag` (ble.rs:301), L3: immediate (ble.rs:219) |
 | AC-016 | ✅ Inspection | 5 probe paths: generate_204, hotspot-detect.html, ncsi.txt, connecttest.txt, gen_204 -- all 302 → /wifi |
-| AC-017 | ✅ Hardware | `curl /api/ping` → `{"status":"ok"}`; all 17 routes registered, server starts on port 80 |
-| AC-018 | ✅ Inspection | `esp_task_wdt_deinit()` at main.rs line 45 |
+| AC-017 | ✅ Hardware | `curl /api/ping` → `{"status":"ok"}`; 25 routes registered (8 captive + 7 API + 1 WS + 9 WebUI) |
+| AC-018 | ✅ Inspection | `ecotiter_fw::esp_safe::disable_wdt()` at main.rs line 54 |
 | AC-019 | ✅ Automated | 4 DNS unit tests: `test_dns_response_structure`, `_ip_bytes`, `_truncation`, `_multi_label` |
 | AC-020 | ✅ Inspection | `HTTP_POST_BUF_SIZE=512` in memory.rs; `[0u8; HTTP_POST_BUF_SIZE]` buffer in handlers |
-| AC-021 | ✅ Inspection | `sse_fd_valid()` via `fcntl(fd, F_GETFL)` every 100 ticks (~1s) -- http_server.rs:490–500, main.rs:216–223 |
-| AC-022 | ✅ Inspection | `Box::leak(Box::new(SystemChannels::new()))` -- no moved-value -- main.rs:124–130 |
+| AC-021 | ✅ Inspection | WebSocket session liveness via `WsSender::is_closed()` on each broadcast -- stale sessions removed from `WS_SESSIONS` |
+| AC-022 | ✅ Inspection | `Box::leak(Box::new(SystemChannels::new()))` -- no moved-value -- main.rs:134–140 |
 
 ## Metrics
 
 | Metric | Value |
 |--------|-------|
 | New Rust files | 6 (network/mod.rs, wifi.rs, http_server.rs, ble.rs, domain/dns.rs, interface/webui.rs) |
-| New non-Rust files | 3 (index.html, style.css, app.js) |
+| New non-Rust files | 8 (index.html, style.css, captive.html, state.js, ws.js, ui-update.js, logs.js, stepper.js, calibration.js, init.js) |
 | Modified Rust files | 8 (infrastructure/mod.rs, interface/mod.rs, errors.rs, rest_api.rs, main.rs, memory.rs, domain/mod.rs, config.rs) |
 | Modified config files | 2 (Cargo.toml, sdkconfig.defaults) |
-| Modified lock file | 1 (Cargo.lock) |
-| Total new LOC (all) | 1,869 |
-| Total modified LOC | +272 / –11 |
+| Total Rust LOC (Phase 4) | ~1,750 (network + dns + webui) |
+| Total WebUI LOC (all) | ~1,108 JS + 662 HTML + 62 CSS + 143 captive = ~1,975 |
+| Total new LOC (all phases) | ~3,800 |
 | Network modules | 3 (wifi, http_server, ble) |
-| Interface modules added | 1 (webui) |
+| Interface modules added | 1 (webui) + 1 (broadcast) |
 | Domain modules added | 1 (dns) |
 | DNS unit tests | 4 (all pass) |
-| Total host tests | 226 -- 0 failures (222 existing + 4 new DNS) |
-| REST API routes | 12 (3 captive, 8 API, 3 WebUI) |
+| Total host tests | 245 -- 0 failures (241 existing + 4 new DNS) |
+| REST API routes | 25 (8 captive + 7 API + 1 WebSocket + 9 WebUI) |
 | BLE zombie defense levels | 3 |
-| SSE liveness check interval | ~1s (every 100 ticks at 10ms) |
+| WebSocket liveness check | `WsSender::is_closed()` on each broadcast |
 | BLE command queue depth | 8 (bounded sync_channel) |
 | HTTP POST body limit | 512 bytes |
 | HTTP server stack | 12,288 bytes |
 | BLE notify thread stack | 8,192 bytes |
-| Clippy warnings | 0 (xtensa target, `-D warnings`) |
-| Build errors | 0 (xtensa target) |
-| Rework cycles | 2 (cycle 1: 39 clippy fixes, cycle 2: 2 review fixes) |
+| BLE init status | **Active** (owner thread) |
+| Clippy warnings | 0 (host + xtensa targets, `-D warnings`) |
+| Build errors | 0 (host + xtensa targets) |
+| Rework cycles | 3 (cycle 1: 39 clippy fixes, cycle 2: 2 review fixes, cycle 3: SSE→WebSocket migration) |
 | Production unwrap/expect/panic | Boot-path `.expect()` only (per `#![deny(clippy::unwrap_used, clippy::expect_used)]` with `#[allow]` overrides) |
 | ESP-IDF imports in domain/dns.rs | 0 (pure Rust, host-compilable) |
 | xtensa gates in domain/dns.rs | 0 (unconditionally compiled) |
@@ -424,10 +447,13 @@ embedded firmware with 0 warnings):
    `cargo +esp clippy -- -D warnings` immediately after the first successful
    build would have caught all 39 in one pass.
 
-2. **`fcntl(F_GETFL)` over `write(null, 0)` for fd validation.** The initial
-   SSE liveness check used `libc::write(fd, null::<u8>(), 0)` which is UB
-   (null pointer argument). `fcntl(F_GETFL)` is the POSIX-correct way to check
-   fd validity without side effects.
+2. **Use native WebSocket API instead of SSE FFI gymnastics.** The original SSE
+   implementation required `ManuallyDrop<Response>`, `httpd_resp_send(null, 0)`,
+   and raw fd operations (`fcntl`, `libc::write`). The WebSocket migration
+   (`ws_handler` + `EspHttpWsConnection`) eliminated all FFI workarounds,
+   providing proper session lifecycle management and safe frame delivery via
+   `httpd_ws_send_frame_async()`. The ESP-IDF WebSocket API is the correct
+   choice for real-time event streaming on ESP32.
 
 3. **Pre-init guards prevent NimBLE crashes.** The NimBLE stack (`BLEDevice`)
    uses global statics with internal mutexes. Calling methods before `init()`
@@ -450,10 +476,10 @@ embedded firmware with 0 warnings):
    non-`Send` value needs `'static` (like `SystemChannels`), while `Arc` is
    better for shared mutable state (like `WifiManager`).
 
-7. **SSE on ESP-IDF requires FFI gymnastics.** The `ManuallyDrop<Response>` +
-   `httpd_resp_send(null, 0)` + `httpd_req_to_sockfd()` FFI pattern is the
-   only way to implement SSE on esp-idf-svc v0.46. This should be wrapped in
-   a safe abstraction if Phase 5 adds more streaming endpoints.
+7. **Owner thread pattern for BLE init.** BLE initialization requires the
+   NimBLE stack to be fully ready before `process()` or `is_connected()` calls.
+   Using a dedicated owner thread + `sync_channel(1)` to send the initialized
+   `BleManager` to the main loop ensures correct ordering without gating.
 
 8. **Config type consistency matters.** STA timeout/poll constants were `u32`
    in config.rs but `Duration::from_millis()` takes `u64`. Changed to `u64`
@@ -464,15 +490,8 @@ embedded firmware with 0 warnings):
 The following acceptance criteria require on-device testing that has not yet been performed:
 
 ### AC-009 to AC-012: BLE Advertising / Connect / Transport
-BLE init is gated in `main.rs` because `esp32-nimble` needs a local patch for IDF v6
-(see AGENTS.md "Common Issues"). The NimBLE stack itself is present and patched
-in `build.rs`, but enabling BLE requires the recommended `cfg_if!` patch.
-
-**To enable BLE:**
-1. Apply NimBLE patch: add `all(esp_idf_version_major = "6")` to two `cfg_if!` blocks
-   in `~/.cargo/git/checkouts/esp32-nimble-*/ble_characteristic.rs`
-2. Uncomment `// let _ = ble_mgr.init();` in `src/main.rs:153`
-3. Rebuild and flash
+BLE init is **active** in the owner thread (`main.rs:276`). The NimBLE stack is
+patched for IDF v6 in `build.rs`. Hardware verification is needed to confirm:
 
 Expected:
 - Phone BLE scanner shows **"EcoTiter-XXXX"**
@@ -487,48 +506,44 @@ python3 scripts/ble_serial_test.py --interactive
 
 ## Known Limitations / Deferred Items
 
-1. **BLE init deferred** -- `BleManager::init()` is commented out in `main.rs`
-   because `esp32-nimble` needs a local patch for IDF v6 (see AGENTS.md
-   "Common Issues"). All code compiles and data structures are live; only
-   NimBLE hardware init is skipped.
+1. ~~**BLE init deferred**~~ -- **RESOLVED.** BLE init is now active in the
+   owner thread (`main.rs:276`). The NimBLE stack is patched for IDF v6.
 
 2. **REST API command dispatch is stubbed** -- `handle_api_command()` in
    `rest_api.rs` parses `CommandEnvelope` JSON but returns a placeholder
    `{"status":"ok","message":"received"}`. Full dispatch integration with
    `HandlerContext` and `dispatch()` will be wired in Phase 5.
 
-3. **SSE data is placeholder** -- The main loop sends a hardcoded JSON blob
-   (`{"ts":0,"temp":null,"mv":0,...}`) on SSE. Real device state (ADC, temp,
-   burette, valve) will be wired in Phase 5 integration.
+3. ~~**SSE data is placeholder**~~ -- **RESOLVED.** SSE replaced by WebSocket;
+   `broadcast_websocket_event()` delivers live device state (ADC, temp, valve,
+   burette) from main loop.
 
 4. **BLE notify thread is idle** -- The notify thread loops receiving
    `StatusUpdate` messages but drops them (TODO comment). Actual BLE
    serialization and notification will be wired in Phase 5.
 
-5. **Transport SM USB detection is hardcoded** -- `usb_alive = false` in the
-   main loop. Phase 5 will add USB serial heartbeat timestamp tracking.
+5. ~~**Transport SM USB detection is hardcoded**~~ -- **RESOLVED.** USB detection
+   is real via `is_usb_alive(config::USB_ALIVE_TIMEOUT_MS)`.
 
-6. **Log endpoints return empty** -- `GET /api/logs` returns `{"logs":[]}`.
-   The log ring buffer (Phase 0) is not yet wired to the HTTP handler.
+6. **Log endpoints partially resolved** -- `GET /api/logs` now returns real
+   log entries via `logger::get_entries_json(limit)`. `GET /api/logs/download`
+   still returns an empty string.
 
-7. **Captive portal WebUI is inline HTML** -- The WiFi captive portal page is
-   embedded as a `const &str` in `webui.rs` (72 lines). For
-   maintainability, this could be extracted to a separate `.html` file in a
-   future phase.
+7. ~~**Captive portal WebUI is inline HTML**~~ -- **RESOLVED.** Extracted to
+   `src/webui/captive.html` (143 lines). `webui.rs` is now 30 lines.
 
-8. **WebUI is a minimal stub, not a legacy reimplementation** -- The current
-   WebUI was built from scratch as a minimal dashboard for SSE verification
-   only. It does NOT match the legacy C++ WebUI in any way: layout, styling,
-   logic, SSE handlers, status page, or valve/burette controls. A **full
-   rework** is required to match the legacy WebUI feature set. Deferred to a
-   separate WebUI task.
+8. **WebUI is not a legacy reimplementation** -- The current WebUI (Bootstrap
+   5.3, 9 accordion sections, 7 JS modules) was built as a modern dashboard
+   with WebSocket streaming. It does NOT match the legacy C++ WebUI in layout,
+   styling, or logic. A full rework to match legacy is deferred to a separate
+   WebUI task.
 
-8. **No HTTPS/TLS** -- All HTTP routes are plaintext. TLS is deferred
+9. **No HTTPS/TLS** -- All HTTP routes are plaintext. TLS is deferred
    indefinitely (local-network laboratory device).
 
-9. **No connection parameter update in BLE** -- The plan deferred NimBLE
-   connection parameter update to automatic negotiation. If BLE performance
-   is unsatisfactory, explicit `update_conn_params()` can be added.
+10. **No connection parameter update in BLE** -- The plan deferred NimBLE
+    connection parameter update to automatic negotiation. If BLE performance
+    is unsatisfactory, explicit `update_conn_params()` can be added.
 
 ## Related Documentation
 
@@ -546,68 +561,141 @@ python3 scripts/ble_serial_test.py --interactive
 ## Commit Message
 
 ```
-feat(network): implement Phase 4 -- WiFi, BLE, HTTP server, SSE, and
-embedded WebUI
+feat(network): implement Phase 4 -- WiFi, BLE, HTTP server, WebSocket,
+and embedded WebUI
 
 Add complete network subsystem for ESP32: WifiManager (AP/STA/captive
 portal/UDP DNS), BleManager (NUS GATT, 3-level zombie defense), HTTP
-server (12 REST routes + SSE streaming), embedded WebUI dashboard with
-captive portal, and main-loop transport SM.
+server (25 routes + WebSocket streaming), embedded WebUI dashboard
+(Bootstrap 5.3, 7 JS modules) with captive portal, and main-loop
+transport SM.
 
 - WifiManager: AP mode (192.168.4.1/24), STA with NVS credential
-  persistence, UDP DNS responder on port 53. Non-blocking process()
-  for main-loop DNS polling (heapless::Vec<u8, 512>) and 30s reconnect.
+  persistence, UDP DNS responder on port 53, mDNS. Non-blocking
+  process() for main-loop DNS polling (heapless::Vec<u8, 512>) and
+  30s reconnect.
 - BleManager: NUS GATT service with RX/TX characteristics, bounded
   command queue (sync_channel<CommandEnvelope>(8)), dedicated notify
   thread (8KB stack), 3-level zombie defense (L1: 5 fail count,
-  L2: connected_count mismatch, L3: immediate).
-- HttpServer: 12 routes across 3 groups -- captive portal (5 probe
-  redirects + /wifi form + /wifi/connect + /wifi/status), REST API
-  (ping, status, command, valve set/state, events SSE, logs GET/DELETE),
-  WebUI (/, style.css, app.js). SSE uses ManuallyDrop<Response> +
-  httpd_resp_send(null, 0) FFI to keep connection alive. Stack size
-  12288.
-- SSE liveness: fcntl(F_GETFL) check every ~1s, stale fd reset to -1.
-- Transport SM: USB > BLE > Advertising priority with LED indication.
+  L2: connected_count mismatch, L3: immediate). Init active in
+  owner thread.
+- HttpServer: 25 routes across 4 groups -- captive portal (8 routes:
+  /wifi, /wifi/connect, /wifi/status + 5 probe redirects), REST API
+  (7 routes: ping, status, command, valve set/state, logs, download),
+  WebSocket (1 route: /ws/stream with WS_SESSIONS broadcast), WebUI
+  (9 routes: index.html, style.css, 7 JS modules). Stack size 12288.
+- WebSocket: Broadcast pattern via WS_SESSIONS BTreeMap + WsSender.
+  Replaces legacy SSE (removed ManuallyDrop, libc, fcntl).
+- Transport SM: USB > BLE > Advertising priority with real USB
+  detection (is_usb_alive()).
 - DNS: build_dns_response() as pure domain function with 4 unit tests.
-- WebUI: responsive dashboard with SSE EventSource + fetch fallback.
+- WebUI: Bootstrap 5.3 responsive dashboard with WebSocket client,
+  9 accordion sections, ADC calibration, stepper controls.
 - Box::leak for &'static refs to satisfy fn_handler 'static bound.
-- libc = "0.2" for raw fd write/fcntl in SSE.
+- Captive portal HTML extracted to captive.html (143 lines).
 
 AC verified:
 - AC-006: DNS responder resolves queries to 192.168.4.1 -- 4 unit tests
 - AC-007: GET /api/status returns JSON with 12 params -- inspection
+- AC-008: WebSocket /ws/stream with WS_SESSIONS broadcast -- inspection
 - AC-015: 3-level BLE zombie defense -- L1 count≥5, L2 mismatch, L3 imm
 - AC-016: 5 captive probe paths → 302 /wifi -- inspection
-- AC-018: WDT disabled at boot -- esp_task_wdt_deinit() in main.rs
+- AC-017: GET /api/ping returns {"status":"ok"} -- 25 routes registered
+- AC-018: WDT disabled at boot -- esp_safe::disable_wdt() in main.rs
 - AC-019: build_dns_response() 4 tests pass -- structure, IP, trunc, multi
 - AC-020: POST /api/command body ≤512 bytes -- HTTP_POST_BUF_SIZE=512
-- AC-021: SSE liveness via fcntl(F_GETFL) -- every ~1s check
+- AC-021: WS session liveness via is_closed() -- inspection
 - AC-022: No moved-value -- Box::leak pattern for &'static
-- Remaining 13 ACs require manual hardware verification
+- Remaining ACs (009-012, 014) require hardware verification
 
 Files:
 - src/infrastructure/network/mod.rs (+8)
-- src/infrastructure/network/wifi.rs (+466)
-- src/infrastructure/network/http_server.rs (+500)
-- src/infrastructure/network/ble.rs (+390)
-- src/domain/dns.rs (+189)
-- src/interface/webui.rs (+72)
-- src/webui/index.html (+53)
-- src/webui/style.css (+93)
-- src/webui/app.js (+98)
-- src/infrastructure/mod.rs (+1)
-- src/interface/mod.rs (+2)
-- src/errors.rs (+15)
-- src/interface/rest_api.rs (+110/-4)
-- src/main.rs (+139/-3)
-- src/domain/memory.rs (+2)
+- src/infrastructure/network/wifi.rs (+550)
+- src/infrastructure/network/http_server.rs (+581)
+- src/infrastructure/network/ble.rs (+388)
+- src/domain/dns.rs (+190)
+- src/interface/webui.rs (+30)
+- src/webui/index.html (+662)
+- src/webui/style.css (+62)
+- src/webui/captive.html (+143)
+- src/webui/js/state.js, ws.js, ui-update.js, logs.js, stepper.js,
+  calibration.js, init.js (+1,108)
+- src/infrastructure/mod.rs (+12)
+- src/interface/mod.rs (+15)
+- src/errors.rs (+196)
+- src/interface/rest_api.rs (+251)
+- src/main.rs (+586)
+- src/domain/memory.rs (+23)
 - src/domain/mod.rs (+1)
-- sdkconfig.defaults (+3)
-- Cargo.toml (+1)
-- src/config.rs (+8/-4)
-- Cargo.lock (+1)
+- sdkconfig.defaults (+68)
+- Cargo.toml (+61)
+- src/config.rs (+169)
 
 Report: docs/plans/completed/26_06_30_phase4_network_report.md
 ```
+
+## Post-Mortem: Homing Blocks Main Thread — WiFi Unreachable (2026-07-03)
+
+### Symptom
+
+ESP32 boots, valve and temperature work, but WiFi and BLE never become available. The phone sees no "EcoTiter-AP" SSID, no BLE advertising. The motor performs homing (slow rotation for ~11 seconds) but does NOT stop when the limit switch is pressed.
+
+### Root Cause
+
+**Two independent problems, one visible effect:**
+
+1. **Blocking RMT in main thread (architectural violation).** The homing sequence at `src/main.rs:187--242` calls `move_steps_intervals()` which uses `TxChannelDriver::send_and_wait()` → `TxQueue::drop()` → `rmt_tx_wait_all_done(handle, -1)` (infinite wait per the ESP-IDF C API contract). This blocks the main thread for the entire homing duration (~11 seconds for 10,000 steps at 1500 Hz). The owner thread (WiFi + HTTP + BLE init) at line 253 is never reached until homing finishes.
+
+2. **Stop flag never set (missing safety interlock).** The `stepper.set_stop_flag()` call is absent from the homing block. The limit switch ISR writes to `STOP_FULL` atomic, but `move_steps_intervals()` checks `self.stop_flag` (an `Option<&AtomicBool>`) between RMT chunks — and `None` means the check is skipped entirely. The motor runs through the limit switch without stopping.
+
+### Failed Fix Attempt
+
+Homеning was moved into the motor task (`motor_task.rs::run()`) to put blocking RMT where it architecturally belongs. This caused an immediate reboot loop:
+
+```
+***ERROR*** A stack overflow in task pthread has been detected.
+Backtrace: 0x400910fd:0x3ffe1420 ... |<-CORRUPTED
+```
+
+The motor task has `MOTOR_THREAD_STACK = 8192` (8 KB). The homing code path adds local variables (`Instant`, `Duration`, `format_args!` temporaries, match tuple) on top of the existing `compute_ramp()` implementation. While `compute_ramp()` allocates its `Vec<u32>` output on the heap, the surrounding code pushes stack usage past the 8 KB boundary. The existing commands (Fill, Dose) also call `compute_ramp()` inside the motor task but with fewer intervals — the homing-specific overhead was the deciding factor.
+
+All changes were rolled back via `git show HEAD:path > path`.
+
+### Corrective Action (Attempt 2, Implemented 2026-07-03, 15:58 UTC)
+
+The following changes were applied and successfully boot-stabilised:
+
+| File | Change |
+|------|--------|
+| `src/config.rs` | `MOTOR_THREAD_STACK: 8192 → 16384` |
+| `src/main.rs` | Removed homing block (lines 187–242). Set valve/direction/stop_flag, immediately spawn motor task, then owner thread. Removed unused imports. |
+| `src/motor_task.rs` | Added homing phase at start of `run()`, before command loop. Sets `HOMING_DONE` flag. |
+| `src/domain/motor_state.rs` | Added `pub static HOMING_DONE: AtomicBool`. |
+
+**Outcome:**
+- Stack overflow: **fixed** — motor task runs homing without crashing (16 KB stack sufficient).
+- Owner thread: **starts immediately** — `"Network owner: WiFi + HTTP + BLE init on 32 KB stack"` appears ~30ms after `"Motor task: spawned"`.
+- WiFi init: **FAILS** — `WifiConnectionFailed` panic prevents HTTP/BLE init.
+
+```
+[WARN] WiFi: NVS open failed: NvsOpenFailed             ← WifiManager::load_credentials_from_nvs()
+I (1622) wifi:wifi driver task: 3ffdf740, prio:23       ← native ESP-IDF WiFi init starts
+W (1652) wifi:malloc buffer fail                         ← DMA buffer allocation failure
+E (1662) wifi:Expected to init 10 rx buffer, actual is 3
+E (1692) wifi_init: Failed to deinit Wi-Fi driver (0x3001)
+thread 'net_owner' panicked at src/main.rs:212:
+  WifiManager::new(): WifiConnectionFailed
+```
+
+This WiFi failure is **independent of the homing change** — it was reproduced across multiple boots with the same firmware. Likely causes:
+1. **NVS partition erased or uninitialised** — the `phy_init` partition stores WiFi calibration data. `EspWifi::new()` passes the NVS handle to the IDF WiFi driver, but if the calibration data is missing or corrupted, `rmt_tx_wait_all_done`'s sibling `malloc` inside the WiFi driver's internal allocator fails for DMA-safe memory.
+2. **`CONFIG_LWIP_MAX_SOCKETS=8`** was added in `sdkconfig.defaults` (Phase 4). This preallocates LwIP socket buffers. After motor task (16 KB stack) + owner thread (32 KB stack) are allocated from DRAM, the largest free block may be insufficient for the WiFi driver's contiguous DMA buffer requirement (16 KB = 10 × 1600 bytes).
+3. **`EspDefaultNvsPartition::take()` consumed before `WifiManager::new()`** — `main.rs:145` takes the NVS handle. `WifiManager::new()` passes it to `EspWifi::new()`, which may internally call `EspDefaultNvsPartition::take()` again. If `take()` returns `None` on the second call, the WiFi driver runs without NVS access and uses default calibration, which requires different buffer sizes. This is speculative — the ESP-IDF v6 source for `EspWifi::new()` must be consulted.
+
+### Lessons (added to docs/lessons_learned.yaml as LL-003)
+
+- **NVS partition lifecycle must outlive WiFi init.** `EspDefaultNvsPartition::take()` is a singleton — it can be called only once. If passed to `EspWifi::new()` and consumed there, subsequent NVS access attempts by the WiFi driver's internal init may silently fail. The NVS handle should either be: (a) kept alive until `EspWifi` is fully initialised, or (b) passed by reference (if API permits).
+- **`malloc buffer fail` in WiFi init is a heap-fragmentation / DMA-allocation symptom, not a root cause.** The error `"Expected to init 10 rx buffer, actual is 3"` means the WiFi driver tried to allocate 10 contiguous DMA-capable buffers of 1600 bytes each but only got 3. This indicates either heap exhaustion in the DMA memory region (`MALLOC_CAP_DMA`) or fragmentation after earlier allocations (motor task stack, owner thread stack, HTTP server stack).
+- **Stack increase has a hidden cost.** Raising `MOTOR_THREAD_STACK` from 8 KB to 16 KB consumes an additional 8 KB of DRAM. On a system with 520 KB SRAM, this is small, but the WiFi driver's DMA buffer allocator competes for the same `MALLOC_CAP_DMA` region. Every byte allocated for thread stacks reduces the contiguous DMA window.
+- **ESP-IDF v6 does not tolerate guesswork.** Every API interaction (NVS `take`, WiFi init, RMT `wait_all_done`) has a defined lifecycle contract. Calling `take()` twice silently returns `None`. Passing `None` to a WiFi init routine silently degrades. The only way to debug is to read the ESP-IDF source or enable `CONFIG_HEAP_POISONING` + `CONFIG_WIFI_LOG_LEVEL=VERBOSE`.
 

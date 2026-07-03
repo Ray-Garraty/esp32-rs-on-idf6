@@ -1,3 +1,14 @@
+---
+type: ESP32 Reference
+title: "Protocol: Stack Overflow"
+description: >
+  Debugging protocol for ESP32 stack overflows: detection, default stack sizes
+  for all tasks, instrumentation with stack watermark, and root cause analysis
+  for the EcoTiter firmware.
+tags: [esp32, debug, stack-overflow, protocol]
+timestamp: 2026-07-03
+---
+
 # Protocol: Stack Overflow
 
 ## Trigger

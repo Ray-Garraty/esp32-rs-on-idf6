@@ -1,3 +1,14 @@
+---
+type: ESP32 Reference
+title: "Protocol: Embedded Boot Crash"
+description: >
+  S1–S5 Occam's Razor protocol for debugging ESP32 boot crashes: Guru Meditation,
+  WDT reset, boot hang, and incomplete flash. Mandatory systematic debugging
+  procedure for the EcoTiter firmware.
+tags: [esp32, debug, boot-crash, protocol, s1-s5]
+timestamp: 2026-07-03
+---
+
 # Protocol: Embedded Boot Crash
 
 ## Trigger
