@@ -495,6 +495,27 @@ Before submitting any change, verify:
 - [ ] Frozen `docs/API/SERIAL_API.md` contract respected
 - [ ] 30-second serial smoke test: no Guru Meditation, no WDT, no panics
 
+### GR-7: MANDATORY DIAGNOSTIC INSTRUMENTATION
+
+Every new function MUST have diagnostic instrumentation:
+
+| What | Instrumentation | Rule |
+|---|---|---|
+| FFI boundary | `ffi_guard::record_enter/exit()` | Must wrap every `unsafe { esp_idf_sys::* }` call |
+| RMT motion | `preconditions::assert_rmt_preconditions()` | Before any `move_steps_intervals()` call |
+| New thread | `stack_monitor::register_thread()` + `black_box::set_thread_slot()` | At thread creation |
+| State transition | `state_tracer::log_burette_transition()` or `log_transport_transition()` | On every `set_burette_state_tag()` call |
+| Large alloc (>4KB) | `heap_snapshot::assert_can_allocate()` | Before allocating contiguous DRAM |
+| Main loop | `tick_watchdog::tick_begin()` / `tick_end()` | Wrap each iteration body |
+
+Code generated without these instrumentation points is INCOMPLETE and must be rejected.
+
+📌 *Rationale (2026-07-03): Every crash in the post-mortem log — homing-blocks-main (GR-1),
+LL-001 stack overflow, DRAM triangle (GR-3), dangling C pointer (GR-5), and
+missing stop flag (GR-2) — could have been detected pre-mortem by a diagnostic
+event. The black box costs 1 KB SRAM and 5 µs per event, which is negligible
+for the insight gained.*
+
 ---
 
 ## Appendix A: Forbidden Patterns Quick Reference

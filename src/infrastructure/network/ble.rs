@@ -40,6 +40,7 @@ use crate::application::command::CommandEnvelope;
 use crate::config;
 use crate::domain::channels::StatusUpdate;
 
+use crate::diag;
 use crate::errors::NetworkError;
 
 /// Global BLE connection flag for zombie defense.
@@ -333,6 +334,8 @@ impl BleManager {
             .stack_size(config::BLE_NOTIFY_THREAD_STACK)
             .name("ble-notify".into())
             .spawn(move || {
+                diag::black_box::set_thread_slot(diag::stack_monitor::BLE_NOTIFY);
+                diag::register_thread(diag::stack_monitor::BLE_NOTIFY, "ble-notify");
                 log::info!("BLE: notify thread started");
 
                 loop {

@@ -12,3 +12,4 @@ __pycache__/
 .env
 components_esp32.lock
 .opencode/tmp/
+/logs/

@@ -34,6 +34,7 @@ use esp_idf_hal::rmt::{PinState, Pulse, PulseTicks, RmtChannel, Symbol, TxChanne
 use esp_idf_hal::units::FromValueType;
 
 use crate::config;
+use crate::diag;
 use crate::domain::context::MotorContext;
 use crate::domain::driver_traits::StepperMotor;
 use crate::domain::types::{Direction, Hz, Steps};
@@ -223,6 +224,12 @@ impl<'d> RmtStepper<'d> {
         if intervals_us.is_empty() {
             return Ok(());
         }
+
+        // Pre-flight: verify GR-2 (stop flag) and GR-1 (motor thread)
+        let _ = diag::preconditions::assert_rmt_preconditions(
+            self.stop_flag,
+            std::thread::current().name().unwrap_or("?"),
+        );
 
         // Check stop flag before the first chunk
         if let Some(flag) = self.stop_flag {

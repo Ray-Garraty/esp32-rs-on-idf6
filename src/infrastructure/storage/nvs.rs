@@ -42,11 +42,13 @@
 
 use core::ffi::c_char;
 
+use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_sys::{
     nvs_close, nvs_commit, nvs_erase_key, nvs_get_i64, nvs_get_str, nvs_get_u32, nvs_handle_t,
     nvs_open, nvs_set_i64, nvs_set_str, nvs_set_u32,
 };
 
+use crate::diag;
 use crate::errors::ResourceError;
 
 /// NVS handle type alias.
@@ -85,11 +87,13 @@ impl NvsManager {
 
         let mut handle: NvsHandle = 0;
 
+        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_NVS_OPEN);
         // SAFETY: nvs_open is a standard ESP-IDF FFI call. The namespace
         // pointer is valid, null-terminated. The handle output pointer is
         // aligned and non-null. We check the return code to ensure the
         // handle is valid.
         let ret = unsafe { nvs_open(c_namespace.as_ptr(), open_mode, &mut handle) };
+        diag::ffi_guard::record_exit(diag::ffi_guard::FFI_NVS_OPEN, if ret == 0 { 0 } else { -1 });
 
         if ret != esp_idf_sys::ESP_OK {
             return Err(ResourceError::NvsOpenFailed);
@@ -110,8 +114,13 @@ impl NvsManager {
         let c_key = std::ffi::CString::new(key).map_err(|_| ResourceError::NvsOpenFailed)?;
         let mut val: u32 = 0;
 
+        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_NVS_GET_U32);
         // SAFETY: Standard NVS FFI call with valid handle and key.
         let ret = unsafe { nvs_get_u32(self.handle, c_key.as_ptr(), &mut val) };
+        diag::ffi_guard::record_exit(
+            diag::ffi_guard::FFI_NVS_GET_U32,
+            if ret == 0 { 0 } else { -1 },
+        );
 
         match ret {
             esp_idf_sys::ESP_OK => {
@@ -144,8 +153,13 @@ impl NvsManager {
         let c_key = std::ffi::CString::new(key).map_err(|_| ResourceError::NvsOpenFailed)?;
         let bits = value.to_bits();
 
+        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_NVS_SET_U32);
         // SAFETY: Standard NVS FFI call.
         let ret = unsafe { nvs_set_u32(self.handle, c_key.as_ptr(), bits) };
+        diag::ffi_guard::record_exit(
+            diag::ffi_guard::FFI_NVS_SET_U32,
+            if ret == 0 { 0 } else { -1 },
+        );
         if ret != esp_idf_sys::ESP_OK {
             return Err(ResourceError::NvsOpenFailed);
         }
@@ -163,8 +177,13 @@ impl NvsManager {
         let c_key = std::ffi::CString::new(key).map_err(|_| ResourceError::NvsOpenFailed)?;
         let mut val: i64 = 0;
 
+        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_NVS_GET_I64);
         // SAFETY: Standard NVS FFI call with valid handle and key.
         let ret = unsafe { nvs_get_i64(self.handle, c_key.as_ptr(), &mut val) };
+        diag::ffi_guard::record_exit(
+            diag::ffi_guard::FFI_NVS_GET_I64,
+            if ret == 0 { 0 } else { -1 },
+        );
 
         match ret {
             esp_idf_sys::ESP_OK => Ok(Some(val)),
@@ -183,8 +202,13 @@ impl NvsManager {
     pub fn write_i64(&self, key: &str, value: i64) -> Result<(), ResourceError> {
         let c_key = std::ffi::CString::new(key).map_err(|_| ResourceError::NvsOpenFailed)?;
 
+        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_NVS_SET_I64);
         // SAFETY: Standard NVS FFI call.
         let ret = unsafe { nvs_set_i64(self.handle, c_key.as_ptr(), value) };
+        diag::ffi_guard::record_exit(
+            diag::ffi_guard::FFI_NVS_SET_I64,
+            if ret == 0 { 0 } else { -1 },
+        );
         if ret != esp_idf_sys::ESP_OK {
             return Err(ResourceError::NvsOpenFailed);
         }
@@ -202,8 +226,13 @@ impl NvsManager {
         let c_key = std::ffi::CString::new(key).map_err(|_| ResourceError::NvsOpenFailed)?;
         let mut val: u32 = 0;
 
+        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_NVS_GET_U32);
         // SAFETY: Standard NVS FFI call.
         let ret = unsafe { nvs_get_u32(self.handle, c_key.as_ptr(), &mut val) };
+        diag::ffi_guard::record_exit(
+            diag::ffi_guard::FFI_NVS_GET_U32,
+            if ret == 0 { 0 } else { -1 },
+        );
 
         match ret {
             esp_idf_sys::ESP_OK => Ok(Some(val)),
@@ -222,8 +251,13 @@ impl NvsManager {
     pub fn write_u32(&self, key: &str, value: u32) -> Result<(), ResourceError> {
         let c_key = std::ffi::CString::new(key).map_err(|_| ResourceError::NvsOpenFailed)?;
 
+        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_NVS_SET_U32);
         // SAFETY: Standard NVS FFI call.
         let ret = unsafe { nvs_set_u32(self.handle, c_key.as_ptr(), value) };
+        diag::ffi_guard::record_exit(
+            diag::ffi_guard::FFI_NVS_SET_U32,
+            if ret == 0 { 0 } else { -1 },
+        );
         if ret != esp_idf_sys::ESP_OK {
             return Err(ResourceError::NvsOpenFailed);
         }
@@ -251,6 +285,7 @@ impl NvsManager {
         // NVS strings for WiFi credentials are at most 64 bytes.
         const MAX_STR_LEN: usize = 256;
 
+        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_NVS_GET_STR);
         // SAFETY: Passing null pointer for buffer to query required length.
         let ret = unsafe {
             nvs_get_str(
@@ -260,6 +295,14 @@ impl NvsManager {
                 &mut required_len,
             )
         };
+        diag::ffi_guard::record_exit(
+            diag::ffi_guard::FFI_NVS_GET_STR,
+            if ret == 0 || ret == esp_idf_sys::ESP_ERR_NVS_INVALID_LENGTH {
+                0
+            } else {
+                -1
+            },
+        );
 
         if ret == esp_idf_sys::ESP_ERR_NVS_NOT_FOUND {
             return Ok(None);
@@ -277,6 +320,7 @@ impl NvsManager {
 
         let mut buf = [0u8; MAX_STR_LEN];
 
+        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_NVS_GET_STR);
         // SAFETY: The buffer is sized to `MAX_STR_LEN` bytes, which is
         // larger than `required_len` (checked above), so the NVS read
         // will not overflow. The buffer pointer is valid and aligned.
@@ -288,6 +332,10 @@ impl NvsManager {
                 &mut required_len,
             )
         };
+        diag::ffi_guard::record_exit(
+            diag::ffi_guard::FFI_NVS_GET_STR,
+            if ret == 0 { 0 } else { -1 },
+        );
 
         if ret != esp_idf_sys::ESP_OK {
             return Err(ResourceError::NvsOpenFailed);
@@ -319,8 +367,13 @@ impl NvsManager {
         let c_key = std::ffi::CString::new(key).map_err(|_| ResourceError::NvsOpenFailed)?;
         let c_value = std::ffi::CString::new(value).map_err(|_| ResourceError::NvsOpenFailed)?;
 
+        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_NVS_SET_STR);
         // SAFETY: Standard NVS FFI call.
         let ret = unsafe { nvs_set_str(self.handle, c_key.as_ptr(), c_value.as_ptr()) };
+        diag::ffi_guard::record_exit(
+            diag::ffi_guard::FFI_NVS_SET_STR,
+            if ret == 0 { 0 } else { -1 },
+        );
         if ret != esp_idf_sys::ESP_OK {
             return Err(ResourceError::NvsOpenFailed);
         }
@@ -335,8 +388,13 @@ impl NvsManager {
     pub fn erase(&self, key: &str) -> Result<(), ResourceError> {
         let c_key = std::ffi::CString::new(key).map_err(|_| ResourceError::NvsOpenFailed)?;
 
+        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_NVS_ERASE);
         // SAFETY: Standard NVS FFI call.
         let ret = unsafe { nvs_erase_key(self.handle, c_key.as_ptr()) };
+        diag::ffi_guard::record_exit(
+            diag::ffi_guard::FFI_NVS_ERASE,
+            if ret == 0 { 0 } else { -1 },
+        );
         if ret != esp_idf_sys::ESP_OK {
             return Err(ResourceError::NvsOpenFailed);
         }
@@ -349,8 +407,13 @@ impl NvsManager {
     ///
     /// Returns `ResourceError::NvsOpenFailed` on commit failure.
     fn commit(&self) -> Result<(), ResourceError> {
+        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_NVS_COMMIT);
         // SAFETY: Standard NVS FFI call with valid handle.
         let ret = unsafe { nvs_commit(self.handle) };
+        diag::ffi_guard::record_exit(
+            diag::ffi_guard::FFI_NVS_COMMIT,
+            if ret == 0 { 0 } else { -1 },
+        );
         if ret != esp_idf_sys::ESP_OK {
             return Err(ResourceError::NvsOpenFailed);
         }
@@ -360,12 +423,14 @@ impl NvsManager {
 
 impl Drop for NvsManager {
     fn drop(&mut self) {
+        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_NVS_CLOSE);
         // SAFETY: nvs_close is safe to call with a valid handle.
         // The handle is guaranteed valid because we only create NvsManager
         // via `open()` which returns Ok only if nvs_open succeeded.
         unsafe {
             nvs_close(self.handle);
         }
+        diag::ffi_guard::record_exit(diag::ffi_guard::FFI_NVS_CLOSE, 0);
     }
 }
 
@@ -392,6 +457,20 @@ pub fn stallguard_read_threshold() -> u8 {
 pub fn stallguard_write_threshold(value: u8) -> Result<(), ResourceError> {
     let mgr = NvsManager::open(NS_STALLGUARD, true)?;
     mgr.write_u32(KEY_SG_THRESHOLD, u32::from(value))
+}
+
+/// Initialize the default NVS partition exactly once at boot.
+///
+/// Returns a clonable handle. After this call, `NvsManager::open()` (which uses
+/// raw FFI `nvs_open()`) is safe to use because `nvs_flash_init()` was called.
+///
+/// Must be called before any `NvsManager::open()` or `EspWifi::new()` call.
+///
+/// # Errors
+///
+/// Returns `ResourceError::NvsOpenFailed` if the NVS partition cannot be initialized.
+pub fn nvs_init() -> Result<EspDefaultNvsPartition, ResourceError> {
+    EspDefaultNvsPartition::take().map_err(|_| ResourceError::NvsOpenFailed)
 }
 
 // ── Tests ──────────────────────────────────────────────────────

@@ -8,6 +8,8 @@
 
 use esp_idf_sys;
 
+use crate::diag;
+
 /// Disable the hardware watchdog timer (TWDT).
 ///
 /// Must be called once at boot, before any FreeRTOS task uses the watchdog.
@@ -19,6 +21,7 @@ use esp_idf_sys;
 /// `esp_task_wdt_deinit()` is safe to call from the main task at boot
 /// (FreeRTOS scheduler is running). No dependencies on other tasks.
 pub fn disable_wdt() {
+    diag::ffi_guard::record_enter(diag::ffi_guard::FFI_ESP_WDT);
     // SAFETY:
     //   Invariant: esp_task_wdt_deinit requires FreeRTOS scheduler running.
     //   Context: called once at boot from main task.
@@ -26,6 +29,7 @@ pub fn disable_wdt() {
     unsafe {
         esp_idf_sys::esp_task_wdt_deinit();
     }
+    diag::ffi_guard::record_exit(diag::ffi_guard::FFI_ESP_WDT, 0);
 }
 
 /// Suppress debug-level logs from the ESP-IDF HTTP server txrx component.
@@ -49,11 +53,13 @@ pub fn suppress_httpd_txrx_logs() {
 ///
 /// Prints errors if corruption is found.
 pub fn check_heap_integrity() {
+    diag::ffi_guard::record_enter(diag::ffi_guard::FFI_ESP_HEAP);
     // SAFETY:
     //   Invariant: heap_caps_check_integrity_all is a read-only diagnostic call.
     //   Context: safe after FreeRTOS scheduler init.
     //   Risk: none — read-only traversal, no side effects.
     let ok = unsafe { esp_idf_sys::heap_caps_check_integrity_all(true) };
+    diag::ffi_guard::record_exit(diag::ffi_guard::FFI_ESP_HEAP, 0);
     if ok {
         log::info!("Heap integrity OK");
     } else {
@@ -63,22 +69,31 @@ pub fn check_heap_integrity() {
 
 /// Read boot-time heap statistics.
 ///
-/// Returns `(free_heap_bytes, largest_free_block_bytes)`.
+/// Returns `(free_heap_bytes, largest_free_default_bytes, largest_free_dma_bytes)`.
 ///
-/// Both values come from read-only hardware registers via the ESP-IDF
+/// All values come from read-only hardware registers via the ESP-IDF
 /// heap allocator. Safe to call after FreeRTOS scheduler init.
-pub fn heap_stats() -> (u32, u32) {
+pub fn heap_stats() -> (u32, u32, u32) {
+    diag::ffi_guard::record_enter(diag::ffi_guard::FFI_ESP_HEAP);
     // SAFETY:
-    //   Invariant: esp_get_free_heap_size and heap_caps_get_largest_free_block
-    //   are read-only FFI calls that access hardware registers only.
+    //   Invariant: All three FFI calls are read-only and access heap
+    //   metadata only. No side effects on memory.
     //   Context: safe after FreeRTOS scheduler init.
     //   Risk: stale values if called while heap is in use (always true).
-    unsafe {
+    let result = unsafe {
         let free = esp_idf_sys::esp_get_free_heap_size();
-        let largest =
+        let largest_default =
             esp_idf_sys::heap_caps_get_largest_free_block(esp_idf_sys::MALLOC_CAP_DEFAULT);
-        (free, u32::try_from(largest).unwrap_or(0))
-    }
+        let largest_dma =
+            esp_idf_sys::heap_caps_get_largest_free_block(esp_idf_sys::MALLOC_CAP_DMA);
+        (
+            free,
+            u32::try_from(largest_default).unwrap_or(0),
+            u32::try_from(largest_dma).unwrap_or(0),
+        )
+    };
+    diag::ffi_guard::record_exit(diag::ffi_guard::FFI_ESP_HEAP, 0);
+    result
 }
 
 /// Read the current task's stack watermark (minimum free stack bytes
@@ -87,18 +102,22 @@ pub fn heap_stats() -> (u32, u32) {
 /// A return value below 1024 indicates critical risk of stack overflow.
 /// Safe to call from any FreeRTOS task after scheduler init.
 pub fn stack_watermark() -> u32 {
+    diag::ffi_guard::record_enter(diag::ffi_guard::FFI_WATERMARK);
     // SAFETY:
     //   Invariant: uxTaskGetStackHighWaterMark(NULL) queries the calling
     //   task's TCB (read-only field). Valid in any FreeRTOS task context.
     //   Context: safe after FreeRTOS scheduler init (main task).
     //   Risk: none — read-only TCB field access, idempotent.
-    unsafe { esp_idf_sys::uxTaskGetStackHighWaterMark(core::ptr::null_mut()) }
+    let result = unsafe { esp_idf_sys::uxTaskGetStackHighWaterMark(core::ptr::null_mut()) };
+    diag::ffi_guard::record_exit(diag::ffi_guard::FFI_WATERMARK, 0);
+    result
 }
 
 /// Trigger a full ESP32 software restart.
 ///
 /// Saves state to NVS before calling. This function does not return.
 pub fn restart() -> ! {
+    diag::ffi_guard::record_enter(diag::ffi_guard::FFI_ESP_RESTART);
     // SAFETY:
     //   Invariant: esp_restart resets the CPU immediately. All state must be
     //   persisted before calling. Safe to call from any task context.
@@ -108,11 +127,28 @@ pub fn restart() -> ! {
     }
 }
 
+/// Write a string directly to UART (stdout) without allocation.
+///
+/// Safe to call from any context including panic handler. Uses the raw
+/// `write(1, ...)` syscall — no heap, no locks, no formatting.
+/// Only for diagnostic emergency output.
+pub fn panic_write_str(s: &str) {
+    // SAFETY:
+    //   Invariant: `write(1, ptr, len)` writes to the pre-opened stdout
+    //   fd which is connected to UART on ESP-IDF. The write is async-signal-safe
+    //   and does not allocate. Safe from any context including panic handler.
+    //   Risk: partial write (returns < len) is silently ignored — OK for diagnostics.
+    unsafe {
+        esp_idf_sys::write(1, s.as_ptr().cast::<core::ffi::c_void>(), s.len());
+    }
+}
+
 /// Set BT/WiFi coexistence priority to prefer BLE.
 ///
 /// Safe to call once at init before any radio activity. Uses a simple
 /// register write — no side effects on memory safety.
 pub fn set_coex_ble_preferred() {
+    diag::ffi_guard::record_enter(diag::ffi_guard::FFI_ESP_COEX);
     // SAFETY:
     //   Invariant: esp_coex_preference_set is a register write, no memory effects.
     //   Context: called once at init before any radio activity.
@@ -120,4 +156,5 @@ pub fn set_coex_ble_preferred() {
     unsafe {
         esp_idf_sys::esp_coex_preference_set(esp_idf_sys::esp_coex_prefer_t_ESP_COEX_PREFER_BT);
     }
+    diag::ffi_guard::record_exit(diag::ffi_guard::FFI_ESP_COEX, 0);
 }

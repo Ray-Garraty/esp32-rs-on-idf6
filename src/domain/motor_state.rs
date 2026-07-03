@@ -34,6 +34,9 @@ pub static BURETTE_STATE_TAG: AtomicU8 = AtomicU8::new(0);
 /// Motor busy flag (true while a command is being executed).
 pub static MOTOR_BUSY: AtomicBool = AtomicBool::new(false);
 
+/// Set to true when homing completes (success or failure).
+pub static HOMING_DONE: AtomicBool = AtomicBool::new(false);
+
 /// Last homing limit switch steps (i.e., the position where the FULL limit switch
 /// was hit during the last homing). Used to infer the real nominal volume.
 pub static HOMING_STOP_STEPS: AtomicI32 = AtomicI32::new(0);
@@ -97,6 +100,15 @@ pub fn set_burette_state_tag(state: &BuretteState) {
         BuretteState::Stopping => 6,
         BuretteState::Error => 7,
     };
+
+    #[cfg(target_arch = "xtensa")]
+    {
+        let prev = BURETTE_STATE_TAG.load(Ordering::Acquire);
+        if prev != tag {
+            crate::diag::state_tracer::log_burette_transition(prev, tag, 0);
+        }
+    }
+
     BURETTE_STATE_TAG.store(tag, Ordering::Release);
 }
 

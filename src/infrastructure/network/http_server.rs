@@ -38,6 +38,8 @@ use esp_idf_sys::{
     httpd_ws_type_t_HTTPD_WS_TYPE_BINARY, httpd_ws_type_t_HTTPD_WS_TYPE_TEXT, EspError, ESP_FAIL,
 };
 
+use crate::diag;
+
 // `WifiManager` used with `'static` lifetime for `fn_handler` `Send` bound.
 type WifiMgr = Arc<Mutex<WifiManager<'static>>>;
 
@@ -106,12 +108,16 @@ impl WsSender {
             len: frame_data.len(),
         };
 
+        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_WS_SEND);
+
         // SAFETY: httpd_ws_send_frame_async is an async FFI call safe from any
         // thread (posts to httpd event loop). sd and fd are valid for the
         // lifetime of this WsSender (removed from WS_SESSIONS on close).
         let ret = unsafe {
             httpd_ws_send_frame_async(self.sd, self.fd, core::ptr::from_ref(&frame).cast_mut())
         };
+
+        diag::ffi_guard::record_exit(diag::ffi_guard::FFI_WS_SEND, if ret == 0 { 0 } else { -1 });
 
         if ret != 0 {
             self.closed.store(true, Ordering::SeqCst);

@@ -10,27 +10,54 @@ use log::info;
 use esp_idf_hal::gpio::Pull;
 
 use ecotiter_fw::config;
+use ecotiter_fw::diag;
 use ecotiter_fw::infrastructure::drivers::adc::AdcDriver;
 use ecotiter_fw::infrastructure::drivers::led::Led;
 use ecotiter_fw::infrastructure::drivers::limitswitch::{LimitSwitch, STOP_EMPTY, STOP_FULL};
 use ecotiter_fw::infrastructure::drivers::onewire;
 
+/// Register a panic hook that dumps the black box and stack watermarks to UART
+/// before the ESP32 resets. No heap allocations — uses raw `write(1, ...)`.
+fn setup_panic_hook() {
+    use core::fmt::Write as CoreWrite;
+    struct UartWriter;
+    impl CoreWrite for UartWriter {
+        fn write_str(&mut self, s: &str) -> core::fmt::Result {
+            ecotiter_fw::esp_safe::panic_write_str(s);
+            Ok(())
+        }
+    }
+    std::panic::set_hook(Box::new(|panic_info| {
+        let mut w = UartWriter;
+        let _ = write!(&mut w, "\n!!! PANIC");
+        if let Some(loc) = panic_info.location() {
+            let _ = write!(&mut w, " at {}:{}", loc.file(), loc.line());
+        }
+        let _ = writeln!(&mut w, " !!!");
+        if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+            let _ = writeln!(&mut w, "Message: {s}");
+        }
+        diag::black_box::dump(&mut w);
+        diag::stack_monitor::emergency_dump(&mut w);
+        let _ = writeln!(&mut w, "!!! PANIC END !!!");
+    }));
+}
+
 #[allow(clippy::expect_used, clippy::too_many_lines)]
 fn main() {
     use core::fmt::Write as CoreWrite;
     use ecotiter_fw::application::command::{CommandEnvelope, CommandResponse, HandlerContext};
-    use ecotiter_fw::domain::burette::{BuretteCommand, BuretteState};
+    use ecotiter_fw::domain::burette::BuretteCommand;
     use ecotiter_fw::domain::channels::CommandWithId;
     use ecotiter_fw::domain::motor_state;
-    use ecotiter_fw::domain::types::{Direction, Ml, TransportMode, ValvePosition};
+    use ecotiter_fw::domain::types::{Direction, TransportMode, ValvePosition};
     use ecotiter_fw::infrastructure::drivers::stepper::RmtStepper;
     use ecotiter_fw::infrastructure::drivers::valve::Valve;
     use ecotiter_fw::infrastructure::network::http_server::HttpServer;
     use ecotiter_fw::infrastructure::network::wifi::WifiManager;
+    use ecotiter_fw::infrastructure::storage::nvs;
     use ecotiter_fw::interface::broadcast::{BroadcastEvent, BuretteBroadcast};
-    use ecotiter_fw::stepper::ramp::{compute_ramp, RampConfig};
     use esp_idf_svc::eventloop::EspSystemEventLoop;
-    use esp_idf_svc::nvs::EspDefaultNvsPartition;
     use std::sync::mpsc;
     use std::sync::mpsc::TryRecvError;
 
@@ -45,6 +72,8 @@ fn main() {
         }
     }
 
+    static LAST_TRANSPORT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0xFF);
+
     esp_idf_sys::link_patches();
 
     // Regression guard: verify heap integrity immediately after startup.
@@ -56,15 +85,19 @@ fn main() {
 
     ecotiter_fw::logger::init();
 
+    setup_panic_hook();
+    diag::init();
+
     log::info!("=== EcoTiter firmware ===");
 
     let peripherals = esp_idf_hal::peripherals::Peripherals::take().expect("Peripherals::take()");
 
-    let (free, largest) = ecotiter_fw::esp_safe::heap_stats();
+    let (free, largest, dma_largest) = ecotiter_fw::esp_safe::heap_stats();
     log::info!(
-        "Heap: free={} KB, largest={} KB",
+        "Heap: free={} KB, largest={} KB, DMA_largest={} KB",
         free / 1024,
-        largest / 1024
+        largest / 1024,
+        dma_largest / 1024,
     );
 
     // ── Lightweight hardware drivers (main task, 32 KB stack) ──
@@ -102,6 +135,88 @@ fn main() {
     let (response_tx, _response_rx) =
         mpsc::sync_channel::<(u64, CommandResponse)>(config::MAX_PENDING_RESPONSES);
 
+    // ── Resources shared with Owner Thread ──
+    #[allow(clippy::expect_used)]
+    let channels: &'static ecotiter_fw::domain::channels::SystemChannels = Box::leak(Box::new(
+        ecotiter_fw::domain::channels::SystemChannels::new(),
+    ));
+    #[allow(clippy::expect_used)]
+    let cal_config: &'static ecotiter_fw::domain::calibration::CalibrationConfig = Box::leak(
+        Box::new(ecotiter_fw::domain::calibration::CalibrationConfig::new()),
+    );
+
+    // Resources for Owner Thread
+    let modem = peripherals.modem;
+    let sys_loop = EspSystemEventLoop::take().expect("System event loop");
+    #[allow(clippy::expect_used)]
+    let nvs = nvs::nvs_init().expect("NVS init");
+    let ble_active = Arc::new(AtomicBool::new(false));
+    let ble_active_clone = Arc::clone(&ble_active);
+
+    // Pre-WiFi DMA heap diagnostic
+    {
+        let (free, largest, dma_largest) = ecotiter_fw::esp_safe::heap_stats();
+        log::info!(
+            "Pre-WiFi heap: free={}K, largest={}K, DMA_largest={}K",
+            free / 1024,
+            largest / 1024,
+            dma_largest / 1024,
+        );
+    }
+
+    // Channel: wifi_mgr from Owner Thread → main
+    let (wifi_tx, wifi_rx) = std::sync::mpsc::channel();
+
+    // BLE init (bounded sync_channel for command queue)
+    let (ble_cmd_tx, ble_cmd_rx) =
+        mpsc::sync_channel::<CommandEnvelope>(ecotiter_fw::domain::memory::BLE_CMD_QUEUE_SIZE);
+
+    let mut ble_mgr = ecotiter_fw::infrastructure::network::ble::BleManager::new(ble_cmd_tx);
+
+    // Channel: ble_mgr from Owner Thread → main
+    let (ble_mgr_tx, ble_mgr_rx) =
+        std::sync::mpsc::channel::<ecotiter_fw::infrastructure::network::ble::BleManager>();
+
+    // ── HOMING runs inside motor task ──
+    // Set valve and direction for homing
+    ecotiter_fw::infrastructure::drivers::valve::set_global_valve_position(ValvePosition::Input);
+    stepper.set_direction(Direction::LiqIn);
+    // Attach limit switch stop flag so homing stops on contact
+    stepper.set_stop_flag(&STOP_FULL);
+
+    // ── Spawn motor task ─────────────────────────────────────────
+    // The stepper is MOVED into the task — main no longer owns it.
+    // Homing runs inside the motor task before entering command loop.
+    ecotiter_fw::motor_task::spawn(stepper, channels, cal_config, response_tx);
+    info!("Motor task: spawned (homing runs inside)");
+
+    // ── Temperature thread (DS18B20 on GPIO33) ───────────────────
+    {
+        let gpio33 = peripherals.pins.gpio33;
+        info!("DS18B20: software bitbang on GPIO33");
+        let _ = std::thread::Builder::new()
+            .stack_size(config::TEMP_THREAD_STACK)
+            .name("temp".into())
+            .spawn(move || {
+                diag::black_box::set_thread_slot(diag::stack_monitor::TEMP);
+                diag::stack_monitor::register_thread(diag::stack_monitor::TEMP, "temp");
+                info!("Temperature thread started");
+                let mut bus = match onewire::OneWireBus::new(gpio33) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        log::error!("OneWireBus::new() failed: {e:?}");
+                        return;
+                    }
+                };
+                loop {
+                    if let Some(temp) = onewire::read_sensor(&mut bus) {
+                        log::info!("Temperature: {temp:.1}°C");
+                    }
+                    std::thread::sleep(Duration::from_millis(config::TEMP_READ_INTERVAL_MS));
+                }
+            });
+    }
+
     // ── UART reader channel ─────────────────────────────────────
     // Thread reads stdin (blocking), sends bytes to main loop (non-blocking drain).
     let (uart_tx, uart_rx) = mpsc::channel::<heapless::Vec<u8, 64>>();
@@ -110,6 +225,8 @@ fn main() {
             .stack_size(4096)
             .name("uart".into())
             .spawn(move || {
+                diag::black_box::set_thread_slot(diag::stack_monitor::UART);
+                diag::stack_monitor::register_thread(diag::stack_monitor::UART, "uart");
                 let mut buf = [0u8; 64];
                 loop {
                     match std::io::stdin().read(&mut buf) {
@@ -129,124 +246,10 @@ fn main() {
             });
     }
 
-    // ── Resources shared with Owner Thread ──
-    #[allow(clippy::expect_used)]
-    let channels: &'static ecotiter_fw::domain::channels::SystemChannels = Box::leak(Box::new(
-        ecotiter_fw::domain::channels::SystemChannels::new(),
-    ));
-    #[allow(clippy::expect_used)]
-    let cal_config: &'static ecotiter_fw::domain::calibration::CalibrationConfig = Box::leak(
-        Box::new(ecotiter_fw::domain::calibration::CalibrationConfig::new()),
-    );
-
-    // Resources for Owner Thread
-    let modem = peripherals.modem;
-    let sys_loop = EspSystemEventLoop::take().expect("System event loop");
-    let nvs = EspDefaultNvsPartition::take().expect("NVS partition");
-    let ble_active = Arc::new(AtomicBool::new(false));
-    let ble_active_clone = Arc::clone(&ble_active);
-
-    // Channel: wifi_mgr from Owner Thread → main
-    let (wifi_tx, wifi_rx) = std::sync::mpsc::channel();
-
-    // BLE init (bounded sync_channel for command queue)
-    let (ble_cmd_tx, ble_cmd_rx) =
-        mpsc::sync_channel::<CommandEnvelope>(ecotiter_fw::domain::memory::BLE_CMD_QUEUE_SIZE);
-
-    let mut ble_mgr = ecotiter_fw::infrastructure::network::ble::BleManager::new(ble_cmd_tx);
-
-    // Channel: ble_mgr from Owner Thread → main
-    let (ble_mgr_tx, ble_mgr_rx) =
-        std::sync::mpsc::channel::<ecotiter_fw::infrastructure::network::ble::BleManager>();
-
-    // ── Temperature thread (DS18B20 on GPIO33) ───────────────────
-    {
-        let gpio33 = peripherals.pins.gpio33;
-        info!("DS18B20: software bitbang on GPIO33");
-        let _ = std::thread::Builder::new()
-            .stack_size(config::TEMP_THREAD_STACK)
-            .name("temp".into())
-            .spawn(move || {
-                info!("Temperature thread started");
-                let mut bus = match onewire::OneWireBus::new(gpio33) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        log::error!("OneWireBus::new() failed: {e:?}");
-                        return;
-                    }
-                };
-                loop {
-                    if let Some(temp) = onewire::read_sensor(&mut bus) {
-                        log::info!("Temperature: {temp:.1}°C");
-                    }
-                    std::thread::sleep(Duration::from_millis(config::TEMP_READ_INTERVAL_MS));
-                }
-            });
-    }
-
-    // ── HOMING SEQUENCE ──────────────────────────────────────────
-    // Runs before motor task spawn. Uses the stepper directly with a stop flag.
-    // Includes a wall-clock timeout of `HOMING_TIMEOUT_MS`.
-    {
-        use std::time::Instant;
-
-        info!("Homing: starting");
-        ecotiter_fw::infrastructure::drivers::valve::set_global_valve_position(
-            ValvePosition::Input,
-        );
-        stepper.set_direction(Direction::LiqIn);
-
-        let nominal_steps = ecotiter_fw::domain::calibration::volume_to_steps(
-            Ml(cal_config.nominal_vol),
-            cal_config.steps_per_ml,
-        )
-        .abs()
-        .min(config::HOMING_MAX_STEPS);
-        let ramp_cfg = RampConfig::new(
-            config::RAMP_ACCEL_STEPS,
-            config::RAMP_DECEL_STEPS,
-            config::HOMING_SPEED_HZ,
-            config::STEPPER_MIN_HZ,
-        );
-        let intervals = compute_ramp(nominal_steps, &ramp_cfg);
-        let motor_ctx = ecotiter_fw::domain::context::MotorContext;
-
-        let homing_start = Instant::now();
-        let timeout = Duration::from_millis(config::HOMING_TIMEOUT_MS);
-
-        let result = stepper.move_steps_intervals(&motor_ctx, &intervals);
-        let elapsed = homing_start.elapsed();
-
-        match (&result, elapsed < timeout) {
-            (Ok(()) | Err(ecotiter_fw::errors::StepperError::LimitSwitchReached), _) => {
-                info!("Homing complete — limit switch reached (elapsed={elapsed:?})");
-                motor_state::CURRENT_POSITION.store(
-                    nominal_steps.cast_signed(),
-                    std::sync::atomic::Ordering::Release,
-                );
-                motor_state::set_current_volume_ml(cal_config.nominal_vol);
-                motor_state::set_burette_state_tag(&BuretteState::Idle);
-            }
-            (Err(_), true) => {
-                log::error!("Homing failed (elapsed={elapsed:?})");
-                let _ = stepper.emergency_stop();
-                motor_state::set_burette_state_tag(&BuretteState::Error);
-            }
-            _ => {
-                log::error!("Homing timed out (elapsed={elapsed:?} > timeout={timeout:?})");
-                let _ = stepper.emergency_stop();
-                motor_state::set_burette_state_tag(&BuretteState::Error);
-            }
-        }
-        stepper.clear_stop_flag();
-    }
-
-    // ── Spawn motor task ─────────────────────────────────────────
-    // The stepper is MOVED into the task — main no longer owns it.
-    ecotiter_fw::motor_task::spawn(stepper, channels, cal_config, response_tx);
-    info!("Motor task: spawned");
-
-    // ── Owner thread: WiFi + HTTP + BLE (32 KB stack) ──────────
+    // ── Owner thread: WiFi + HTTP + BLE (after stack-heavy threads) ──
+    // Motor, temp, and UART threads allocate their stacks first.
+    // WiFi static rx buffers (4×1600=6.4K contiguous DMA) fit in
+    // the remaining heap without fragmentation.
     {
         let wifi_tx = wifi_tx;
         let ble_mgr_tx = ble_mgr_tx;
@@ -254,10 +257,26 @@ fn main() {
             .stack_size(config::NET_OWNER_STACK)
             .name("net_owner".into())
             .spawn(move || {
+                diag::black_box::set_thread_slot(diag::stack_monitor::NET_OWNER);
+                diag::stack_monitor::register_thread(diag::stack_monitor::NET_OWNER, "net_owner");
                 info!("Network owner: WiFi + HTTP + BLE init on 32 KB stack");
 
-                let wifi_mgr = WifiManager::new(modem, sys_loop, Some(nvs), ble_active_clone)
-                    .expect("WifiManager::new()");
+                // Clone sys_loop before passing to WifiManager::new().
+                // If EspWifi::new() fails, it drops the original sys_loop,
+                // which kills lwIP's tcpip thread. The clone keeps lwIP alive
+                // for HTTP server and BLE even without WiFi.
+                let _sysloop_keepalive = sys_loop.clone();
+                let wifi_mgr = match WifiManager::new(modem, sys_loop, Some(nvs.clone()), Arc::clone(&ble_active_clone)) {
+                    Ok(w) => w,
+                    Err(e) => {
+                        let (free, largest, dma_largest) = ecotiter_fw::esp_safe::heap_stats();
+                        log::error!(
+                            "WiFi init failed: {e:?}. Heap: free={}K, largest={}K, DMA_largest={}K. Running offline.",
+                            free / 1024, largest / 1024, dma_largest / 1024,
+                        );
+                        WifiManager::offline(ble_active_clone)
+                    }
+                };
 
                 let wifi_mgr = Arc::new(std::sync::Mutex::new(wifi_mgr));
                 let wifi_mgr_for_init = Arc::clone(&wifi_mgr);
@@ -267,16 +286,30 @@ fn main() {
                 // Init WiFi FIRST so HTTP server has correct IP/routing
                 if let Ok(mut wifi) = wifi_mgr_for_init.try_lock() {
                     wifi.init();
+                    diag::heap_snapshot::snapshot("wifi_init");
+                    // Post-WiFi DMA heap diagnostic
+                    let (free, largest, dma_largest) = ecotiter_fw::esp_safe::heap_stats();
+                    log::info!(
+                        "Post-WiFi heap: free={}K, largest={}K, DMA_largest={}K",
+                        free / 1024,
+                        largest / 1024,
+                        dma_largest / 1024,
+                    );
                 }
                 drop(wifi_mgr_for_init);
 
-                let _http_server = HttpServer::new(wifi_mgr_for_http).expect("HttpServer::new()");
+                match HttpServer::new(wifi_mgr_for_http) {
+                    Ok(_) => info!("HTTP: server started"),
+                    Err(e) => log::error!("HTTP: server init failed: {e:?}"),
+                }
+                diag::heap_snapshot::snapshot("http_started");
 
                 // Init BLE after HTTP (DRAM still mostly pristine)
                 match ble_mgr.init() {
                     Ok(()) => info!("BLE: init OK"),
                     Err(e) => log::error!("BLE init failed: {e:?}"),
                 }
+                diag::heap_snapshot::snapshot("ble_init");
                 let _ = ble_mgr_tx.send(ble_mgr);
 
                 let watermark = ecotiter_fw::esp_safe::stack_watermark();
@@ -288,7 +321,7 @@ fn main() {
             });
     }
 
-    // ── Получаем wifi_mgr из Owner Thread ──
+    // ── Receive wifi_mgr from Owner Thread ──
     let wifi_mgr = loop {
         match wifi_rx.try_recv() {
             Ok(mgr) => break mgr,
@@ -303,7 +336,7 @@ fn main() {
     };
     log::info!("Main: received wifi_mgr, entering event loop");
 
-    // ── Получаем ble_mgr из Owner Thread ──
+    // ── Receive ble_mgr from Owner Thread ──
     let mut ble_mgr = loop {
         match ble_mgr_rx.try_recv() {
             Ok(mgr) => break mgr,
@@ -337,6 +370,7 @@ fn main() {
     let mut tick_count: u64 = 0;
 
     loop {
+        diag::tick_watchdog::tick_begin();
         // Read ADC (non-blocking, ~30 µs)
         if let Ok(mv) = adc.read_raw_mv() {
             tick_count += 1;
@@ -545,6 +579,15 @@ fn main() {
                 ecotiter_fw::interface::serial::is_usb_alive(config::USB_ALIVE_TIMEOUT_MS);
             let ble_connected = ble_mgr.is_connected();
             let mode = transport_sm(usb_alive, ble_connected);
+            let mode_id = match mode {
+                TransportMode::UsbActive => 0u8,
+                TransportMode::BleAdvertising => 1u8,
+                TransportMode::BleConnected => 2u8,
+            };
+            let prev = LAST_TRANSPORT.swap(mode_id, core::sync::atomic::Ordering::Relaxed);
+            if prev != mode_id && prev != 0xFF {
+                diag::state_tracer::log_transport_transition(prev, mode_id);
+            }
             led.set_transport_mode(mode);
 
             // Restart check via global flag (set by captive portal handler in owner thread)
@@ -566,17 +609,26 @@ fn main() {
                 }
             }
 
-            // Stack watermark monitoring every ~10 seconds (1000 ticks × 10 ms)
+            // Heap + stack watermark monitoring every ~10 seconds (1000 ticks × 10 ms)
             if tick_count.is_multiple_of(1000) {
                 let wm = ecotiter_fw::esp_safe::stack_watermark();
-                log::info!("Main loop stack watermark: {wm} bytes free");
+                let (free, largest, dma_largest) = ecotiter_fw::esp_safe::heap_stats();
+                log::info!(
+                    "Heap: free={}K, largest={}K, DMA_largest={}K | Stack: {wm} bytes free",
+                    free / 1024,
+                    largest / 1024,
+                    dma_largest / 1024,
+                );
                 if wm < 2048 {
                     log::error!(
                         "Main stack critically low ({wm} bytes) — increase CONFIG_ESP_MAIN_TASK_STACK_SIZE"
                     );
                 }
+                diag::stack_monitor::check_watermark(diag::stack_monitor::MAIN);
             }
         }
+
+        diag::tick_watchdog::tick_end();
 
         // Advance the LED blink state machine
         led.process(config::MAIN_LOOP_TICK_MS);

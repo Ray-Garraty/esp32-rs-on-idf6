@@ -21,12 +21,13 @@
 #![forbid(unsafe_code)]
 
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use log::info;
 
 use crate::application::command::CommandResponse;
 use crate::config;
+use crate::diag;
 use crate::domain::burette::{BuretteCommand, BuretteOperation, BuretteState, RinsePhase};
 use crate::domain::calibration::{self, CalibrationConfig};
 use crate::domain::channels::{CommandWithId, StatusUpdate};
@@ -36,15 +37,16 @@ use crate::domain::motor_state;
 use crate::domain::types::{Direction, Hz, Ml, Steps};
 use crate::errors::StepperError;
 use crate::infrastructure::drivers::stepper::RmtStepper;
+use crate::stepper::ramp::{compute_ramp, RampConfig};
 
 /// Spawn the motor task thread.
 ///
 /// Takes ownership of `stepper`, `cmd_rx`, `status_tx`, and `response_tx`.
-/// The thread has an 8 KB stack and is named "motor".
+/// The thread has a 16 KB stack and is named "motor".
 ///
 /// # Parameters
 ///
-/// * `stepper` — Initialised `RmtStepper` (homing already completed).
+/// * `stepper` — Initialised `RmtStepper` (homing runs inside the thread).
 /// * `channels` — Static `SystemChannels` from which cmd_rx and status_tx are extracted.
 /// * `cal_config` — Static calibration configuration.
 /// * `response_tx` — Channel to send command completion responses to main loop.
@@ -69,8 +71,9 @@ pub fn spawn(
 
 /// Main loop of the motor thread.
 ///
-/// Owns the `RmtStepper`. Reads `CommandWithId` from `cmd_rx`, executes motion,
-/// updates atomics, and sends responses.
+/// Runs homing before entering the command loop. Then owns the `RmtStepper`,
+/// reads `CommandWithId` from `cmd_rx`, executes motion, updates atomics,
+/// and sends responses.
 fn run(
     mut stepper: RmtStepper<'static>,
     cmd_rx: &'static std::sync::Mutex<mpsc::Receiver<CommandWithId>>,
@@ -78,8 +81,66 @@ fn run(
     cal_config: &'static CalibrationConfig,
     response_tx: &mpsc::SyncSender<(u64, CommandResponse)>,
 ) {
+    diag::black_box::set_thread_slot(diag::stack_monitor::MOTOR);
+    diag::stack_monitor::register_thread(diag::stack_monitor::MOTOR, "motor");
     let ctx = MotorContext;
     let mut iteration: u64 = 0;
+
+    // ── HOMING PHASE ──────────────────────────────────────────
+    // Run homing before entering command loop. This is the ONLY place
+    // where blocking RMT calls are architecturally permitted.
+    // Stack: 16 KB (config::MOTOR_THREAD_STACK)
+    {
+        info!("Motor: homing starting");
+        let ctx = MotorContext;
+
+        let nominal_steps =
+            calibration::volume_to_steps(Ml(cal_config.nominal_vol), cal_config.steps_per_ml)
+                .abs()
+                .min(config::HOMING_MAX_STEPS);
+
+        let ramp_cfg = RampConfig::new(
+            config::RAMP_ACCEL_STEPS,
+            config::RAMP_DECEL_STEPS,
+            config::HOMING_SPEED_HZ,
+            config::STEPPER_MIN_HZ,
+        );
+        let intervals = compute_ramp(nominal_steps, &ramp_cfg);
+
+        let homing_start = Instant::now();
+        let timeout = Duration::from_millis(config::HOMING_TIMEOUT_MS);
+
+        let result = stepper.move_steps_intervals(&ctx, &intervals);
+        let elapsed = homing_start.elapsed();
+
+        match (&result, elapsed < timeout) {
+            (Ok(()) | Err(StepperError::LimitSwitchReached), _) => {
+                info!("Motor: homing complete (elapsed={elapsed:?})");
+                motor_state::CURRENT_POSITION.store(
+                    nominal_steps.cast_signed(),
+                    std::sync::atomic::Ordering::Release,
+                );
+                motor_state::set_current_volume_ml(cal_config.nominal_vol);
+                motor_state::set_burette_state_tag(&BuretteState::Idle);
+                diag::state_tracer::log_burette_transition(1, 0, 0); // homing → idle
+            }
+            (Err(_), true) => {
+                log::error!("Motor: homing failed (elapsed={elapsed:?})");
+                let _ = stepper.emergency_stop();
+                motor_state::set_burette_state_tag(&BuretteState::Error);
+                diag::state_tracer::log_burette_transition(1, 7, 0); // homing → error
+            }
+            _ => {
+                log::error!("Motor: homing timed out (elapsed={elapsed:?} > timeout={timeout:?})");
+                let _ = stepper.emergency_stop();
+                motor_state::set_burette_state_tag(&BuretteState::Error);
+                diag::state_tracer::log_burette_transition(1, 7, 0); // homing timeout → error
+            }
+        }
+        stepper.clear_stop_flag();
+        motor_state::HOMING_DONE.store(true, std::sync::atomic::Ordering::Release);
+        info!("Motor: homing done");
+    }
 
     loop {
         iteration += 1;
@@ -128,13 +189,7 @@ fn run(
         // result is always non-negative and the expression is correct.
         #[allow(clippy::manual_is_multiple_of)]
         if iteration % 100 == 0 {
-            let wm = crate::esp_safe::stack_watermark();
-            info!("Motor stack watermark: {wm} bytes free");
-            if wm < 2048 {
-                log::error!(
-                    "Motor stack critically low ({wm} bytes) — increase MOTOR_THREAD_STACK"
-                );
-            }
+            diag::stack_monitor::check_watermark(diag::stack_monitor::MOTOR);
         }
     }
 }

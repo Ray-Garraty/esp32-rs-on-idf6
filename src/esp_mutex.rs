@@ -14,6 +14,8 @@
 
 use core::cell::UnsafeCell;
 
+use crate::diag;
+
 /// ESP-IDF `PTHREAD_MUTEX_INITIALIZER` — sentinel value `0xFFFFFFFF` that
 /// triggers lazy `xSemaphoreCreateMutex()` allocation on first lock.
 const PTHREAD_MUTEX_INIT: u32 = 0xFFFF_FFFF;
@@ -49,9 +51,11 @@ impl<T> EspMutex<T> {
     /// On the first call, `pthread_mutex_lock()` detects the sentinel and
     /// triggers `xSemaphoreCreateMutex()` (heap allocation).
     pub fn lock(&self) -> Result<EspMutexGuard<'_, T>, ()> {
+        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_MUTEX_LOCK);
         // SAFETY: `handle` is a valid `pthread_mutex_t` initialized to the
         // ESP-IDF sentinel `0xFFFFFFFF`. The first lock triggers lazy init.
         let r = unsafe { esp_idf_sys::pthread_mutex_lock(self.handle.get().cast()) };
+        diag::ffi_guard::record_exit(diag::ffi_guard::FFI_MUTEX_LOCK, if r == 0 { 0 } else { -1 });
         if r == 0 {
             Ok(EspMutexGuard { mutex: self })
         } else {
@@ -61,8 +65,13 @@ impl<T> EspMutex<T> {
 
     /// Non-blocking lock attempt. Returns `Err(())` if the mutex is already held.
     pub fn try_lock(&self) -> Result<EspMutexGuard<'_, T>, ()> {
+        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_MUTEX_TRYLOCK);
         // SAFETY: Same as `lock()` — valid sentinel-initialized handle.
         let r = unsafe { esp_idf_sys::pthread_mutex_trylock(self.handle.get().cast()) };
+        diag::ffi_guard::record_exit(
+            diag::ffi_guard::FFI_MUTEX_TRYLOCK,
+            if r == 0 { 0 } else { -1 },
+        );
         if r == 0 {
             Ok(EspMutexGuard { mutex: self })
         } else {
@@ -78,11 +87,13 @@ pub struct EspMutexGuard<'a, T> {
 
 impl<T> Drop for EspMutexGuard<'_, T> {
     fn drop(&mut self) {
+        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_MUTEX_UNLOCK);
         // SAFETY: We hold the lock, so the mutex is in a valid locked state
         // and `pthread_mutex_unlock` is safe to call.
         unsafe {
             esp_idf_sys::pthread_mutex_unlock(self.mutex.handle.get().cast());
         }
+        diag::ffi_guard::record_exit(diag::ffi_guard::FFI_MUTEX_UNLOCK, 0);
     }
 }
 
