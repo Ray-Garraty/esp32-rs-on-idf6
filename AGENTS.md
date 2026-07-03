@@ -300,7 +300,7 @@ Default `ESP_COEX_PREFER_BALANCE`. Never prefer BT (GR-4).
 | `scripts/build.sh clippy-host` | Clippy (host, lib only) | 30 s |
 | `scripts/build.sh test` | Host unit tests | 60 s |
 | `scripts/build.sh fmt` | Format check | 30 s |
-| `scripts/build.sh flash [port]` | Flash firmware | ≥ 180 s |
+| `scripts/build.sh flash [port]` | Flash firmware | ≥ 300 s (5 min) — confirmed only by "Flashing has completed!" message |
 | `timeout 30 python3 scripts/serial_monitor.py` | Smoke test | 30 s |
 
 **After sourcing `scripts/build.sh`**, verify paths with `type <tool>`
