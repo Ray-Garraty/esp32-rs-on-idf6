@@ -1,6 +1,5 @@
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 #![forbid(unsafe_code)]
-use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -89,7 +88,7 @@ fn main() {
     setup_panic_hook();
     diag::init();
 
-    log::info!("=== EcoTiter firmware ===");
+    log::info!("=== esp32-rs-on-idf6 ===");
 
     let peripherals = esp_idf_hal::peripherals::Peripherals::take().expect("Peripherals::take()");
 
@@ -185,82 +184,9 @@ fn main() {
     // Attach limit switch stop flag so homing stops on contact
     stepper.set_stop_flag(&STOP_FULL);
 
-    // ── Spawn motor task ─────────────────────────────────────────
-    // The stepper is MOVED into the task — main no longer owns it.
-    // Homing runs inside the motor task before entering command loop.
-    ecotiter_fw::motor_task::spawn(stepper, channels, cal_config, response_tx);
-    info!("Motor task: spawned (homing runs inside)");
-
-    // ── Temperature thread (DS18B20 on GPIO33) ───────────────────
-    {
-        let gpio33 = peripherals.pins.gpio33;
-        info!("DS18B20: software bitbang on GPIO33");
-        diag::stack_monitor::register_thread(diag::stack_monitor::TEMP, "temp");
-        let _ = std::thread::Builder::new()
-            .stack_size(config::TEMP_THREAD_STACK)
-            .name("temp".into())
-            .spawn(move || {
-                diag::black_box::set_thread_slot(diag::stack_monitor::TEMP);
-                info!("Temperature thread started");
-                let mut bus = match onewire::OneWireBus::new(gpio33) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        log::error!("OneWireBus::new() failed: {e:?}");
-                        return;
-                    }
-                };
-                let mut temp_tick = 0u64;
-                loop {
-                    temp_tick += 1;
-                    if temp_tick.is_multiple_of(100) {
-                        diag::stack_monitor::check_watermark(diag::stack_monitor::TEMP);
-                    }
-                    if let Some(temp) = onewire::read_sensor(&mut bus) {
-                        log::info!("Temperature: {temp:.1}°C");
-                    }
-                    std::thread::sleep(Duration::from_millis(config::TEMP_READ_INTERVAL_MS));
-                }
-            });
-    }
-
-    // ── UART reader channel ─────────────────────────────────────
-    // Thread reads stdin (blocking), sends bytes to main loop (non-blocking drain).
-    let (uart_tx, uart_rx) = mpsc::channel::<heapless::Vec<u8, 64>>();
-    diag::stack_monitor::register_thread(diag::stack_monitor::UART, "uart");
-    {
-        let _ = std::thread::Builder::new()
-            .stack_size(config::UART_THREAD_STACK)
-            .name("uart".into())
-            .spawn(move || {
-                diag::black_box::set_thread_slot(diag::stack_monitor::UART);
-                let mut buf = [0u8; 64];
-                let mut uart_tick = 0u64;
-                loop {
-                    uart_tick += 1;
-                    if uart_tick.is_multiple_of(100) {
-                        diag::stack_monitor::check_watermark(diag::stack_monitor::UART);
-                    }
-                    match std::io::stdin().read(&mut buf) {
-                        Ok(n) if n > 0 => {
-                            let mut bytes = heapless::Vec::<u8, 64>::new();
-                            let _ = bytes.extend_from_slice(&buf[..n]); // safe: n ≤ 64
-                            if uart_tx.send(bytes).is_err() {
-                                break; // channel closed
-                            }
-                        }
-                        _ => {
-                            // read returned 0 or error — sleep briefly before retry
-                            std::thread::sleep(Duration::from_millis(10));
-                        }
-                    }
-                }
-            });
-    }
-
-    // ── Owner thread: WiFi + HTTP + BLE (after stack-heavy threads) ──
-    // Motor, temp, and UART threads allocate their stacks first.
-    // WiFi static rx buffers (4×1600=6.4K contiguous DMA) fit in
-    // the remaining heap without fragmentation.
+    // ── Owner thread: WiFi + HTTP + BLE (before stack-heavy threads) ──
+    // Spawn net_owner FIRST so WiFi init gets pristine DRAM before
+    // motor (16KB), temp (16KB), and UART (8KB) stacks fragment the heap.
     diag::stack_monitor::register_thread(diag::stack_monitor::NET_OWNER, "net_owner");
     {
         let wifi_tx = wifi_tx;
@@ -313,18 +239,19 @@ fn main() {
                 }
                 drop(wifi_mgr_for_init);
 
-                let http_ok = match HttpServer::new(wifi_mgr_for_http) {
-                    Ok(_) => {
+                let _http_server = match HttpServer::new(wifi_mgr_for_http) {
+                    Ok(server) => {
                         let watermark = ecotiter_fw::esp_safe::stack_watermark();
                         info!("HTTP: server started (stack watermark: {watermark} bytes)");
-                        true
+                        Some(server)
                     }
                     Err(e) => {
                         log::error!("HTTP: server init failed: {e:?}");
-                        false
+                        None
                     }
                 };
                 diag::heap_snapshot::snapshot("http_started");
+                let http_ok = _http_server.is_some();
                 ecotiter_fw::infrastructure::network::http_server::G_HTTP_SERVER_ALIVE
                     .store(http_ok, core::sync::atomic::Ordering::Release);
 
@@ -357,6 +284,103 @@ fn main() {
         }
     };
     log::info!("Main: received wifi_mgr, entering event loop");
+
+    // ── Spawn motor task ─────────────────────────────────────────
+    // Spawn BEFORE BLE init, while heap has ~60KB+ free (after WiFi+HTTP,
+    // before BLE consumes ~30KB). Motor/temp/uart do NOT need BLE.
+    // The stepper is MOVED into the task — main no longer owns it.
+    // Homing runs inside the motor task before entering command loop.
+    ecotiter_fw::motor_task::spawn(stepper, channels, cal_config, response_tx);
+    info!("Motor task: spawned (homing runs inside)");
+
+    // ── Temperature thread (DS18B20 on GPIO33) ───────────────────
+    {
+        let gpio33 = peripherals.pins.gpio33;
+        info!("DS18B20: software bitbang on GPIO33");
+        diag::stack_monitor::register_thread(diag::stack_monitor::TEMP, "temp");
+        let _ = std::thread::Builder::new()
+            .stack_size(config::TEMP_THREAD_STACK)
+            .name("temp".into())
+            .spawn(move || {
+                diag::black_box::set_thread_slot(diag::stack_monitor::TEMP);
+                info!("Temperature thread started");
+                let mut bus = match onewire::OneWireBus::new(gpio33) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        log::error!("OneWireBus::new() failed: {e:?}");
+                        return;
+                    }
+                };
+                let mut temp_tick = 0u64;
+                loop {
+                    temp_tick += 1;
+                    if temp_tick.is_multiple_of(100) {
+                        diag::stack_monitor::check_watermark(diag::stack_monitor::TEMP);
+                    }
+                    if let Some(temp) = onewire::read_sensor(&mut bus) {
+                        log::info!("Temperature: {temp:.1}°C");
+                    }
+                    std::thread::sleep(Duration::from_millis(config::TEMP_READ_INTERVAL_MS));
+                }
+            });
+    }
+
+    // ── UART reader channel ─────────────────────────────────────
+    // Thread reads stdin (blocking), sends bytes to main loop (non-blocking drain).
+    //
+    // Initialize UART0 VFS driver + install driver for blocking stdin reads.
+    // Without this, `std::io::stdin().read()` panics because the VFS layer has
+    // no driver backing fd 0 — ESP-IDF's boot console only sets up polled-mode
+    // output (printf/println), not interrupt-driven input.
+    ecotiter_fw::esp_safe::uart_init_stdin();
+    let (uart_tx, uart_rx) = mpsc::channel::<heapless::Vec<u8, 64>>();
+    diag::stack_monitor::register_thread(diag::stack_monitor::UART, "uart");
+    {
+        #[allow(clippy::expect_used)]
+        match std::thread::Builder::new()
+            .stack_size(config::UART_THREAD_STACK)
+            .name("uart".into())
+            .spawn(move || {
+                // [INVESTIGATION] raw UART write at thread entry
+                ecotiter_fw::esp_safe::panic_write_str("[INVESTIGATION] UART thread: entered closure\n");
+                diag::black_box::set_thread_slot(diag::stack_monitor::UART);
+                ecotiter_fw::esp_safe::panic_write_str("[INVESTIGATION] UART thread: after set_thread_slot\n");
+                let mut buf = [0u8; 64];
+                let mut uart_tick = 0u64;
+                ecotiter_fw::esp_safe::panic_write_str("[INVESTIGATION] UART thread: before loop\n");
+                loop {
+                    uart_tick += 1;
+                    if uart_tick.is_multiple_of(100) {
+                        diag::stack_monitor::check_watermark(diag::stack_monitor::UART);
+                    }
+                    ecotiter_fw::esp_safe::panic_write_str("[INVESTIGATION] UART thread: calling uart_read_stdin_blocking\n");
+                    match ecotiter_fw::esp_safe::uart_read_stdin_blocking(&mut buf) {
+                        Ok(n) if n > 0 => {
+                            let mut bytes = heapless::Vec::<u8, 64>::new();
+                            let _ = bytes.extend_from_slice(&buf[..n]); // safe: n ≤ 64
+                            if uart_tx.send(bytes).is_err() {
+                                break; // channel closed
+                            }
+                        }
+                        _ => {
+                            // uart_read_stdin_blocking returned 0 (no data) or
+                            // Err (driver not installed) — sleep briefly before retry.
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                    }
+                }
+            }) {
+            Ok(_handle) => {
+                // [INVESTIGATION] UART thread spawned successfully
+                ecotiter_fw::esp_safe::panic_write_str("[INVESTIGATION] UART thread: spawn OK\n");
+            }
+            Err(e) => {
+                // [INVESTIGATION] UART thread spawn FAILED
+                ecotiter_fw::esp_safe::panic_write_str("[INVESTIGATION] UART thread: spawn FAILED\n");
+                log::error!("UART thread spawn failed: {e:?}");
+            }
+        }
+    }
 
     // ── Receive ble_mgr from Owner Thread ──
     let mut ble_mgr = loop {

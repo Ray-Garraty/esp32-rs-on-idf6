@@ -3,7 +3,7 @@ const extractLevel = (entry) => LOG_LEVEL_REGEX.exec(entry)?.[1] || 'INFO';
 const getFilteredLogs = (messages, filter) =>
   filter === 'ALL' ? messages : messages.filter((e) => extractLevel(e) === filter);
 const addLogEntryData = (entries, data, maxLen = CONFIG.LOG_MAX_ENTRIES) => {
-  const ts = new Date().toLocaleTimeString('ru-RU');
+  const ts = new Date().toLocaleTimeString();
   const newEntries = [`[${ts}] [${data.level || 'INFO'}] ${data.msg || ''}`, ...entries];
   return newEntries.length > maxLen ? newEntries.slice(0, maxLen) : newEntries;
 };
@@ -33,7 +33,7 @@ const downloadLogs = () => {
       const blob = new Blob([text], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = 'ecotiter-logs.txt'; a.click();
+      a.href = url; a.download = 'firmware-logs.txt'; a.click();
       URL.revokeObjectURL(url);
     })
     .catch(e => console.error("downloadLogs error:", e));

@@ -1,62 +1,52 @@
-# EcoTiter Firmware
+# esp32-rs-on-idf6
 
-Firmware for a laboratory automatic titrator. Runs on ESP32, written in Rust (ESP-IDF v6, `esp-idf-hal` std mode). Controls a stepper-driven glass burette, solenoid valve, pH/ORP electrode, and temperature sensor. Primary host: Tauri desktop app.
+**ESP32 + Rust + ESP-IDF v6 — experimental firmware reference**
 
-## The Instrument
+An experimental firmware stack exploring ESP32 + Rust + ESP-IDF v6 with WiFi/BLE coexistence, RMT stepper control, limit switch ISRs, DS18B20 bitbang, ADC, multi-threaded architecture, and a comprehensive diagnostic subsystem.
 
-### Burette Module
+## What's Inside
 
-A glass cylinder with a plunger driven by a linear stepper motor (TMC2209). The plunger moves between two **limit switches**:
+- **Working drivers**: RMT stepper (TMC2209), ADC (pH electrode), DS18B20 (1-Wire bitbang), limit switches (GPIO ISR), solenoid valve, status LED
+- **Three communication transports**: USB-Serial (JSON), BLE GATT (NimBLE NUS), WiFi (REST API + WebSocket + captive portal)
+- **Multi-threaded architecture**: 7 dedicated threads with documented stack budgets
+- **32 wire-protocol commands** with typed dispatch
+- **Comprehensive diagnostics**: black-box event ring, stack watermark monitor, heap snapshotter, tick watchdog, FFI guard, state tracer
+- **Extensive host-testable domain logic**: burette state machine, calibration math, motion planning (>100 unit tests)
+- **14 documented crash post-mortems**: see [docs/lessons_learned.yaml](./docs/lessons_learned.yaml) — real bugs, root causes, fixes
 
-- **FULL** (bottom) — burette is full of titrant
-- **EMPTY** (top) — burette is empty
+## Current Status
 
-Position is tracked in steps from the FULL switch. The volume currently inside the cylinder is the **leftover volume** (ml). A homing sequence on power-up finds both endstops to establish position.
-
-### Valve
-
-A 2-way solenoid valve directs flow:
-
-| Position | Flow |
-|---|---|
-| `input` | From **titrant bottle** into the burette (filling) |
-| `output` | From **burette** into the titration vessel (dispensing) |
-
-### Sensors
-
-| Sensor | Measures | Used for |
-|---|---|---|
-| pH/ORP electrode | Electrical potential (mV) via ADC | Tracking the analytical signal during titration |
-| DS18B20 | Temperature (°C) | Temperature compensation of pH readings |
-
-### How Titration Works
-
-1. **Fill** the burette from the titrant bottle (valve → `input`, plunger moves down to FULL)
-2. For each dose step:
-   - **Dose** a precise volume into the vessel (valve → `output`, plunger moves up)
-   - **Wait** for the pH/mV reading to stabilise (drift < threshold, or timeout)
-   - **Record** the point (volume, pH/mV, derivative)
-3. Compute dpH/dV to detect the **equivalence point**
-4. Deliver post-equivalence volume if configured, then stop
-
-Results: a titration curve (CSV) with detected equivalence points.
+**Experimental — NOT production-ready.** This is an extended feasibility study. The code compiles and runs on real hardware, but known issues exist (DRAM fragmentation, init-order sensitivity, BLE null dereference edge cases). All findings are documented in the crash log and lessons-learned database.
 
 ## Quick Start
 
 ```bash
-PATH="/c/Users/vlbes/.pyenv/pyenv-win/versions/3.11.9:$PATH" \
-  cargo +esp build --target xtensa-esp32-espidf
-
-espflash flash --port COM5 "target/xtensa-esp32-espidf/debug/ecotiter"
-
-timeout 30 python scripts/serial_monitor.py COM5
-
-cargo test --lib stepper::ramp::tests
-
-cargo +esp clippy -- -D warnings
+source scripts/build.sh        # set up toolchain environment
+scripts/build.sh               # build for xtensa target
+scripts/build.sh test          # run host unit tests
+scripts/build.sh clippy        # clippy (xtensa) — 0 warnings
+scripts/build.sh flash /dev/ttyUSB0  # flash firmware
+timeout 30 python3 scripts/serial_monitor.py
 ```
 
-**Prerequisites:** `espup install`, `cargo install espflash ldproxy`, Python 3.11+.
+**Prerequisites:** `espup install`, Python 3.11+.
+
+## Development with OpenCode
+
+This project includes a set of custom [OpenCode](https://opencode.ai) AI sub-agents in `.opencode/agents/` that understand the project's architecture, rules, and hardware constraints:
+
+| Agent | Purpose |
+|---|---|
+| **planner** | Analyzes tasks and produces structured plans with acceptance criteria |
+| **verifier** | Validates plan feasibility against real code and hardware invariants |
+| **implementer** | Implements code from verified plans, runs all checks |
+| **validator** | Builds firmware, flashes real ESP32, runs smoke tests |
+| **reviewer** | Code review (architecture, style, safety, conventions) |
+| **debugger** | Embedded crash analysis using Occam's Razor protocol (S1–S5) |
+| **reporter** | Generates completion reports and conventional-commit messages |
+| **orchestrator** | Drives full feature/bugfix workflows using the above agents |
+
+All agents enforce the non-negotiable rules in [AGENTS.md](./AGENTS.md) — golden rules (GR-1 through GR-7), thread budget, init order, and hardware invariants derived from real post-mortems.
 
 ## Pin Assignment
 
@@ -67,7 +57,7 @@ cargo +esp clippy -- -D warnings
 | TMC2209 EN | 27 | PinDriver::output (active LOW) |
 | Valve | 14 | PinDriver::output (LOW=input, HIGH=output) |
 | Limit FULL | 32 | PinDriver::input + ISR |
-| Limit EMPTY | 35 | PinDriver::input + ISR |
+| Limit HOME | 35 | PinDriver::input + ISR |
 | pH electrode | 34 | ADC1_CH6 (12-bit) |
 | DS18B20 | 33 | OneWire bitbang |
 | Status LED | 2 | PinDriver::output |
@@ -79,11 +69,9 @@ The **critical rule**: GPIO3 is U0RXD — never configure it. `Serial` itself ow
 
 | Interface | Role | Protocol |
 |---|---|---|
-| USB-Serial | Primary command/response | JSON lines, two-phase (ACK → Result) |
+| USB-Serial | Command/response | JSON lines, two-phase (ACK → Result) |
 | BLE (NimBLE NUS) | Secondary | Same JSON protocol |
-| WiFi (AP/STA) | REST API + SSE + embedded WebUI | HTTP/JSON |
-
-USB has absolute priority — when USB is active, BLE is disconnected.
+| WiFi (AP/STA) | REST API + WebSocket + embedded WebUI | HTTP/JSON |
 
 ## Architecture
 

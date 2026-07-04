@@ -2,7 +2,7 @@
 type: Plan
 title: Phase 4 -- Network Subsystem -- WiFi, BLE, HTTP Server, WebSocket, and WebUI
 description: >
-  Complete implementation of EcoTiter network subsystem: WifiManager (AP/STA/captive
+  Complete implementation of esp32-rs-on-idf6 network subsystem: WifiManager (AP/STA/captive
   portal/DNS), BLE NUS GATT service with 3-level zombie defense, EspHttpServer with
   REST API (25 routes), WebSocket real-time stream, embedded WebUI dashboard, and main-loop
   transport state machine. All 22 ACs verified (8 automated/inspection, 9 hardware, 5 manual).

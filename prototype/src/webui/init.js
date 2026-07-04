@@ -1,5 +1,5 @@
 const initTheme = () => {
-  const saved = localStorage.getItem('ecotiter-theme') || 'light';
+  const saved = localStorage.getItem('theme') || 'light';
   document.documentElement.setAttribute('data-bs-theme', saved);
   const icon = document.getElementById('theme-icon');
   if (icon) icon.textContent = saved === 'dark' ? '☀️' : '🌙';
@@ -11,7 +11,7 @@ const toggleTheme = () => {
   html.setAttribute('data-bs-theme', next);
   const icon = document.getElementById('theme-icon');
   if (icon) icon.textContent = next === 'dark' ? '☀️' : '🌙';
-  localStorage.setItem('ecotiter-theme', next);
+  localStorage.setItem('theme', next);
 };
 let _cmdId = 0;
 const sendCommand = async (cmd, params) => {
@@ -36,7 +36,7 @@ const toggleValve = async () => {
       } else { console.error('toggleValve: server returned error', JSON.stringify(data)); }
     } else { const body = await res.text().catch(() => '(no body)'); console.error(`toggleValve: HTTP ${res.status}: ${body}`); }
   } catch (e) { console.error('toggleValve: network error:', e); }
-  finally { if (btn) { btn.disabled = false; btn.textContent = 'Переключить'; } }
+  finally { if (btn) { btn.disabled = false; btn.textContent = 'Toggle'; } }
 };
 const loadInitialLogs = () => {
   fetch('/api/logs?limit=20').then(r => {
@@ -46,7 +46,7 @@ const loadInitialLogs = () => {
     if (!data) return;
     if (data.entries) {
       data.entries.forEach(e => {
-        const ts = new Date().toLocaleTimeString('ru-RU');
+        const ts = new Date().toLocaleTimeString();
         APP_STATE.logs.messages.unshift(`[${ts}] [${e.level}] ${e.msg}`);
       });
       if (APP_STATE.logs.messages.length > CONFIG.LOG_MAX_ENTRIES) APP_STATE.logs.messages.length = CONFIG.LOG_MAX_ENTRIES;

@@ -3,8 +3,8 @@ const updateCalibrationUI = (state) => {
   if (!state) return;
   const badge = document.getElementById("adc-cal-status-badge");
   if (badge) {
-    if (state.is_default) { badge.textContent = "○ По умолчанию"; badge.className = "badge bg-secondary ms-2"; }
-    else { badge.textContent = "● Пользовательская"; badge.className = "badge bg-success ms-2"; }
+    if (state.is_default) { badge.textContent = "○ Default"; badge.className = "badge bg-secondary ms-2"; }
+    else { badge.textContent = "● Custom"; badge.className = "badge bg-success ms-2"; }
   }
   document.getElementById("adc-cal-a").textContent = state.a?.toFixed(6) ?? "—";
   document.getElementById("adc-cal-b").textContent = state.b?.toFixed(6) ?? "—";
@@ -19,10 +19,10 @@ const updateCalibrationUI = (state) => {
     const isMeasuring = APP_STATE.calibration.calibratingIndex === i;
     const tr = document.createElement("tr");
     const btnHtml = isMeasuring
-      ? '<span class="spinner-border spinner-border-sm"></span> Калибрую...'
+      ? '<span class="spinner-border spinner-border-sm"></span> Calibrating...'
       : pt.collected
         ? "✅"
-        : `<button class="btn btn-sm btn-outline-primary" onclick="calibratePoint(${i}, ${ref})">Калибровать</button>`;
+        : `<button class="btn btn-sm btn-outline-primary" onclick="calibratePoint(${i}, ${ref})">Calibrate</button>`;
     tr.innerHTML = `
       <td class="text-center">${i + 1}</td>
       <td class="font-monospace text-center">${ref >= 0 ? "+" : ""}${ref}</td>
@@ -48,22 +48,22 @@ const calibratePoint = async (index, refMv) => {
 };
 const computeCalibration = async () => {
   const btn = document.getElementById("adc-cal-compute-btn");
-  if (btn) { btn.disabled = true; btn.textContent = "⏳ Расчёт..."; }
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Computing..."; }
   const result = await sendCommand("adc.cal.compute", {});
   if (result?.status === "ok") {
     const a = result.data?.a ?? 0;
     const b = result.data?.b ?? 0;
     const r2 = result.data?.r_squared ?? 0;
-    if (window.confirm(`Коэффициенты новой калибровки:\n\na = ${a.toFixed(6)}\nb = ${b.toFixed(6)}\nR² = ${r2.toFixed(4)}\n\nСохранить?`)) {
+    if (window.confirm(`New calibration coefficients:\n\na = ${a.toFixed(6)}\nb = ${b.toFixed(6)}\nR² = ${r2.toFixed(4)}\n\nSave?`)) {
       await sendCommand("adc.cal.save", {});
-      window.alert("Калибровка успешно сохранена");
+      window.alert("Calibration saved successfully");
     }
     await loadCalibrationStatus();
   }
-  if (btn) { btn.disabled = false; btn.textContent = "🧮 Рассчитать и сохранить"; }
+  if (btn) { btn.disabled = false; btn.textContent = "🧮 Compute & Save"; }
 };
 const resetCalibration = async () => {
-  if (!window.confirm("Калибровка АЦП будет сброшена. Продолжить?")) return;
+  if (!window.confirm("ADC calibration will be reset. Continue?")) return;
   await sendCommand("adc.cal.reset", {});
   await loadCalibrationStatus();
 };
@@ -81,9 +81,9 @@ const loadBuretteCalStatus = async () => {
 const updateBuretteCalUI = (state) => {
   if (!state) return;
   const badge = document.getElementById("bc-cal-status-badge");
-  if (badge) { badge.textContent = state.is_default ? "○ По умолчанию" : "● Пользовательская"; badge.className = state.is_default ? "badge bg-secondary ms-2" : "badge bg-success ms-2"; }
+  if (badge) { badge.textContent = state.is_default ? "○ Default" : "● Custom"; badge.className = state.is_default ? "badge bg-secondary ms-2" : "badge bg-success ms-2"; }
   const spBadge = document.getElementById("bc-sp-cal-status-badge");
-  if (spBadge) { spBadge.textContent = state.is_default ? "○ По умолчанию" : "● Пользовательская"; spBadge.className = state.is_default ? "badge bg-secondary ms-2" : "badge bg-success ms-2"; }
+  if (spBadge) { spBadge.textContent = state.is_default ? "○ Default" : "● Custom"; spBadge.className = state.is_default ? "badge bg-secondary ms-2" : "badge bg-success ms-2"; }
   const sps = document.getElementById("bc-steps-per-ml");
   if (sps) sps.textContent = state.steps_per_ml?.toFixed(1) ?? "—";
   const nom = document.getElementById("bc-nominal-vol");
@@ -122,13 +122,13 @@ const waitForBuretteIdle = async () => {
 };
 const runVolumeCalibration = async () => {
   const freq = parseInt(document.getElementById("bc-vol-freq")?.value);
-  if (!freq || freq <= 0) { window.alert("Введите частоту"); return; }
+  if (!freq || freq <= 0) { window.alert("Enter frequency"); return; }
   const btn = document.getElementById("bc-vol-run-btn");
   const spinner = document.getElementById("bc-vol-run-spinner");
   const btnText = document.getElementById("bc-vol-run-text");
   if (btn) btn.disabled = true;
   if (spinner) spinner.classList.remove("d-none");
-  if (btnText) btnText.textContent = " Заполнение...";
+  if (btnText) btnText.textContent = " Filling...";
   const result = await sendCommand("burette.cal.run", { mode: "dose", freq_hz: freq });
   if (result?.status === "ok") {
     await waitForBuretteIdle();
@@ -138,14 +138,14 @@ const runVolumeCalibration = async () => {
     document.getElementById("bc-vol-calc-btn").disabled = false;
   }
   if (spinner) spinner.classList.add("d-none");
-  if (btnText) btnText.textContent = "▶ Запуск";
+  if (btnText) btnText.textContent = "▶ Run";
   if (btn) btn.disabled = false;
 };
 const calcVolumeCalibration = async () => {
   const mass = parseFloat(document.getElementById("bc-vol-mass")?.value || "0");
   const temp = parseFloat(document.getElementById("bc-vol-temp")?.value || "25");
   const pressure = parseFloat(document.getElementById("bc-vol-pressure")?.value || "101.3");
-  if (mass <= 0) { window.alert("Введите массу"); return; }
+  if (mass <= 0) { window.alert("Enter mass"); return; }
   const result = await sendCommand("burette.cal.calcVolume", { mass_g: mass, temp_c: temp, pressure_kpa: pressure });
   if (result?.status === "ok" && result?.data) {
     const d = result.data;
@@ -160,7 +160,7 @@ const calcVolumeCalibration = async () => {
 const saveBuretteCal = async () => {
   const result = await sendCommand("burette.cal.save", {});
   if (result?.status === "ok") {
-    window.alert("Калибровка сохранена");
+    window.alert("Calibration saved");
     document.getElementById("bc-vol-run-result").style.display = "none";
     document.getElementById("bc-vol-calc-result").style.display = "none";
     document.getElementById("bc-vol-calc-btn").disabled = true;
@@ -171,7 +171,7 @@ const saveBuretteCal = async () => {
   }
 };
 const resetBuretteCal = async () => {
-  if (!window.confirm("Калибровка бюретки будет сброшена. Продолжить?")) return;
+  if (!window.confirm("Burette calibration will be reset. Continue?")) return;
   await sendCommand("burette.cal.reset", {});
   await loadBuretteCalStatus();
 };
@@ -207,9 +207,9 @@ const runSpeedSequence = async () => {
   const calcBtn = document.getElementById("bc-sp-calc-btn");
   const resetBtn = document.getElementById("bc-sp-reset-btn");
   runBtn.disabled = true; calcBtn.disabled = true; resetBtn.disabled = true;
-  spinner.classList.remove("d-none"); runText.textContent = " Работа...";
+  spinner.classList.remove("d-none"); runText.textContent = " Running...";
   const freqs = Array.from(rows).map((tr) => parseInt(tr.querySelector(".bc-sp-freq")?.value || "0"));
-  if (freqs.some(f => !f || f <= 0)) { window.alert("Некорректные частоты"); spinner.classList.add("d-none"); runText.textContent = "▶ Запуск"; runBtn.disabled = false; calcBtn.disabled = false; resetBtn.disabled = false; return; }
+  if (freqs.some(f => !f || f <= 0)) { window.alert("Invalid frequencies"); spinner.classList.add("d-none"); runText.textContent = "▶ Run"; runBtn.disabled = false; calcBtn.disabled = false; resetBtn.disabled = false; return; }
   const result = await sendCommand("burette.cal.runSpeedSeq", { freqs, speed_ml_min: 20 });
   if (result?.status === "ok") {
     await waitForBuretteIdle();
@@ -229,10 +229,10 @@ const runSpeedSequence = async () => {
       });
       if (calStatus?.status === "ok" && calStatus?.data) updateBuretteCalUI(calStatus.data);
     }
-    spinner.classList.add("d-none"); runText.textContent = "▶ Запуск"; runBtn.disabled = false; calcBtn.disabled = false; resetBtn.disabled = false;
+    spinner.classList.add("d-none"); runText.textContent = "▶ Run"; runBtn.disabled = false; calcBtn.disabled = false; resetBtn.disabled = false;
     return;
   }
-  spinner.classList.add("d-none"); runText.textContent = "▶ Запуск"; runBtn.disabled = false; calcBtn.disabled = false; resetBtn.disabled = false;
+  spinner.classList.add("d-none"); runText.textContent = "▶ Run"; runBtn.disabled = false; calcBtn.disabled = false; resetBtn.disabled = false;
   const statusResult = await sendCommand("burette.cal.get", {});
   if (statusResult?.status === "ok" && statusResult?.data) updateBuretteCalUI(statusResult.data);
 };
@@ -243,7 +243,7 @@ const calcSpeedCalibration = async () => {
     const speed = parseFloat(tr.querySelector(".bc-sp-speed")?.value || "0");
     return freq > 0 && speed > 0 ? [...acc, { freq_hz: freq, speed_ml_min: speed }] : acc;
   }, []);
-  if (measurements.length < 2) { window.alert("Нужно минимум 2 измерения"); return; }
+  if (measurements.length < 2) { window.alert("Need at least 2 measurements"); return; }
   const result = await sendCommand("burette.cal.calcSpeed", { measurements });
   if (result?.status === "ok" && result?.data) {
     document.getElementById("bc-sp-k").textContent = result.data.k?.toFixed(6) ?? "—";

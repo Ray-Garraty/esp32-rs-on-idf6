@@ -3,7 +3,7 @@ type: Plan
 title: Phase 3 — Application Layer — Command Dispatch + REST API + Unify
   Broadcast
 description: >
-  Complete implementation of the EcoTiter application layer: 32-variant Command
+  Complete implementation of the esp32-rs-on-idf6 application layer: 32-variant Command
   enum with serde JSON deserialization, central dispatch routing table, 6
   handler modules (burette ops, calibration, sensors, valve, system, serial),
   application state machine, scheduler, serial line reader, broadcast event

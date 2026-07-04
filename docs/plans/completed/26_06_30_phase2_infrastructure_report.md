@@ -2,7 +2,7 @@
 type: Plan
 title: Phase 2 — Infrastructure Hardware Drivers
 description: >
-  Complete implementation of hardware drivers for EcoTiter ESP32: RMT stepper
+  Complete implementation of hardware drivers for esp32-rs-on-idf6 ESP32: RMT stepper
   (RmtStepper), ADC (pH electrode), OneWire (DS18B20 temperature), Valve
   (GPIO solenoid), LimitSwitch (GPIO32/35 ISR), LED (status indicator), and
   NVS storage (calibration + WiFi credentials). 2 rework cycles, 143/143

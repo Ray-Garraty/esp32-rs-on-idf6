@@ -516,11 +516,11 @@ impl WebServer {
 }
 
 const CAPTIVE_PORTAL_HTML: &str = r#"<!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EcoTiter - Настройка WiFi</title>
+    <title>WiFi Setup</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -588,22 +588,22 @@ const CAPTIVE_PORTAL_HTML: &str = r#"<!DOCTYPE html>
 </head>
 <body>
     <div class="container">
-        <h1>🌐 EcoTiter</h1>
-        <p class="subtitle">Настройка подключения к WiFi сети</p>
+        <h1>🌐 ESP32 WiFi Setup</h1>
+        <p class="subtitle">Configure WiFi connection</p>
         <form id="wifi-form">
             <div class="form-group">
-                <label for="ssid">Название WiFi сети (SSID)</label>
-                <input type="text" id="ssid" name="ssid" required placeholder="Введите SSID сети">
+                <label for="ssid">WiFi Network Name (SSID)</label>
+                <input type="text" id="ssid" name="ssid" required placeholder="Enter network SSID">
             </div>
             <div class="form-group">
-                <label for="password">Пароль</label>
+                <label for="password">Password</label>
                 <div style="display: flex; gap: 8px;">
-                    <input type="password" id="password" name="password" required placeholder="Введите пароль" style="flex: 1;">
+                    <input type="password" id="password" name="password" required placeholder="Enter password" style="flex: 1;">
                     <button type="button" id="toggle-password" onclick="togglePasswordVisibility()"
                             style="width: 48px; min-width: 48px; font-size: 20px; padding: 8px; background: #e0e0e0; border: 2px solid #e0e0e0; border-radius: 8px; cursor: pointer;">👁</button>
                 </div>
             </div>
-            <button type="submit" id="submit-btn">Подключиться</button>
+            <button type="submit" id="submit-btn">Connect</button>
         </form>
         <div id="status" class="status"></div>
     </div>
@@ -623,9 +623,9 @@ const CAPTIVE_PORTAL_HTML: &str = r#"<!DOCTYPE html>
             const ssid = document.getElementById('ssid').value;
             const password = document.getElementById('password').value;
             submitBtn.disabled = true;
-            submitBtn.innerHTML = '<span class="spinner"></span> Подключение...';
+            submitBtn.innerHTML = '<span class="spinner"></span> Connecting...';
             statusDiv.className = 'status info';
-            statusDiv.innerHTML = 'Пробуем подключиться к сети...';
+            statusDiv.innerHTML = 'Attempting to connect to network...';
             try {
                 const response = await fetch('/wifi/connect', {
                     method: 'POST',
@@ -635,23 +635,23 @@ const CAPTIVE_PORTAL_HTML: &str = r#"<!DOCTYPE html>
                 const result = await response.json();
                 if (result.success) {
                     statusDiv.className = 'status success';
-                    statusDiv.innerHTML = '✓ Подключение успешно! Сохранение настроек и перезагрузка...';
-                    submitBtn.innerHTML = '✓ Готово!';
+                    statusDiv.innerHTML = '✓ Connection successful! Saving settings and rebooting...';
+                    submitBtn.innerHTML = '✓ Done!';
                     setTimeout(() => {
-                        statusDiv.innerHTML += '<br><br>Устройство перезагружается. Подождите 10-15 секунд.';
+                        statusDiv.innerHTML += '<br><br>Device rebooting. Please wait 10-15 seconds.';
                     }, 2000);
                     return;
                 } else {
                     statusDiv.className = 'status error';
-                    statusDiv.innerHTML = '✗ Ошибка: ' + (result.message || 'Не удалось подключиться');
+                    statusDiv.innerHTML = '✗ Error: ' + (result.message || 'Could not connect');
                     submitBtn.disabled = false;
-                    submitBtn.innerHTML = 'Подключиться';
+                    submitBtn.innerHTML = 'Connect';
                 }
             } catch (error) {
                 statusDiv.className = 'status error';
-                statusDiv.innerHTML = '✗ Соединение прервано. Если подключение было успешным, устройство перезагружается. Подождите 10-15 секунд.';
+                statusDiv.innerHTML = '✗ Connection lost. If successful, the device is rebooting. Please wait 10-15 seconds.';
                 submitBtn.disabled = false;
-                submitBtn.innerHTML = 'Подключиться';
+                submitBtn.innerHTML = 'Connect';
             }
         });
     </script>

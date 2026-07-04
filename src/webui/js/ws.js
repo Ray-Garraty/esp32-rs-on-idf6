@@ -86,7 +86,7 @@ const startIntervals = () => {
 const millisToTime = (ms, base, baseMs) => {
   if (!base || !baseMs) return '';
   const real = new Date(base.getTime() + (ms - baseMs));
-  return real.toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  return real.toLocaleTimeString({ hour:'2-digit', minute:'2-digit', second:'2-digit' });
 };
 
 const valveLabel = (v) => ({'in':'input','out':'output','unk':'unknown'})[v] || v || '—';
@@ -97,14 +97,14 @@ const formatWsEntry = (e) => {
 
   const cell = (content, title = '') => `<td class="text-nowrap small" ${title ? `title="${title}"` : ''}>${content}</td>`;
   const buretteStatus = b ? (b.sts === 'working'
-    ? '<span class="badge bg-warning text-dark">движется</span>'
-    : '<span class="badge bg-success">ожидание</span>') : '—';
+    ? '<span class="badge bg-warning text-dark">moving</span>'
+    : '<span class="badge bg-success">idle</span>') : '—';
   const vol = b?.vl != null ? `${b.vl.toFixed(2)} мл` : '—';
   const speed = b?.spd != null ? `${b.spd.toFixed(1)} мл/мин` : '—';
   const tempStr = e.temp != null ? `${e.temp.toFixed(1)}°C` : '—';
   const mvStr = e.mv != null ? `${Number(e.mv).toFixed(1)} мВ` : '—';
 
-  return `<tr>${cell(ts)}${cell(buretteStatus)}${cell(vol, 'Объём')}${cell(speed, 'Скорость')}${cell(tempStr)}${cell(mvStr)}${cell(valveLabel(e.vlv))}</tr>`;
+  return `<tr>${cell(ts)}${cell(buretteStatus)}${cell(vol, 'Volume')}${cell(speed, 'Speed')}${cell(tempStr)}${cell(mvStr)}${cell(valveLabel(e.vlv))}</tr>`;
 };
 
 const renderWsLog = () => {
@@ -116,7 +116,7 @@ const renderWsLog = () => {
     ).join('');
     return;
   }
-  const header = `<table class="table table-sm table-bordered mb-0"><thead class="table-dark"><tr><th>Время</th><th>Бюретка</th><th>Объём</th><th>Скорость</th><th>Темп.</th><th>Электрод</th><th>Клапан</th></tr></thead><tbody>`;
+  const header = `<table class="table table-sm table-bordered mb-0"><thead class="table-dark"><tr><th>Time</th><th>Burette</th><th>Volume</th><th>Speed</th><th>Temp.</th><th>Electrode</th><th>Valve</th></tr></thead><tbody>`;
   container.innerHTML = `${header}${APP_STATE.logs.wsEntries.map(formatWsEntry).join('')}</tbody></table>`;
 };
 
@@ -201,8 +201,8 @@ window.initWs = () => {
           if (data.full === undefined || data.empty === undefined) {
             console.error('WS limitsw: missing full/empty fields', JSON.stringify(data));
           }
-          document.getElementById('hw-limit-min').textContent = data.full ? '✅ Активирован' : '—';
-          document.getElementById('hw-limit-max').textContent = data.empty ? '✅ Активирован' : '—';
+          document.getElementById('hw-limit-min').textContent = data.full ? '✅ Active' : '—';
+          document.getElementById('hw-limit-max').textContent = data.empty ? '✅ Active' : '—';
           break;
         }
         default:

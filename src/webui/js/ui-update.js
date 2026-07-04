@@ -22,7 +22,7 @@ const toggleSgThresholdEdit = async () => {
     APP_STATE.ui.sgEditMode = true; updateSgThresholdUI();
   } else {
     const val = parseInt(input.value, 10);
-    if (isNaN(val) || val < 0 || val > CONFIG.SG_THRESHOLD_MAX) { alert(`Порог: 0–${CONFIG.SG_THRESHOLD_MAX}`); return; }
+    if (isNaN(val) || val < 0 || val > CONFIG.SG_THRESHOLD_MAX) { alert(`Threshold: 0–${CONFIG.SG_THRESHOLD_MAX}`); return; }
     const btn = document.getElementById('stepperDrv-sg-threshold-btn');
     if (btn) btn.disabled = true;
     await sendCommand('stallGuard.setThreshold', { threshold: val });
@@ -43,7 +43,7 @@ const updateStepperUI = (stepper) => {
   set('stepperDrv-en-pin', APP_STATE.stepper.enEnabled ? 'LOW' : 'HIGH', APP_STATE.stepper.enEnabled ? 'badge bg-success ms-1' : 'badge bg-secondary ms-1');
 
   const btn = document.getElementById('stepper-start-stop-btn');
-  if (btn) { btn.textContent = isMoving ? '⏹ Стоп' : '▶ Пуск'; btn.className = isMoving ? 'btn btn-danger' : 'btn btn-success'; }
+  if (btn) { btn.textContent = isMoving ? '⏹ Stop' : '▶ Start'; btn.className = isMoving ? 'btn btn-danger' : 'btn btn-success'; }
   isMoving ? show('stepper-spinner') : hide('stepper-spinner');
 
   const inp = document.querySelector('#dynamic-input-container input');
@@ -117,8 +117,8 @@ const updateDebugUI = (data) => {
     }
   }
   if (diff('sgValue')) set('stepperDrv-sg-result', cur.sgValue);
-  if (diff('isStalled')) set('stepperDrv-stall', cur.isStalled ? '⚠️ Да' : '✅ Нет');
-  if (diff('isMoving')) set('stepperDrv-motor-busy', cur.isMoving ? 'Да' : 'Нет');
+  if (diff('isStalled')) set('stepperDrv-stall', cur.isStalled ? '⚠️ Yes' : '✅ No');
+  if (diff('isMoving')) set('stepperDrv-motor-busy', cur.isMoving ? 'Yes' : 'No');
   if (diff('sgThreshold')) {
     const inp = document.getElementById('stepperDrv-sg-threshold');
     if (inp && !APP_STATE.ui.sgEditMode) inp.value = cur.sgThreshold ?? '';
@@ -135,7 +135,7 @@ const updateUI = (data) => {
     const el = document.getElementById('hw-temperature');
     if (el) {
       if (data.temp !== null) el.textContent = `${data.temp.toFixed(1)} °C`;
-      else el.textContent = 'DS18B20 не подключен';
+      else el.textContent = 'DS18B20 not connected';
     }
   }
   const el = document.getElementById('hw-electrode');

@@ -1,4 +1,4 @@
-pub const AP_SSID: &str = "EcoTiter-AP";
+pub const AP_SSID: &str = "esp32-rs-on-idf6";
 pub const AP_PASSWORD: &str = "12345678";
 pub const AP_CHANNEL: u8 = 1;
 pub const AP_MAX_CONNECTIONS: u16 = 4;
@@ -21,5 +21,5 @@ pub const TEMP_READ_INTERVAL_MS: u64 = 1000;
 pub const TEMP_CONVERSION_WAIT_MS: u64 = 800;
 
 pub const NTP_MIN_VALID_TIMESTAMP: i64 = 1_000_000_000;
-pub const MDNS_HOSTNAME: &str = "ecotiter";
+pub const MDNS_HOSTNAME: &str = "esp32-rs-idf6";
 pub const HTTP_PORT: u16 = 80;

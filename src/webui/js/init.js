@@ -3,7 +3,7 @@
  * @brief Application initialization
  */
 const initTheme = () => {
-  const saved = localStorage.getItem('ecotiter-theme') || 'light';
+  const saved = localStorage.getItem('theme') || 'light';
   document.documentElement.setAttribute('data-bs-theme', saved);
   const icon = document.getElementById('theme-icon');
   if (icon) icon.textContent = saved === 'dark' ? '☀️' : '🌙';
@@ -16,7 +16,7 @@ const toggleTheme = () => {
   html.setAttribute('data-bs-theme', next);
   const icon = document.getElementById('theme-icon');
   if (icon) icon.textContent = next === 'dark' ? '☀️' : '🌙';
-  localStorage.setItem('ecotiter-theme', next);
+  localStorage.setItem('theme', next);
 };
 
 let _cmdId = 0;
@@ -48,7 +48,7 @@ const toggleValve = async () => {
       console.error(`toggleValve: HTTP ${res.status}: ${body}`);
     }
   } catch (e) { console.error('toggleValve: network error:', e); }
-  finally { if (btn) { btn.disabled = false; btn.textContent = 'Переключить'; } }
+  finally { if (btn) { btn.disabled = false; btn.textContent = 'Toggle'; } }
 };
 
 const loadInitialLogs = () => {
@@ -58,7 +58,7 @@ const loadInitialLogs = () => {
   }).then(data => {
     if (!data) return;
     if (data.entries) {
-      const ts = new Date().toLocaleTimeString('ru-RU');
+      const ts = new Date().toLocaleTimeString();
       const newMessages = data.entries.map(e => `[${ts}] [${e.level}] ${e.msg}`);
       APP_STATE.logs.messages = [...newMessages.reverse(), ...APP_STATE.logs.messages].slice(0, CONFIG.LOG_MAX_ENTRIES);
       renderLogTextarea();

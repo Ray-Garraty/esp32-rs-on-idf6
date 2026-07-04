@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ru" data-bs-theme="light">
+<html lang="en" data-bs-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EcoTiter ESP32 Dashboard</title>
+    <title>ESP32 Dashboard</title>
     <link
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
       rel="stylesheet"
@@ -19,7 +19,7 @@
       class="theme-toggle-btn"
       id="theme-toggle"
       onclick="toggleTheme()"
-      title="Переключить тему"
+      title="Toggle theme"
     >
       <span id="theme-icon">🌙</span>
     </button>
@@ -27,7 +27,7 @@
       <h3
         class="mb-4 text-center d-flex justify-content-center align-items-center gap-2"
       >
-        Панель отладки ESP32 ЭКОТИТР
+        ESP32 Debug Panel
         <span id="connection-status" class="badge bg-success"
           ><i class="bi bi-wifi"></i
         ></span>
@@ -46,7 +46,7 @@
               aria-expanded="true"
               aria-controls="collapse-hardware"
             >
-              <span class="flex-grow-1 text-center">Статус периферии</span>
+              <span class="flex-grow-1 text-center">Peripheral Status</span>
             </button>
           </h2>
           <div id="collapse-hardware" class="accordion-collapse collapse show">
@@ -55,19 +55,19 @@
                 <table class="table table-sm table-bordered mb-0">
                   <tbody>
                     <tr>
-                      <th style="width: 40%">Температура</th>
+                      <th style="width: 40%">Temperature</th>
                       <td id="hw-temperature">—</td>
                     </tr>
                     <tr>
-                      <th style="width: 40%">АЦП (мВ)</th>
+                      <th style="width: 40%">ADC (mV)</th>
                       <td id="hw-adc">—</td>
                     </tr>
                     <tr>
-                      <th>Электрод (мВ)</th>
+                      <th>Electrode (mV)</th>
                       <td id="hw-electrode">—</td>
                     </tr>
                     <tr>
-                      <th>Положение клапана</th>
+                      <th>Valve Position</th>
                       <td>
                         <span id="hw-valve">—</span>
                         <button
@@ -75,20 +75,20 @@
                           class="btn btn-sm btn-primary ms-2"
                           onclick="toggleValve()"
                         >
-                          Переключить
+                          Toggle
                         </button>
                       </td>
                     </tr>
                     <tr>
-                      <th>Концевик EMPTY</th>
+                      <th>Limit Switch EMPTY</th>
                       <td id="hw-limit-max">—</td>
                     </tr>
                     <tr>
-                      <th>Концевик FULL</th>
+                      <th>Limit Switch FULL</th>
                       <td id="hw-limit-min">—</td>
                     </tr>
                     <tr>
-                      <th>Связь с Tauri</th>
+                      <th>Connection</th>
                       <td id="hw-connection">—</td>
                     </tr>
                   </tbody>
@@ -110,7 +110,7 @@
               id="stepperDrv-toggle-btn"
             >
               <span class="flex-grow-1 text-center"
-                >Драйвер шагового двигателя (UART)</span
+                >Stepper Driver (UART)</span
               >
               <span id="stepperDrv-status-icon" class="badge bg-danger ms-1"
                 >✗</span
@@ -127,7 +127,7 @@
                     <span id="stepperDrv-sg-result">—</span>
                   </p>
                   <p class="mb-1">
-                    <strong>StallGuard порог:</strong>
+                    <strong>StallGuard Threshold:</strong>
                     <input
                       type="number"
                       id="stepperDrv-sg-threshold"
@@ -172,7 +172,7 @@
               aria-controls="collapse-stepper"
             >
               <span class="flex-grow-1 text-center"
-                >Управление шаговым двигателем</span
+                >Stepper Motor Control</span
               >
             </button>
           </h2>
@@ -189,7 +189,7 @@
                     value="steps"
                   />
                   <label class="form-label fw-bold mb-0" for="mode-steps"
-                    >По числу шагов</label
+                    >By Steps</label
                   >
                 </div>
                 <div class="form-check form-check-inline mb-0">
@@ -202,10 +202,10 @@
                     checked
                   />
                   <label class="form-label fw-bold mb-0" for="mode-continuous"
-                    >Непрерывное движение</label
+                    >Continuous</label
                   >
                 </div>
-                <span class="fw-bold ms-2">Пройдено шагов: </span
+                <span class="fw-bold ms-2">Steps Taken: </span
                 ><span id="stepper-actual-steps" class="fw-bold text-primary"
                   >0</span
                 >
@@ -215,10 +215,10 @@
               <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
                 <div id="dynamic-input-container"></div>
                 <button id="stepper-start-stop-btn" class="btn btn-success">
-                  ▶ Пуск
+                  ▶ Start
                 </button>
                 <div id="stepper-spinner" class="spinner-border text-primary" role="status" style="display:none;"></div>
-                <div class="btn-group" role="group" aria-label="Направление">
+                <div class="btn-group" role="group" aria-label="Direction">
                   <input
                     type="radio"
                     class="btn-check"
@@ -262,7 +262,7 @@
               aria-expanded="true"
               aria-controls="collapse-logs"
             >
-              <span class="flex-grow-1 text-center">Системный лог</span>
+              <span class="flex-grow-1 text-center">System Log</span>
             </button>
           </h2>
           <div id="collapse-logs" class="accordion-collapse collapse show">
@@ -274,7 +274,7 @@
                   style="width:auto"
                   onchange="setLogLevelFilter(this.value)"
                 >
-                  <option value="ALL" selected>ВСЕ</option>
+                  <option value="ALL" selected>ALL</option>
                   <option value="DEBUG">DEBUG</option>
                   <option value="INFO">INFO</option>
                   <option value="WARN">WARN</option>
@@ -285,10 +285,10 @@
                   class="btn btn-sm btn-primary"
                   onclick="downloadLogs()"
                 >
-                  Выгрузить
+                  Download
                 </button>
                 <button class="btn btn-sm btn-danger" onclick="clearLogs()">
-                  Очистить
+                  Clear
                 </button>
               </div>
               <textarea
@@ -312,7 +312,7 @@
               data-bs-target="#collapse-ws"
               aria-controls="collapse-ws"
             >
-              <span class="flex-grow-1 text-center">WS-события</span>
+              <span class="flex-grow-1 text-center">WS Events</span>
             </button>
           </h2>
           <div id="collapse-ws" class="accordion-collapse collapse">
@@ -326,7 +326,7 @@
                     onchange="toggleWsRawJson()"
                   />
                   <label class="form-check-label" for="ws-raw-json"
-                    >Сырой JSON</label
+                    >Raw JSON</label
                   >
                 </div>
                 <div class="form-check form-check-inline mb-0">
@@ -335,10 +335,10 @@
                     type="checkbox"
                     id="ws-autoupdate-check"
                     checked
-                    onchange="toggleWsAutoupdate()"
+                     onchange="toggleWsAutoupdate()"
                   />
                   <label class="form-check-label" for="ws-autoupdate-check"
-                    >Автообновление:</label
+                    >Auto-update:</label
                   >
                 </div>
               </div>
@@ -357,21 +357,21 @@
               data-bs-target="#collapse-adc-cal"
               aria-controls="collapse-adc-cal"
             >
-              <span class="flex-grow-1 text-center">Калибровка АЦП</span>
-              <span id="adc-cal-status-badge" class="badge bg-secondary me-3">○ По умолчанию</span>
+                <span class="flex-grow-1 text-center">ADC Calibration</span>
+              <span id="adc-cal-status-badge" class="badge bg-secondary me-3">○ Default</span>
             </button>
           </h2>
           <div id="collapse-adc-cal" class="accordion-collapse collapse">
             <div class="accordion-body px-2 py-2">
 
-              <!-- Таблица точек -->
+              <!-- Measurement points table -->
               <table class="table table-sm table-bordered mb-2 text-center" id="adc-cal-points-table">
                 <thead class="table-dark">
                   <tr>
-                    <th class="text-center" style="width:10%;">№</th>
-                    <th class="text-center" style="width:25%;">Опорное (мВ)</th>
-                    <th class="text-center" style="width:30%;">Сигнал АЦП (мВ)</th>
-                    <th class="text-center" style="width:35%;">Действие</th>
+                    <th class="text-center" style="width:10%;">#</th>
+                    <th class="text-center" style="width:25%;">Reference (mV)</th>
+                    <th class="text-center" style="width:30%;">ADC Signal (mV)</th>
+                    <th class="text-center" style="width:35%;">Action</th>
                   </tr>
                 </thead>
                 <tbody id="adc-cal-points-body">
@@ -395,7 +395,7 @@
                   <span id="adc-cal-r2">—</span>
                 </div>
                 <div class="col-6">
-                  <span class="fw-bold">Калибровано:</span>
+                  <span class="fw-bold">Calibrated:</span>
                   <span id="adc-cal-date">—</span>
                 </div>
               </div>
@@ -403,10 +403,10 @@
               <!-- Кнопки -->
               <div class="d-flex gap-2 mt-2">
                 <button id="adc-cal-compute-btn" class="btn btn-success flex-grow-1" disabled>
-                  🧮 Рассчитать и сохранить
+                  🧮 Compute & Save
                 </button>
                 <button id="adc-cal-reset-btn" class="btn btn-outline-danger" onclick="resetCalibration()">
-                  ↺ Сбросить
+↺ Reset
                 </button>
               </div>
 
@@ -424,7 +424,7 @@
               data-bs-target="#collapse-pinout"
               aria-controls="collapse-pinout"
             >
-              <span class="flex-grow-1 text-center">Таблица распиновки</span>
+              <span class="flex-grow-1 text-center">Pinout Table</span>
             </button>
           </h2>
           <div id="collapse-pinout" class="accordion-collapse collapse">
@@ -433,8 +433,8 @@
                 <thead class="table-dark">
                   <tr>
                     <th>ESP32 GPIO</th>
-                    <th>Устройство</th>
-                    <th>Примечание</th>
+                    <th>Device</th>
+                    <th>Note</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -455,38 +455,38 @@
                   </tr>
                   <tr>
                     <td><strong>17</strong></td>
-                    <td>TMC22xx PDN_UART (RX), ближний к EN</td>
-                    <td>Через резистор 1 кОм</td>
+                    <td>TMC22xx PDN_UART (RX), closest to EN</td>
+                    <td>Via 1 kΩ resistor</td>
                   </tr>
                   <tr>
                     <td><strong>16</strong></td>
-                    <td>TMC22xx PDN_UART (RX), ближний к EN</td>
-                    <td>Напрямую</td>
+                    <td>TMC22xx PDN_UART (RX), closest to EN</td>
+                    <td>Direct connection</td>
                   </tr>
                   <tr>
                     <td><strong>14</strong></td>
-                    <td>Клапан</td>
+                    <td>Valve</td>
                     <td>—</td>
                   </tr>
                   <tr>
                     <td><strong>33</strong></td>
-                    <td>DS18B20 термодатчик</td>
-                    <td>Подтянуть к +3,3В через 2,2 — 4,7 кОм</td>
+                    <td>DS18B20 temperature sensor</td>
+                    <td>Pull up to +3.3V via 2.2–4.7 kΩ</td>
                   </tr>
                   <tr>
                     <td><strong>34</strong></td>
-                    <td>Плата электрода</td>
+                    <td>Electrode board</td>
                     <td>—</td>
                   </tr>
                   <tr>
                     <td><strong>35</strong></td>
-                    <td>Концевик EMPTY</td>
-                    <td>HIGH=активен</td>
+                    <td>Limit Switch EMPTY</td>
+                    <td>HIGH=active</td>
                   </tr>
                   <tr>
                     <td><strong>32</strong></td>
-                    <td>Концевик FULL</td>
-                    <td>HIGH=активен</td>
+                    <td>Limit Switch FULL</td>
+                    <td>HIGH=active</td>
                   </tr>
                 </tbody>
               </table>
@@ -504,8 +504,8 @@
               data-bs-target="#collapse-bc-volume"
               aria-controls="collapse-bc-volume"
             >
-              <span class="flex-grow-1 text-center">Калибровка объёма бюретки</span>
-              <span id="bc-cal-status-badge" class="badge bg-secondary ms-2">○ По умолчанию</span>
+              <span class="flex-grow-1 text-center">Burette Volume Calibration</span>
+              <span id="bc-cal-status-badge" class="badge bg-secondary ms-2">○ Default</span>
             </button>
           </h2>
           <div id="collapse-bc-volume" class="accordion-collapse collapse">
@@ -517,9 +517,9 @@
                   <tr class="text-center">
                     <th class="text-end" style="width:16%">steps_per_ml</th>
                     <td style="width:18%"><span id="bc-steps-per-ml">—</span></td>
-                    <th class="text-end" style="width:16%">nominal_vol (мл)</th>
+                    <th class="text-end" style="width:16%">nominal_vol (ml)</th>
                     <td style="width:18%"><span id="bc-nominal-vol">—</span></td>
-                    <th class="text-end" style="width:12%">Дата</th>
+                    <th class="text-end" style="width:12%">Date</th>
                     <td style="width:20%"><span id="bc-cal-date">—</span></td>
                   </tr>
                 </tbody>
@@ -528,19 +528,19 @@
               <!-- 4 поля ввода на одной строке -->
               <div class="row g-2 mb-2 text-center">
                 <div class="col-3">
-                  <label class="form-label mb-0 small fw-medium">Частота (Гц)</label>
+                  <label class="form-label mb-0 small fw-medium">Frequency (Hz)</label>
                   <input type="number" class="form-control form-control-sm text-center" id="bc-vol-freq" min="1" step="1">
                 </div>
                 <div class="col-3">
-                  <label class="form-label mb-0 small fw-medium">Масса (г)</label>
+                  <label class="form-label mb-0 small fw-medium">Mass (g)</label>
                   <input type="number" class="form-control form-control-sm text-center" id="bc-vol-mass" step="0.01" min="0">
                 </div>
                 <div class="col-3">
-                  <label class="form-label mb-0 small fw-medium">Температура (°C)</label>
+                  <label class="form-label mb-0 small fw-medium">Temperature (°C)</label>
                   <input type="number" class="form-control form-control-sm text-center" id="bc-vol-temp" value="25" step="0.1">
                 </div>
                 <div class="col-3">
-                  <label class="form-label mb-0 small fw-medium">Давление (кПа)</label>
+                  <label class="form-label mb-0 small fw-medium">Pressure (kPa)</label>
                   <input type="number" class="form-control form-control-sm text-center" id="bc-vol-pressure" value="101.3" step="0.1">
                 </div>
               </div>
@@ -549,28 +549,28 @@
               <div class="d-flex gap-2 mb-2">
                 <button class="btn btn-primary btn-sm flex-fill" id="bc-vol-run-btn" onclick="runVolumeCalibration()">
                   <span class="spinner-border spinner-border-sm d-none" id="bc-vol-run-spinner" role="status"></span>
-                  <span id="bc-vol-run-text">▶ Запуск</span>
+                  <span id="bc-vol-run-text">▶ Run</span>
                 </button>
-                <button class="btn btn-success btn-sm flex-fill" id="bc-vol-calc-btn" onclick="calcVolumeCalibration()" disabled>🧮 Рассчитать</button>
-                <button class="btn btn-outline-danger btn-sm flex-fill" id="bc-vol-reset-btn" onclick="resetBuretteCal()">↺ Сбросить</button>
+                <button class="btn btn-success btn-sm flex-fill" id="bc-vol-calc-btn" onclick="calcVolumeCalibration()" disabled>🧮 Calculate</button>
+                <button class="btn btn-outline-danger btn-sm flex-fill" id="bc-vol-reset-btn" onclick="resetBuretteCal()">↺ Reset</button>
               </div>
 
               <!-- Результат дозирования -->
               <div id="bc-vol-run-result" class="mb-2" style="display:none">
                 <table class="table table-sm table-bordered mb-0">
-                  <tr><th>Пройдено шагов</th><td id="bc-vol-steps">—</td></tr>
+                  <tr><th>Steps Taken</th><td id="bc-vol-steps">—</td></tr>
                 </table>
               </div>
 
               <!-- Результат расчёта -->
               <div id="bc-vol-calc-result" style="display:none">
                 <table class="table table-sm table-bordered mb-2">
-                  <tr><th>Z-фактор</th><td id="bc-vol-z-factor">—</td></tr>
-                  <tr><th>Факт. объём (мл)</th><td id="bc-vol-actual">—</td></tr>
-                  <tr><th>Новый steps_per_ml</th><td id="bc-vol-new-sps">—</td></tr>
-                  <tr><th>Погрешность (%)</th><td id="bc-vol-error">—</td></tr>
+                  <tr><th>Z-Factor</th><td id="bc-vol-z-factor">—</td></tr>
+                  <tr><th>Actual Vol. (ml)</th><td id="bc-vol-actual">—</td></tr>
+                  <tr><th>New steps_per_ml</th><td id="bc-vol-new-sps">—</td></tr>
+                  <tr><th>Error (%)</th><td id="bc-vol-error">—</td></tr>
                 </table>
-                <button class="btn btn-primary btn-sm w-100 mb-2" id="bc-vol-save-btn" onclick="saveBuretteCal()" disabled>💾 Сохранить</button>
+                <button class="btn btn-primary btn-sm w-100 mb-2" id="bc-vol-save-btn" onclick="saveBuretteCal()" disabled>💾 Save</button>
               </div>
 
             </div>
@@ -587,8 +587,8 @@
               data-bs-target="#collapse-bc-speed"
               aria-controls="collapse-bc-speed"
             >
-              <span class="flex-grow-1 text-center">Калибровка скорости бюретки</span>
-              <span id="bc-sp-cal-status-badge" class="badge bg-secondary ms-2">○ По умолчанию</span>
+              <span class="flex-grow-1 text-center">Burette Speed Calibration</span>
+              <span id="bc-sp-cal-status-badge" class="badge bg-secondary ms-2">○ Default</span>
             </button>
           </h2>
           <div id="collapse-bc-speed" class="accordion-collapse collapse">
@@ -598,11 +598,11 @@
               <table class="table table-sm table-bordered mb-2">
                 <tbody>
                   <tr class="text-center">
-                    <th class="text-end" style="width:16%">speed_coeff (мл/мин/Гц)</th>
+                    <th class="text-end" style="width:16%">speed_coeff (ml/min/Hz)</th>
                     <td style="width:17%"><span id="bc-speed-coeff">—</span></td>
-                    <th class="text-end" style="width:16%">Частоты (Гц)</th>
+                    <th class="text-end" style="width:16%">Frequencies (Hz)</th>
                     <td style="width:17%"><span id="bc-freq-range">—</span></td>
-                    <th class="text-end" style="width:12%">Дата</th>
+                    <th class="text-end" style="width:12%">Date</th>
                     <td style="width:22%"><span id="bc-sp-cal-date">—</span></td>
                   </tr>
                 </tbody>
@@ -613,10 +613,10 @@
                 <thead class="table-dark">
                   <tr>
                     <th style="width:7%">№</th>
-                    <th style="width:26%">Частота (Гц)</th>
-                    <th style="width:23%">Скорость (мл/мин)</th>
-                    <th style="width:23%">k (мл/мин/Гц)</th>
-                    <th style="width:21%">Время (с)</th>
+                    <th style="width:26%">Frequency (Hz)</th>
+                    <th style="width:23%">Speed (ml/min)</th>
+                    <th style="width:23%">k (ml/min/Hz)</th>
+                    <th style="width:21%">Time (s)</th>
                   </tr>
                 </thead>
                 <tbody id="bc-speed-body">
@@ -627,19 +627,19 @@
               <div class="d-flex gap-2 mb-2">
                 <button class="btn btn-primary btn-sm flex-fill" id="bc-sp-run-btn" onclick="runSpeedSequence()">
                   <span class="spinner-border spinner-border-sm d-none" id="bc-sp-run-spinner" role="status"></span>
-                  <span id="bc-sp-run-text">▶ Запуск</span>
+                  <span id="bc-sp-run-text">▶ Run</span>
                 </button>
-                <button class="btn btn-success btn-sm flex-fill" id="bc-sp-calc-btn" onclick="calcSpeedCalibration()" disabled>🧮 Рассчитать</button>
-                <button class="btn btn-outline-danger btn-sm flex-fill" id="bc-sp-reset-btn" onclick="resetBuretteCal()">↺ Сбросить</button>
+                <button class="btn btn-success btn-sm flex-fill" id="bc-sp-calc-btn" onclick="calcSpeedCalibration()" disabled>🧮 Calculate</button>
+                <button class="btn btn-outline-danger btn-sm flex-fill" id="bc-sp-reset-btn" onclick="resetBuretteCal()">↺ Reset</button>
               </div>
 
               <!-- Результат расчёта -->
               <div id="bc-sp-calc-result" style="display:none">
                 <table class="table table-sm table-bordered mb-2">
-                  <tr><th>k (мл/мин/Гц)</th><td id="bc-sp-k">—</td></tr>
+                  <tr><th>k (ml/min/Hz)</th><td id="bc-sp-k">—</td></tr>
                   <tr><th>R²</th><td id="bc-sp-r2">—</td></tr>
                 </table>
-                <button class="btn btn-primary btn-sm w-100 mb-2" id="bc-sp-save-btn" onclick="saveBuretteCal()" disabled>💾 Сохранить</button>
+                <button class="btn btn-primary btn-sm w-100 mb-2" id="bc-sp-save-btn" onclick="saveBuretteCal()" disabled>💾 Save</button>
               </div>
 
             </div>

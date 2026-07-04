@@ -440,7 +440,7 @@ def test_ping_response(dut):
     import urllib.request
 
     # Wait for boot
-    dut.expect('=== EcoTiter firmware ===', timeout=30)
+    dut.expect('=== esp32-rs-on-idf6 ===', timeout=30)
 
     # Get the AP IP (firmware starts in AP mode)
     ip = '192.168.4.1'
@@ -631,7 +631,7 @@ pip install pytest-embedded pytest-embedded-serial-esp
 dut.expect(r'\[INFO\] ADC: raw_mv=\d+')
 
 # Wait for exact string
-dut.expect_exact('=== EcoTiter firmware ===')
+dut.expect_exact('=== esp32-rs-on-idf6 ===')
 
 # Write data to ESP32 serial input
 dut.write(b'{"cmd": "dose", "ml": 5.0}\n')

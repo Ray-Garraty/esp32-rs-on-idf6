@@ -1,6 +1,6 @@
 ---
 type: Plan
-title: General Implementation Plan — EcoTiter Firmware (Rust, ESP-IDF v6)
+title: General Implementation Plan — esp32-rs-on-idf6 Firmware (Rust, ESP-IDF v6)
 description: Full-scope build plan for production-grade Rust firmware from legacy C++ business logic. All changes scoped to src/. LittleFS logging excluded.
 tags: [plan, implementation, firmware, esp32, production, audit]
 timestamp: 2026-06-29
@@ -12,7 +12,7 @@ phases_partial: [3]
 phases_implemented_ahead: [4, 5]
 ---
 
-# General Implementation Plan - EcoTiter Firmware (Rust, ESP-IDF v6)
+# General Implementation Plan - esp32-rs-on-idf6 Firmware (Rust, ESP-IDF v6)
 
 ## Phase Completion Status
 

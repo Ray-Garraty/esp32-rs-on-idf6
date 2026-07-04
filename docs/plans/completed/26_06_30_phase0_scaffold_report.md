@@ -2,7 +2,7 @@
 type: Plan
 title: Phase 0 — Project Scaffold and Build Pipeline
 description: >
-  Complete scaffold for EcoTiter ESP32 firmware: domain types, error hierarchy,
+  Complete scaffold for esp32-rs-on-idf6 ESP32 firmware: domain types, error hierarchy,
   config constants, memory budget, logging infrastructure, and minimal bootable
   entry point.   3 iterations, 0 errors, all 5 ACs passing (2 confirmed on HW).
 tags: [scaffold, phase-0, domain, errors, logging, build-pipeline]

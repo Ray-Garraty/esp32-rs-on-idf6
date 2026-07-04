@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 // ── WiFi Access Point ─────────────────────────────────────────
-pub const AP_SSID: &str = "EcoTiter-AP";
+pub const AP_SSID: &str = "esp32-rs-on-idf6";
 pub const AP_PASSWORD: &str = "12345678";
 pub const AP_CHANNEL: u8 = 1;
 pub const AP_MAX_CONNECTIONS: u16 = 4;
@@ -39,7 +39,7 @@ pub const TEMP_CONVERSION_WAIT_MS: u64 = 800;
 pub const NTP_MIN_VALID_TIMESTAMP: i64 = 1_000_000_000;
 
 // ── mDNS ──────────────────────────────────────────────────────
-pub const MDNS_HOSTNAME: &str = "ecotiter";
+pub const MDNS_HOSTNAME: &str = "esp32-rs-idf6";
 
 // ── HTTP Server ───────────────────────────────────────────────
 pub const HTTP_PORT: u16 = 80;
@@ -51,7 +51,7 @@ pub const NUS_RX_UUID: &str = "6e400002-b5a3-f393-e0a9-e50e24dc0000";
 pub const NUS_TX_UUID: &str = "6e400003-b5a3-f393-e0a9-e50e24dc0000";
 
 /// BLE advertising name prefix (mac address appended by NimBLE).
-pub const BLE_ADV_NAME_PREFIX: &str = "EcoTiter-";
+pub const BLE_ADV_NAME_PREFIX: &str = "esp32-idf6-";
 
 /// BLE connection parameters (in milliseconds).
 pub const BLE_CONN_MIN_INTERVAL_MS: u32 = 30;
@@ -70,10 +70,15 @@ pub const MAIN_TASK_STACK: usize = 16384;
 pub const MOTOR_THREAD_STACK: usize = 16384;
 /// DS18B20 bitbang temperature thread.
 pub const TEMP_THREAD_STACK: usize = 16384;
-/// UART reader thread (stdin polling, 4 KB — sufficient for read+send).
-pub const UART_THREAD_STACK: usize = 4096;
+/// UART reader thread (stdin polling, 8 KB).
+///
+/// `std::io::stdin().read()` goes through a deep FFI call chain: Rust std →
+/// libc → ESP-IDF VFS → UART driver. Was 4 KB — caused pthread stack overflow
+/// (LL-008 pattern: watermark was 540 bytes, crash during `log::warn!()` from
+/// the `check_watermark` diagnostic routine).
+pub const UART_THREAD_STACK: usize = 8192;
 /// BLE GATT notify thread (recv + conditionally notify — simple loop).
-pub const BLE_NOTIFY_THREAD_STACK: usize = 6144;
+pub const BLE_NOTIFY_THREAD_STACK: usize = 8192;
 /// HTTP server task.
 pub const HTTP_SERVER_STACK: usize = 12288;
 

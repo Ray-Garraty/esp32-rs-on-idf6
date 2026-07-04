@@ -8,7 +8,7 @@ const updateDynamicInput = () => {
   if (!container) return;
   const isSteps = APP_STATE.stepper.mode === 'steps';
   const id = isSteps ? 'stepper-steps-input' : 'stepper-freq-input';
-  const label = isSteps ? 'Число шагов:' : 'Частота, Гц:';
+  const label = isSteps ? 'Steps:' : 'Frequency (Hz):';
   const val = isSteps ? CFG.DEFAULT_STEPS : CFG.DEFAULT_FREQ;
   const maxAttr = isSteps ? '' : `max="${CFG.MAX_FREQ}" `;
   container.innerHTML = `
@@ -20,19 +20,19 @@ const updateDynamicInput = () => {
 const stepperStartStop = async () => {
   const btn = document.getElementById('stepper-start-stop-btn');
   if (APP_STATE.stepper.busy) {
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Остановка...'; }
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Stopping...'; }
     const res = await sendCommand('burette.stop', {});
-    if (!res) showUIError('Не удалось остановить двигатель');
+    if (!res) showUIError('Failed to stop motor');
     else if (res.status === 'error') console.error('stepperStartStop: stop rejected', JSON.stringify(res));
   } else {
     const dir = document.querySelector('input[name="stepper-dir"]:checked')?.value || APP_STATE.stepper.direction;
     const input = document.querySelector('#dynamic-input-container input');
     const val = parseInt(input?.value || '0', 10);
-    if (val <= 0) { showUIError('Введите значение > 0'); return; }
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Запуск...'; }
+    if (val <= 0) { showUIError('Enter value > 0'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Starting...'; }
     const { cmd, params } = buildStepperCommand(APP_STATE.stepper.mode, dir, val);
     const res = await sendCommand(cmd, params);
-    if (!res) showUIError(`Команда ${cmd} не выполнена`);
+    if (!res) showUIError(`Command ${cmd} failed`);
     else if (res.status === 'error') console.error(`stepperStartStop: ${cmd} rejected`, JSON.stringify(res));
   }
   if (btn) { btn.disabled = false; }

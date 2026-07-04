@@ -44,7 +44,7 @@ fn main() {
 fn patch_esp32_nimble(file: &Path) {
     let src = std::fs::read_to_string(file).unwrap_or_default();
 
-    if src.contains("// ecotiter-patch: unexpected_cfgs") {
+    if src.contains("// esp32-rs-on-idf6 patch: unexpected_cfgs") {
         return;
     }
 
@@ -54,7 +54,7 @@ fn patch_esp32_nimble(file: &Path) {
     );
 
     // Prepend allow(unexpected_cfgs) — rustc does not recognise "6" as valid cfg value
-    let allow = "#![allow(unexpected_cfgs)] // ecotiter-patch: unexpected_cfgs\n";
+    let allow = "#![allow(unexpected_cfgs)] // esp32-rs-on-idf6 patch: unexpected_cfgs\n";
     let patched = format!("{allow}{src}");
     let patched = patched
         .replace(
@@ -99,7 +99,7 @@ fn patch_rmt_encoder(file: &Path) {
     const NEW: &str = r#"impl From<rmt_encode_state_t> for EncoderState {
     #[allow(non_upper_case_globals)]
     fn from(value: rmt_encode_state_t) -> Self {
-        // ecotiter-patch: rmt_encoder_bitmask — use bitwise checks for bitmask type
+        // esp32-rs-on-idf6 patch: rmt_encoder_bitmask — use bitwise checks for bitmask type
         #[cfg(esp_idf_version_at_least_5_5_0)]
         if value & rmt_encode_state_t_RMT_ENCODING_WITH_EOF != 0 {
             return Self::EncodingWithEof;
@@ -124,7 +124,7 @@ fn patch_rmt_encoder(file: &Path) {
         // Already patched (by debugger) but without marker — insert it
         let header = "    fn from(value: rmt_encode_state_t) -> Self {\n";
         let marker =
-            "        // ecotiter-patch: rmt_encoder_bitmask — use bitwise checks for bitmask type\n";
+            "        // esp32-rs-on-idf6 patch: rmt_encoder_bitmask — use bitwise checks for bitmask type\n";
         if src.contains(header) {
             let patched = src.replace(header, &format!("{header}{marker}"));
             std::fs::write(file, &patched).expect("Failed to write marker to encoder.rs");

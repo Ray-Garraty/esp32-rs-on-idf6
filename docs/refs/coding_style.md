@@ -1,14 +1,14 @@
 ---
 type: Architecture Reference
 title: Coding Style Guide
-description: Coding conventions, error hierarchy, state machine patterns, memory budget, and concurrency rules for EcoTiter firmware
+description: Coding conventions, error hierarchy, state machine patterns, memory budget, and concurrency rules for esp32-rs-on-idf6 firmware
 tags: [coding-style, conventions, architecture]
 timestamp: 2026-06-29
 ---
 
 # Coding Style Guide
 
-Based on proven conventions from the ASMPL autosampler project, adapted for the EcoTiter's ESP32 + Rust + ESP-IDF v6 stack, and extended with [Qwen-recommended](https://github.com/qwen-lm) architectural principles.
+Based on proven conventions from the ASMPL autosampler project, adapted for the esp32-rs-on-idf6 ESP32 + Rust + ESP-IDF v6 stack, and extended with [Qwen-recommended](https://github.com/qwen-lm) architectural principles.
 
 ## 1. Layered Architecture
 

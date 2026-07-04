@@ -1,4 +1,4 @@
-# EcoTiter Firmware — Development Log
+# esp32-rs-on-idf6 — Development Log
 
 Format: `YYYY-MM-DD | Phase | Type | Status | Description`
 

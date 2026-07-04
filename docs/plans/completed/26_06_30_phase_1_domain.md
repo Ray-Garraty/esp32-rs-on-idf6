@@ -2,7 +2,7 @@
 type: Plan
 title: Phase 1 — Domain Pure Business Logic
 description: >
-  Complete implementation of the EcoTiter domain layer: burette state machine,
+  Complete implementation of the esp32-rs-on-idf6 domain layer: burette state machine,
   calibration math (ISO 8655 Z-table, OLS regression, volume/speed conversion),
   command planning (dose, fill, empty, rinse, cal-run, cal-speed-seq), stepper
   trapezoidal ramp computation, and system channels with mpsc dispatch.

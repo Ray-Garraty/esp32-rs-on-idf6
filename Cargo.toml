@@ -3,11 +3,11 @@ name = "ecotiter-fw"
 version = "0.1.0"
 edition = "2021"
 resolver = "2"
-description = "EcoTiter firmware — ESP32-based titration controller"
+description = "ESP32 + Rust + ESP-IDF v6 experimental firmware reference (WiFi/BLE/stepper/ADC/DS18B20)"
 license = "MIT"
-repository = "https://github.com/vlbes/ecotiter"
+repository = "https://github.com/vlbes/esp32-rs-on-idf6"
 readme = "README.md"
-keywords = ["embedded", "esp32", "titration", "iot"]
+keywords = ["embedded", "esp32", "esp-idf", "rust", "reference"]
 categories = ["embedded", "hardware-support", "science"]
 
 [lib]

@@ -1,4 +1,4 @@
-# AGENTS.md — AI Agent Rules for EcoTiter Firmware (ESP32 + Rust + ESP-IDF v6)
+# AGENTS.md — AI Agent Rules (ESP32 + Rust + ESP-IDF v6)
 
 This file defines **non-negotiable rules** for AI coding agents working on this
 firmware. Violations of CRITICAL rules invalidate all changes and require
