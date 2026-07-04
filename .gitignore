@@ -13,3 +13,4 @@ __pycache__/
 components_esp32.lock
 .opencode/tmp/
 /logs/
+/legacy/
