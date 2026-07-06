@@ -32,7 +32,6 @@ use esp_idf_svc::mdns::EspMdns;
 
 use crate::config;
 use crate::errors::NetworkError;
-use crate::infrastructure::storage::nvs::NvsManager;
 
 /// Helper: convert &str to heapless::String<N>.
 fn str_to_heapless<const N: usize>(s: &str) -> heapless::String<N> {
@@ -509,46 +508,30 @@ impl<'d> WifiManager<'d> {
 
     /// Load saved WiFi credentials from NVS (namespace "wifi", keys "ssid"/"password").
     fn load_credentials_from_nvs() -> (heapless::String<32>, heapless::String<64>) {
-        let empty_ssid = heapless::String::new();
-        let empty_password = heapless::String::new();
+        use crate::infrastructure::storage::nvs;
 
-        match NvsManager::open("wifi", true) {
-            Ok(nvs) => {
-                let ssid = nvs
-                    .read_str::<32>("ssid")
-                    .ok()
-                    .flatten()
-                    .unwrap_or_default();
-                let password = nvs
-                    .read_str::<64>("password")
-                    .ok()
-                    .flatten()
-                    .unwrap_or_default();
-                (ssid, password)
-            }
-            Err(e) => {
-                log::warn!("WiFi: NVS open failed: {e:?}");
-                (empty_ssid, empty_password)
-            }
-        }
+        let ssid = nvs::wifi_read_str::<32>("ssid")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let password = nvs::wifi_read_str::<64>("password")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        (ssid, password)
     }
 
     /// Save WiFi credentials to NVS.
     ///
     /// Opens namespace "wifi" in read-write mode and writes "ssid"/"password".
     pub fn save_credentials_to_nvs(ssid: &str, password: &str) {
-        match NvsManager::open("wifi", true) {
-            Ok(nvs) => {
-                if nvs.write_str("ssid", ssid).is_ok() {
-                    log::info!("WiFi: saved SSID to NVS");
-                }
-                if nvs.write_str("password", password).is_ok() {
-                    log::info!("WiFi: saved password to NVS");
-                }
-            }
-            Err(e) => {
-                log::error!("WiFi: failed to open NVS for write: {e:?}");
-            }
+        use crate::infrastructure::storage::nvs;
+
+        if nvs::wifi_write_str("ssid", ssid).is_ok() {
+            log::info!("WiFi: saved SSID to NVS");
+        }
+        if nvs::wifi_write_str("password", password).is_ok() {
+            log::info!("WiFi: saved password to NVS");
         }
     }
 
@@ -556,16 +539,11 @@ impl<'d> WifiManager<'d> {
     ///
     /// Opens namespace "wifi" in read-write mode and erases "ssid"/"password".
     pub fn clear_credentials_from_nvs() {
-        match NvsManager::open("wifi", true) {
-            Ok(nvs) => {
-                let _ = nvs.erase("ssid");
-                let _ = nvs.erase("password");
-                log::info!("WiFi: cleared credentials from NVS");
-            }
-            Err(e) => {
-                log::error!("WiFi: failed to open NVS for erase: {e:?}");
-            }
-        }
+        use crate::infrastructure::storage::nvs;
+
+        let _ = nvs::wifi_erase("ssid");
+        let _ = nvs::wifi_erase("password");
+        log::info!("WiFi: cleared credentials from NVS");
     }
 }
 

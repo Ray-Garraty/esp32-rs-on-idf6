@@ -6,8 +6,6 @@
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use esp_idf_sys::esp_timer_get_time;
-
 use super::black_box;
 use super::black_box::DiagEvent;
 
@@ -23,9 +21,7 @@ static LAST_TICK_US: AtomicU32 = AtomicU32::new(0);
 /// Call at the START of each main loop iteration.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn tick_begin() {
-    // SAFETY: esp_timer_get_time is a read-only FFI call returning microseconds
-    // since boot. Safe from any FreeRTOS task context after scheduler init.
-    let now = unsafe { u32::try_from(esp_timer_get_time()) }.unwrap_or(0);
+    let now = u32::try_from(crate::esp_safe::micros()).unwrap_or(0);
     LAST_TICK_US.store(now, Ordering::Release);
 }
 
@@ -33,8 +29,7 @@ pub fn tick_begin() {
 /// Detects overruns and records diagnostic events.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn tick_end() {
-    // SAFETY: Same as tick_begin — read-only FFI, no side effects.
-    let now = unsafe { u32::try_from(esp_timer_get_time()) }.unwrap_or(0);
+    let now = u32::try_from(crate::esp_safe::micros()).unwrap_or(0);
     let start = LAST_TICK_US.load(Ordering::Acquire);
     let elapsed_us = now.wrapping_sub(start);
     let elapsed_ms = u16::try_from(elapsed_us / 1000).unwrap_or(u16::MAX);

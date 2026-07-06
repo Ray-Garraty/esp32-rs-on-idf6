@@ -4,21 +4,19 @@
 //! during main loop. Also provides `assert_can_allocate()` which warns
 //! if contiguous allocation of N bytes might fail due to fragmentation.
 
-use esp_idf_sys::{heap_caps_get_free_size, heap_caps_get_largest_free_block, MALLOC_CAP_INTERNAL};
-
 use super::black_box;
 use super::black_box::DiagEvent;
 
-/// Take a heap snapshot. `phase` is a short string identifying the init phase
+/// Take a heap snapshot.
+///
+/// `phase` is a short string identifying the init phase
 /// (e.g., "boot", "wifi_init", "http_started", "ble_init").
+/// Uses `esp_safe::heap_stats()` which wraps `esp_get_free_heap_size()` and
+/// `heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)`. On ESP32 without
+/// PSRAM these are equivalent to MALLOC_CAP_INTERNAL values.
 #[allow(clippy::cast_possible_truncation)]
 pub fn snapshot(phase: &'static str) {
-    // SAFETY: heap_caps_get_free_size is a read-only FFI call, safe after
-    // FreeRTOS scheduler init (completed before main). Returns bytes free
-    // in the internal DRAM region.
-    let free = unsafe { heap_caps_get_free_size(MALLOC_CAP_INTERNAL) };
-    // SAFETY: Same invariants as above — read-only FFI, no side effects.
-    let largest = unsafe { heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) };
+    let (free, largest, _dma) = crate::esp_safe::heap_stats();
 
     black_box::record(DiagEvent::HeapSnapshot {
         free_kb: (free / 1024).min(255) as u8,
@@ -38,8 +36,8 @@ pub fn snapshot(phase: &'static str) {
 /// Call before allocating a large contiguous buffer.
 #[allow(clippy::cast_possible_truncation)]
 pub fn assert_can_allocate(bytes: usize, context: &'static str) {
-    // SAFETY: Same as snapshot — read-only FFI, no side effects.
-    let largest = unsafe { heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) as usize };
+    let (_free, largest, _dma) = crate::esp_safe::heap_stats();
+    let largest = largest as usize;
     if largest < bytes {
         black_box::record(DiagEvent::DramFragmented {
             largest_block: (largest / 1024).min(u16::MAX as usize) as u16,

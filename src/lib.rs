@@ -48,9 +48,6 @@ pub mod logger;
 pub mod infrastructure;
 
 #[cfg(target_arch = "xtensa")]
-pub mod esp_mutex;
-
-#[cfg(target_arch = "xtensa")]
 pub mod esp_safe;
 
 #[cfg(target_arch = "xtensa")]

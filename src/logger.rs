@@ -5,13 +5,12 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use crate::esp_mutex::EspMutex;
 use core::fmt::Write as FmtWrite;
 use log::{Level, LevelFilter, Log, Metadata, Record};
+use std::sync::Mutex;
 
 use heapless::Deque;
 
-use crate::diag;
 use crate::domain::logging::LogEntry;
 use crate::domain::memory::{
     LOG_BUFFER_SIZE, MAX_LOG_MODULE_SIZE, MAX_LOG_MSG_SIZE, MAX_RESPONSE_SIZE,
@@ -49,11 +48,11 @@ impl Default for RingBuffer {
 }
 
 static LOGGER: Logger = Logger {
-    inner: EspMutex::new(RingBuffer::new()),
+    inner: Mutex::new(RingBuffer::new()),
 };
 
 struct Logger {
-    inner: EspMutex<RingBuffer>,
+    inner: Mutex<RingBuffer>,
 }
 
 impl Log for Logger {
@@ -76,25 +75,18 @@ impl Log for Logger {
         // UART console output — only available on the ESP32 target
         println!("[{}] {}", level, record.args());
 
-        diag::ffi_guard::record_enter(diag::ffi_guard::FFI_ESP_TIMER);
-        // SAFETY:
-        //   Invariant: esp_timer_get_time is a read-only FFI call, safe after
-        //   FreeRTOS scheduler init (which completed before main()).
-        //   Return value is microseconds since boot, always non-negative.
-        let ts_ms = unsafe { u64::try_from(esp_idf_sys::esp_timer_get_time()).unwrap_or(0) / 1000 };
-        diag::ffi_guard::record_exit(diag::ffi_guard::FFI_ESP_TIMER, 0);
+        let ts_ms = crate::esp_safe::micros() / 1000;
 
         let mut module: heapless::String<MAX_LOG_MODULE_SIZE> = heapless::String::new();
         write!(module, "{target}").ok();
 
-        if let Ok(mut buf) = self.inner.lock() {
-            buf.push(LogEntry {
-                ts_ms,
-                level,
-                module,
-                msg,
-            });
-        }
+        let mut buf = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        buf.push(LogEntry {
+            ts_ms,
+            level,
+            module,
+            msg,
+        });
     }
 
     fn flush(&self) {}

@@ -434,7 +434,7 @@ known_good: <last working commit hash>")
 
 ### 8.3 Unsafe Policy
 
-**Total unsafe blocks: 32** (Last audited: 2026-07-03, baseline in
+**Total unsafe blocks: 27** (Last audited: 2026-07-06, baseline in
 `scripts/check_unsafe.py`)
 
 **Modules with `#![forbid(unsafe_code)]`:**
@@ -445,13 +445,11 @@ complete list. These modules must never contain `unsafe` code.
 
 | File | Blocks | Reason |
 |---|---|---|
-| `infrastructure/storage/nvs.rs` | 13 | NVS FFI wrappers inside safe public API |
-| `esp_mutex.rs` | 7 | `pthread_mutex_lock`/`unlock`/`trylock` + `unsafe impl Sync/Send` + `UnsafeCell` deref |
-| `esp_safe.rs` | 7 | Safe wrappers around ESP-IDF boot-time FFI calls |
-| `infrastructure/network/http_server.rs` | 2 | WebSocket `httpd_ws_send_frame_async` |
-| `infrastructure/drivers/limitswitch.rs` | 1 | GPIO ISR `subscribe()` callback |
-| `infrastructure/drivers/onewire.rs` | 1 | `unsafe impl Send` for MMIO-based PinDriver |
-| `logger.rs` | 1 | `esp_timer_get_time()` inside safe `Log::log()` fn |
+| `esp_safe.rs` | 20 | Safe wrappers around ESP-IDF boot-time and panic-handler FFI calls (WDT, heap, UART, HW registers, panic handler, `--wrap` entry) |
+| `diag/black_box.rs` | 3 | Lock-free volatile ring buffer for ISR/panic context — no heap/mutex available |
+| `infrastructure/network/http_server.rs` | 2 | WebSocket `httpd_ws_send_frame_async` FFI + `unsafe impl Send` for opaque C handle |
+| `infrastructure/drivers/limitswitch.rs` | 1 | GPIO ISR `subscribe()` callback — closure runs in interrupt context |
+| `infrastructure/drivers/onewire.rs` | 1 | `unsafe impl Send` for MMIO-based PinDriver on dual-core ESP32 |
 
 **Enforcement:**
 1. Every `unsafe { }` MUST have a preceding `// SAFETY:` comment with

@@ -231,6 +231,11 @@ pub fn uart_init_stdin() {
 ///
 /// - `Ok(n)` — `n` bytes were read into `buf` (1 ≤ n ≤ buf.len()).
 /// - `Err(EspError)` — UART driver not installed or parameter error.
+///
+/// # Panics
+///
+/// Panics if `NonZeroI32::new()` fails, which cannot happen in practice
+/// because `ret < 0` is verified before the conversion.
 pub fn uart_read_stdin_blocking(buf: &mut [u8]) -> Result<usize, EspError> {
     diag::ffi_guard::record_enter(diag::ffi_guard::FFI_UART_READ);
     let len = u32::try_from(buf.len()).unwrap_or(u32::MAX);
@@ -251,9 +256,9 @@ pub fn uart_read_stdin_blocking(buf: &mut [u8]) -> Result<usize, EspError> {
     };
     diag::ffi_guard::record_exit(diag::ffi_guard::FFI_UART_READ, if ret < 0 { -1 } else { 0 });
     if ret < 0 {
-        // SAFETY: ret < 0, so it is non-zero. NonZeroI32::new_unchecked
-        // is valid because 0 is the only value that fails the contract.
-        Err(unsafe { EspError::from_non_zero(NonZeroI32::new_unchecked(ret)) })
+        #[allow(clippy::expect_used)]
+        let nz = NonZeroI32::new(ret).expect("ret < 0 => non-zero");
+        Err(EspError::from_non_zero(nz))
     } else {
         Ok(ret.try_into().unwrap_or(0))
     }
