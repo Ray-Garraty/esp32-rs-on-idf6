@@ -37,21 +37,24 @@ smoke test. No step moves forward unless the smoke test passes.
 | `infrastructure/drivers/led` | ✅ Done | Blink SM (3 transport modes) |
 | `infrastructure/storage/nvs` | ✅ Done | RAII NvsHandle, f32 bit-cast |
 | `application/` | ✅ Done | 10 .cpp, 8 headers, 35 Command variants, 6 handlers |
-| `interface/` | ⬜ Stubs | serial stubs |
+| `interface/` | ✅ Done | SerialReader (UART), BroadcastEvent, REST API handlers |
 | `infrastructure/network/` | ⬜ Missing | WiFi, HTTP, BLE not started |
-| Thread model / `main.cpp` | ⬜ Minimal | Only diag init + pacer |
-| Tests (Catch2) | ✅ Partial | 8 test files, 133 test cases |
+| Thread model / `main.cpp` | ✅ Partial | UART cmd pipeline active, no WiFi/BLE/motor |
+| Tests (Catch2 + uart_test.py) | ✅ Partial | 11 Catch2 files (159 tests) + 5 Python UART tests |
 
-### Remaining Work (7 Steps)
+### Remaining Work
 
 | Step | Description | Files | Smoke Test |
 |------|-------------|-------|------------|
 | **2** | Application Layer | ~12 new files | ✅ Done (19 new files, 133/133 tests) |
-| **3** | Interface Layer (Serial + Broadcast + REST) | ~4 new files | Build + flash + `curl /api/ping` |
-| **4** | Network Layer (WiFi + HTTP + WebUI) | ~6 new files + WebUI assets | Build + flash + AP visible on phone |
-| **5** | BLE Layer (NimBLE NUS GATT) | ~2 new files | Build + flash + BLE advertising visible |
-| **6** | Thread Model + Main Loop Integration | modify main.cpp + ~3 new files | Build + flash + all features concurrently |
-| **7** | Tests & Hardening | ~6 test files + config changes | Build + flash + 60s stability test |
+| **3** | Interface Layer (Serial + Broadcast + REST) | ~4 new files | ✅ Done (6 new files, 159/159 tests) |
+| **3.5** | UART Command Test | main.cpp rewrite + uart_test.py | ✅ Done (5/5 UART tests, BOOT OK) |
+| **4** | Stepper via UART (motor task + homing + stop flags) | motor_task.cpp, burette_ops доработка | Build + flash + moveSteps крутит мотором |
+| **5** | Sensors + Broadcast (ADC temp thread, broadcast via serial) | temp_thread.cpp, broadcast wiring | Build + flash + broadcast JSON по UART каждые 300ms |
+| **6** | BLE Layer (NimBLE NUS GATT) | ~2 new files | Build + flash + BLE advertising visible |
+| **7** | Network Layer (WiFi AP/STA + HTTP + WebUI) | ~6 new files + WebUI assets | Build + flash + AP visible on phone |
+| **8** | Thread Model + Main Loop Integration | modify main.cpp + ~3 new files | Build + flash + all features concurrently |
+| **9** | Tests & Hardening | ~6 test files + config changes | Build + flash + 60s stability test |
 
 ---
 
@@ -162,6 +165,8 @@ in the application core).
 
 ## Step 3 — Interface Layer (Serial UART + Broadcast + REST API Handlers)
 
+**Status: ✅ COMPLETED (2026-07-07)**
+
 ### Objective
 
 Port the interface layer: real UART init via `uart_vfs_dev_register`, a
@@ -230,14 +235,337 @@ registered but server not yet created — that is Step 4).
 
 ### Acceptance Criteria
 
-- `idf.py build` — 0 errors, 0 warnings
-- All host tests pass (Catch2)
-- 30-second serial smoke test: device boots, serial output visible
-- No new clang-tidy warnings
+- ✅ `idf.py build` — 0 errors, 0 warnings
+- ✅ Host tests — 159/159 passed (448 assertions)
+- ✅ 30-second serial smoke test: BOOT_OK, no Guru/WDT/panic
+- ✅ `./scripts/lint.sh` — clean
+
+### Results
+
+| Metric | Value |
+|--------|-------|
+| New files | 6 (broadcast.hpp/.cpp, rest_api.hpp/.cpp, test_serial, test_broadcast, test_rest_api) |
+| Modified files | 5 (domain/types.hpp, domain/burette.hpp, interface/CMakeLists, serial.hpp, serial.cpp) |
+| Global hardware atoms | 11 added to domain/types.hpp (gTempCX100, gValvePosition, gBuretteState, etc.) |
+| Test cases | 26 new (159 total) |
 
 ---
 
-## Step 4 — Network Layer (WiFi AP/STA + HTTP Server + WebUI)
+## Step 3.5 — UART Command Test (SerialReader → parseCommand → dispatch → respond)
+
+**Status: ✅ COMPLETED (2026-07-07)**
+
+### Objective
+
+Wire `SerialReader` + `parseCommand` + `dispatch` + `serializeToBuffer` into
+`app_main()` so the ESP32-S3 can receive JSON commands via UART and respond
+in real time. Create a Python test script to validate the exchange.
+
+### Pre-Flight Checklist
+
+1.  **Thread:** Main loop (32 KB, CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768)
+2.  **Blocking >10ms?** No — `select()` + non-blocking `read()`
+3.  **Stack impact:** `std::array<char, 256>` on stack per iteration
+4.  **Init order dep:** `SerialReader::init()` before main loop
+5.  **FFI boundary:** UART fd stored as `int`
+6.  **Stop flag:** N/A
+7.  **DRAM:** UART buffer (256 bytes) allocated once at init
+
+### Detailed Tasks
+
+#### 3.5.1 Update main/CMakeLists.txt
+
+- Add `interface`, `application` to REQUIRES
+
+#### 3.5.2 Rewrite main/main.cpp
+
+- `app_main()` boot sequence: `nvs_flash_init()` → `BlackBox::init()` →
+  `StackMonitor::registerMainTask()` → `SerialReader::init()` → `Led::init()`
+- Main loop (10ms tick):
+  1. `TickScheduler::tick()`
+  2. `SerialReader::process()` → `parseCommand()` → `dispatch()` →
+     `serializeToBuffer()` → `SerialReader::write()`
+  3. Error handling: parse failures → `{"error":"parse failed"}`,
+     dispatch failures → `{"error":"dispatch failed"}`
+  4. `vTaskDelayUntil(&lastWake, PACING_TICK)`
+
+#### 3.5.3 Create scripts/uart_test.py
+
+- PySerial-based test script with 5 tests:
+  1. `serial.ping` → `{"cmd":"serial.ping","result":"pong"}`
+  2. `system.firmwareVersion` → `{"version":"0.1.0"}`
+  3. `getStatus` → JSON with `"state"` field
+  4. Invalid JSON → `{"error":"parse failed"}`
+  5. Unknown command → `{"error":"parse failed"}`
+- Auto-detect port via `find_port.py` or `-p` flag
+- Raw log saved to `logs/uart_test_<timestamp>.log`
+
+#### 3.5.4 Update scripts/build.sh
+
+- Add `uart` command: runs `scripts/uart_test.py -p <port>`
+
+### Acceptance Criteria
+
+- ✅ `idf.py build` — 0 errors, 0 warnings
+- ✅ `scripts/uart_test.py` — 5/5 tests pass
+- ✅ 30-second serial smoke test: BOOT_OK, no Guru/WDT/panic
+- ✅ Raw UART log saved to `logs/uart_test_<timestamp>.log`
+
+---
+
+## Step 4 — Stepper via UART (Motor Task + Homing + Stop Flags)
+
+**Status: ⬜ Pending**
+
+### Objective
+
+Wire the stepper motor into the UART command pipeline. Create a dedicated
+FreeRTOS motor task (16 KB stack, GR-6), implement `moveSteps`, `stop`,
+`emergencyStop` with mandatory stop flags (GR-2), homing sequence at boot,
+and limit switch integration.
+
+### Pre-Flight Checklist
+
+1.  **Thread:** Motor task (16 KB, GR-6) — created at boot; main loop sends
+    commands via FreeRTOS queue
+2.  **Blocking >10ms?** Yes — `rmt_tx_wait_all_done()` blocks for the
+    duration of each RMT chunk. OK because it's in the dedicated motor task,
+    NOT main loop (GR-1).
+3.  **Stack impact:** Motor 16 KB. No `std::format` in hot path. No stack-local
+    arrays > 256 bytes.
+4.  **Init order dep:** Motor is independent — init after NVS, before network.
+5.  **FFI boundary:** RAII `RmtChannel` wrapper handles `rmt_channel_handle_t`.
+    No raw pointers cross task boundaries.
+6.  **Stop flag:** **REQUIRED (GR-2).** Every `moveStepsIntervals()` call gets
+    `&gStopFull` or `&gStopHome` as the stop flag.
+7.  **DRAM:** Motor task stack (16 KB) allocated at boot. RMT channel + encoder
+    allocated once in constructor.
+
+### Detailed Tasks
+
+#### 4.1 Create motor task
+
+- `infrastructure/src/motor_task.cpp`
+- `infrastructure/include/infrastructure/motor_task.hpp`
+- `MotorCommand` struct — command type (MoveSteps, Stop, EmergencyStop, Home,
+  SetDirection, SetSpeed, SetAccel) + optional parameters
+- `motorTaskEntry(void*)` — FreeRTOS task function, 16 KB stack
+- Creates `StepperMotor` + `LimitSwitch` instances at start
+- Homing sequence: move CW until HOME limit switch triggers, set position=0
+- Command loop: `xQueueReceive()` with 100ms timeout
+  - Execute motor commands via `StepperMotor::moveStepsIntervals()` with
+    `&gStopFull` / `&gStopHome` stop flag
+  - Check `gStopFull` between RMT chunks (already in `moveStepsIntervals`)
+  - On `LimitSwitchTriggered`: log, set `gBuretteState=Error`, reset flag
+- Direction changes: `gpio_set_level(dirPin, ...)` before move
+- Speed/accel: stored as config, used to compute RMT interval arrays
+
+#### 4.2 Define MotorCommand queue
+
+- FreeRTOS `QueueHandle_t` with `xQueueCreate(4, sizeof(MotorCommand))`
+- Extern global `gMotorCmdQueue` declared in `motor_task.hpp`
+- RAII queue creation in motor task init
+
+#### 4.3 Wire motor commands in burette_ops handlers
+
+- Modify `burette_ops.cpp` handlers to send commands via `gMotorCmdQueue`
+  instead of returning stubs:
+  - `handleMoveSteps(steps)` → send `MotorCommand::MoveSteps` to queue
+  - `handleStop()` → send `MotorCommand::Stop`, set `gBuretteState=Stopping`
+  - `handleEmergencyStop()` → set `gStopFull=true`, send `MotorCommand::EmergencyStop`
+  - `handleSetDirection(dir)` → send `MotorCommand::SetDirection`
+  - `handleSetSpeed(speed)` → store in `gSpeed`
+  - `handleSetAccel(accel)` → store in `gAccel`
+- Return `AckThen` for all queued commands (acknowledge before execution)
+
+#### 4.4 Wire homing + limit switch globals
+
+- `domain/types.hpp` already has `gStopFull`, `gStopHome`, `gBuretteState`
+- Connect limit switch ISRs (GPIO 32 FULL, GPIO 35 HOME) to these atoms
+  (ISR already exists in `limitswitch.cpp` — verify it sets the correct atoms)
+
+#### 4.5 Update CMakeLists.txt
+
+- `components/infrastructure/CMakeLists.txt` — add `src/motor_task.cpp`
+- No changes to `main/CMakeLists.txt` (main loop just sends to queue)
+
+#### 4.6 Update scripts/uart_test.py
+
+- Add stepper test cases:
+  - `moveSteps` with 200 steps → see motor move
+  - `stop` → motor stops mid-move  
+  - `emergencyStop` → immediate stop
+  - `setDirection` + `moveSteps` → motor moves opposite direction
+
+#### 4.7 Add host tests (optional, if motor_task logic is testable)
+
+- If `MotorCommand` queue send/receive can be isolated, add tests
+
+### Acceptance Criteria
+
+- `idf.py build` — 0 errors, 0 warnings
+- Flash + UART: `{"cmd":"moveSteps","steps":200}` → motor rotates 200 steps
+- `{"cmd":"stop"}` → motor stops before completing
+- `{"cmd":"emergencyStop"}` → immediate stop via `gStopFull=true`
+- HOME limit switch triggered → homing completes
+- 30-second smoke test: BOOT OK, no Guru/WDT/panic, `uxTaskGetStackHighWaterMark` > 20%
+
+---
+
+## Step 5 — Sensors + Broadcast (ADC, Temperature, Periodic Broadcast)
+
+**Status: ⬜ Pending**
+
+### Objective
+
+Wire real sensor readings (ADC pH electrode, DS18B20 temperature) into the
+main loop. Create a dedicated temperature thread (16 KB stack, GR-6) for
+blocking OneWire reads. Publish periodic BroadcastEvent JSON via Serial
+every 300ms using `TickScheduler::shouldBroadcast()`.
+
+### Pre-Flight Checklist
+
+1.  **Thread:** Temperature thread (16 KB) — blocking reads OK; main loop
+    for ADC + broadcast
+2.  **Blocking >10ms?** Temperature thread: `vTaskDelay(1000ms)` + blocking
+    OneWire bitbang (OK — dedicated thread). Main loop: no blocking.
+3.  **Stack impact:** Temp thread 16 KB. ADC read uses stack-local
+    `std::array<uint16_t, 64>`. Broadcast uses `std::snprintf` into fixed
+    512-byte buffer.
+4.  **Init order dep:** None — sensors independent of network/BLE.
+5.  **FFI boundary:** ADC uses `adc_oneshot_read()` (ESP-IDF C API wrapped
+    in RAII). No C pointers stored.
+6.  **Stop flag:** N/A
+7.  **DRAM:** ADC calibration struct (~32 bytes). Temperature atomic int.
+
+### Detailed Tasks
+
+#### 5.1 Create temperature thread
+
+- `infrastructure/src/temp_thread.cpp`
+- `infrastructure/include/infrastructure/temp_thread.hpp`
+- `tempThreadEntry(void*)` — FreeRTOS task, 16 KB stack
+- Creates `OneWireBus` on GPIO 33 (DS18B20)
+- Every 1 second: call `readSensor()`, store result in `gTempCX100`
+- On read failure: store sentinel `-99999`, log warning
+- Blocking: `vTaskDelay(pdMS_TO_TICKS(1000))`
+
+#### 5.2 Wire ADC periodic sampling
+
+- In main loop, every `scheduler.shouldSample()` (100ms):
+  - Call `adc_oneshot_read()` on ADC1_CH3 (GPIO 4)
+  - Apply rolling average (existing in `adc.cpp`)
+  - Convert to mV via calibration, store in `gLastMv`
+
+#### 5.3 Wire BroadcastEvent to Serial
+
+- In main loop, every `scheduler.shouldBroadcast()` (300ms):
+  - Build `BroadcastEvent` from current atomic state
+  - Call `serializeBroadcast()` into `ResponseBuffer`
+  - Write to serial via `SerialReader::write()`
+
+#### 5.4 Add host tests
+
+- `tests/src/test_broadcast.cpp` — already exists from Step 3, expand with
+  real atom reads (mockable wrapper or use test values)
+- `tests/src/test_scheduler.cpp` — tick wrapping, broadcast interval
+
+#### 5.5 Update CMakeLists.txt
+
+- `components/infrastructure/CMakeLists.txt` — add `src/temp_thread.cpp`
+
+### Acceptance Criteria
+
+- `idf.py build` — 0 errors, 0 warnings
+- Flash + UART: every ~300ms a JSON broadcast line appears on serial
+- `{"cmd":"temperature.read"}` returns current temperature
+- `{"cmd":"adc.cal.get"}` returns ADC calibration
+- 30-second smoke test: BOOT OK, no Guru/WDT/panic
+
+---
+
+## Step 6 — BLE Layer (NimBLE GATT NUS)
+
+**Status: ⬜ Pending**
+
+### Objective
+
+Port the BLE/NimBLE subsystem. Implement a `BleManager` with NUS (Nordic UART
+Service) GATT for JSON command transport, a bounded command queue, a dedicated
+notify thread (8 KB stack, GR-6), and 3-level zombie defense.
+
+### Pre-Flight Checklist
+
+1.  **Thread:** BLE notify (8 KB) + NimBLE host (12 KB, internal FreeRTOS
+    task) + main loop for command drain
+2.  **Blocking >10ms?** No — `xQueueReceive` with 10ms timeout in notify
+    thread; `try_recv()` in main loop
+3.  **Stack impact:** No `std::format`/`std::print` in notify thread (8 KB
+    budget). Use `std::array<char,N>` + `std::format_to`.
+4.  **Init order dep:** GR-3 — WiFi → HTTP → BLE. BLE init LAST. Heap
+    pre-check: largest free block >= 30 KB before attempting.
+5.  **FFI boundary:** NimBLE C API calls wrapped in `FfiGuard` (GR-7).
+    No raw NimBLE pointers stored across boundaries.
+6.  **Stop flag:** N/A
+7.  **DRAM:** Critical — BLE NimBLE host needs ~12 KB contiguous
+    `MALLOC_CAP_INTERNAL`. Must check `largestFreeBlock()` before init.
+
+### Detailed Tasks
+
+#### 6.1 Implement BleManager
+
+- `infrastructure/network/include/infrastructure/network/ble.hpp`
+- `infrastructure/network/src/ble.cpp`
+- NUS GATT service with RX (write) and TX (notify) characteristics
+- Bounded command queue: `xQueueCreate(8, sizeof(CommandEnvelope))`
+- Pre-init guard: `bool initialized_` — `process()` / `isConnected()`
+  return immediately if false
+- 3-level zombie defense:
+  - L1: 5 consecutive notify failures → force disconnect
+  - L2: `ble_gap_conn_active() == 0` but `connected_ == true` → cleanup
+  - L3: immediate kill on notify with 0 connections but flag set
+
+#### 6.2 Implement BLE notify thread
+
+- Dedicated `std::thread` with 8 KB stack (`BLE_NOTIFY_STACK`)
+- Receives `StatusUpdate` messages from queue, serializes to JSON,
+  calls `ble_gattc_notify()` / `esp_ble_gatts_send_indicate()`
+- No `std::format`/`nlohmann::json::dump()` in hot path — use
+  `std::format_to` into fixed buffer
+
+#### 6.3 Add heap pre-check to init sequence
+
+- Before `nimble_port_init()`, call `heap_caps_get_largest_free_block()`
+  with `MALLOC_CAP_INTERNAL`
+- If < 30 KB, log warning and skip BLE init (device runs in WiFi-only mode)
+- Guards against NimBLE's uncatchable `assert()` crash (LL-007)
+
+#### 6.4 Update CMakeLists.txt and sdkconfig
+
+- Add `bt` component to `infrastructure/CMakeLists.txt` REQUIRES
+- `sdkconfig.defaults`:
+  - `CONFIG_BT_ENABLED=y`
+  - `CONFIG_BT_NIMBLE_ENABLED=y`
+  - `CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288`
+  - `CONFIG_BT_NIMBLE_ACL_BUF_COUNT=12`
+  - `CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=12`
+  - `CONFIG_BT_NIMBLE_MAX_CCCD=4`
+- `idf.py reconfigure` after changes
+
+### Acceptance Criteria
+
+- `idf.py build` — 0 errors, 0 warnings
+- Flash + monitor: boot completes, "EcoTiter-XXXX" visible on phone BLE scan
+- nRF Connect / phone app can connect and send `{"cmd":"serial.ping"}`
+- BLE notify thread sends status updates
+- 30-second stability test with concurrent WiFi + BLE: no Guru Meditation,
+  no heap crash, no zombie connection
+
+---
+
+## Step 7 — Network Layer (WiFi AP/STA + HTTP Server + WebUI)
+
+**Status: ⬜ Pending**
 
 ### Objective
 
@@ -264,7 +592,7 @@ dashboard (HTML/CSS/JS). HTTP server stack must be 12 KB (GR-6).
 
 ### Detailed Tasks
 
-#### 4.1 Implement WifiManager
+#### 7.1 Implement WifiManager
 
 - `infrastructure/network/include/infrastructure/network/wifi.hpp`
 - `infrastructure/network/src/wifi.cpp`
@@ -276,7 +604,7 @@ dashboard (HTML/CSS/JS). HTTP server stack must be 12 KB (GR-6).
 - `startAP()`, `startSTA(ssid, pass)`, `stop()`, `isConnected()`,
   `getIP()`
 
-#### 4.2 Implement HttpServer
+#### 7.2 Implement HttpServer
 
 - `infrastructure/network/include/infrastructure/network/http_server.hpp`
 - `infrastructure/network/src/http_server.cpp`
@@ -291,13 +619,13 @@ dashboard (HTML/CSS/JS). HTTP server stack must be 12 KB (GR-6).
 - `broadcastWebsocketEvent()`: iterate sessions, send JSON via
   `httpd_ws_send_frame_async()`, remove stale sessions via `is_closed()`
 
-#### 4.3 Implement DNS responder
+#### 7.3 Implement DNS responder
 
 - Pure function in `domain/dns.hpp` (already planned in domain layer):
   `buildDnsResponse()` — constructs UDP DNS response packet
 - 4 host-compilable tests for DNS packet structure
 
-#### 4.4 Port WebUI assets
+#### 7.4 Port WebUI assets
 
 - Copy from `legacy/rust/src/webui/` to `main/webui/` or embed via
   `include..` in a `webui.hpp` component
@@ -305,14 +633,14 @@ dashboard (HTML/CSS/JS). HTTP server stack must be 12 KB (GR-6).
   logs, stepper, calibration, init), CSS
 - Captive portal HTML page (`captive.html`)
 
-#### 4.5 Update CMakeLists.txt
+#### 7.5 Update CMakeLists.txt
 
 - `components/infrastructure/CMakeLists.txt` — add network/ sources,
   `esp_wifi`, `esp_http_server`, `mdns`, `lwip` to REQUIRES
 - `components/interface/CMakeLists.txt` — add `webui.hpp` if separate
   component
 
-#### 4.6 Update sdkconfig.defaults
+#### 7.6 Update sdkconfig.defaults
 
 - `CONFIG_LWIP_MAX_SOCKETS=5` (reduce from 8 to save DRAM per LL-016)
 - `CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=4`
@@ -332,84 +660,9 @@ dashboard (HTML/CSS/JS). HTTP server stack must be 12 KB (GR-6).
 
 ---
 
-## Step 5 — BLE Layer (NimBLE GATT NUS)
+## Step 8 — Thread Model + Main Loop Integration
 
-### Objective
-
-Port the BLE/NimBLE subsystem. Implement a `BleManager` with NUS (Nordic UART
-Service) GATT for JSON command transport, a bounded command queue, a dedicated
-notify thread (8 KB stack, GR-6), and 3-level zombie defense.
-
-### Pre-Flight Checklist
-
-1.  **Thread:** BLE notify (8 KB) + NimBLE host (12 KB, internal FreeRTOS
-    task) + main loop for command drain
-2.  **Blocking >10ms?** No — `xQueueReceive` with 10ms timeout in notify
-    thread; `try_recv()` in main loop
-3.  **Stack impact:** No `std::format`/`std::print` in notify thread (8 KB
-    budget). Use `std::array<char,N>` + `std::format_to`.
-4.  **Init order dep:** GR-3 — WiFi → HTTP → BLE. BLE init LAST. Heap
-    pre-check: largest free block >= 30 KB before attempting.
-5.  **FFI boundary:** NimBLE C API calls wrapped in `FfiGuard` (GR-7).
-    No raw NimBLE pointers stored across boundaries.
-6.  **Stop flag:** N/A
-7.  **DRAM:** Critical — BLE NimBLE host needs ~12 KB contiguous
-    `MALLOC_CAP_INTERNAL`. Must check `largestFreeBlock()` before init.
-
-### Detailed Tasks
-
-#### 5.1 Implement BleManager
-
-- `infrastructure/network/include/infrastructure/network/ble.hpp`
-- `infrastructure/network/src/ble.cpp`
-- NUS GATT service with RX (write) and TX (notify) characteristics
-- Bounded command queue: `xQueueCreate(8, sizeof(CommandEnvelope))`
-- Pre-init guard: `bool initialized_` — `process()` / `isConnected()`
-  return immediately if false
-- 3-level zombie defense:
-  - L1: 5 consecutive notify failures → force disconnect
-  - L2: `ble_gap_conn_active() == 0` but `connected_ == true` → cleanup
-  - L3: immediate kill on notify with 0 connections but flag set
-
-#### 5.2 Implement BLE notify thread
-
-- Dedicated `std::thread` with 8 KB stack (`BLE_NOTIFY_STACK`)
-- Receives `StatusUpdate` messages from queue, serializes to JSON,
-  calls `ble_gattc_notify()` / `esp_ble_gatts_send_indicate()`
-- No `std::format`/`nlohmann::json::dump()` in hot path — use
-  `std::format_to` into fixed buffer
-
-#### 5.3 Add heap pre-check to init sequence
-
-- Before `nimble_port_init()`, call `heap_caps_get_largest_free_block()`
-  with `MALLOC_CAP_INTERNAL`
-- If < 30 KB, log warning and skip BLE init (device runs in WiFi-only mode)
-- Guards against NimBLE's uncatchable `assert()` crash (LL-007)
-
-#### 5.4 Update CMakeLists.txt and sdkconfig
-
-- Add `bt` component to `infrastructure/CMakeLists.txt` REQUIRES
-- `sdkconfig.defaults`:
-  - `CONFIG_BT_ENABLED=y`
-  - `CONFIG_BT_NIMBLE_ENABLED=y`
-  - `CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288`
-  - `CONFIG_BT_NIMBLE_ACL_BUF_COUNT=12`
-  - `CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=12`
-  - `CONFIG_BT_NIMBLE_MAX_CCCD=4`
-- `idf.py reconfigure` after changes
-
-### Acceptance Criteria
-
-- `idf.py build` — 0 errors, 0 warnings
-- Flash + monitor: boot completes, "EcoTiter-XXXX" visible on phone BLE scan
-- nRF Connect / phone app can connect and send `{"cmd":"serial.ping"}`
-- BLE notify thread sends status updates
-- 30-second stability test with concurrent WiFi + BLE: no Guru Meditation,
-  no heap crash, no zombie connection
-
----
-
-## Step 6 — Thread Model + Main Loop Integration
+**Status: ⬜ Pending**
 
 ### Objective
 
@@ -438,7 +691,7 @@ WebSocket broadcast.
 
 ### Detailed Tasks
 
-#### 6.1 Create motor task
+#### 8.1 Create motor task
 
 - `infrastructure/src/motor_task.cpp`
 - `motorTaskEntry()` — FreeRTOS task with 16 KB stack
@@ -447,7 +700,7 @@ WebSocket broadcast.
   `stepper.moveStepsIntervals()` with stop flag, sends result back
 - Stop flag polling: checks `gStopFull` / `gStopHome` between RMT chunks
 
-#### 6.2 Create temperature thread
+#### 8.2 Create temperature thread
 
 - `infrastructure/src/temp_thread.cpp`
 - `tempThreadEntry()` — `std::thread` with 16 KB stack
@@ -455,7 +708,7 @@ WebSocket broadcast.
   `gTempCX100`
 - Blocking: `vTaskDelay(pdMS_TO_TICKS(1000))`
 
-#### 6.3 Create net_owner thread
+#### 8.3 Create net_owner thread
 
 - `infrastructure/src/net_owner.cpp`
 - 16 KB stack, created at boot
@@ -466,7 +719,7 @@ WebSocket broadcast.
   4.  `BleManager::init()` (if heap >= 30 KB)
 - Posts initialized handles to main loop via queue
 
-#### 6.4 Implement full app_main()
+#### 8.4 Implement full app_main()
 
 - `main/main.cpp` — rewrite from minimal loop to full application
 - Boot sequence:
@@ -489,7 +742,7 @@ WebSocket broadcast.
   8.  Transport SM — USB alive check, mode transitions
   9.  `vTaskDelayUntil(&lastWake, PACING_TICK)`
 
-#### 6.5 Add cross-thread communication
+#### 8.5 Add cross-thread communication
 
 - FreeRTOS queues (wrapped in RAII `Queue<T>` template):
   - `motor_cmd_queue` — MotorCommand from dispatch → motor task
@@ -497,7 +750,7 @@ WebSocket broadcast.
   - `ble_notify_queue` — StatusUpdate from main loop → BLE notify thread
   - `init_result_queue` — net_owner → main loop (handles + status)
 
-#### 6.6 Wire command dispatch
+#### 8.6 Wire command dispatch
 
 - `main.cpp` main loop calls `dispatch()` for each input source:
   - Serial lines from `SerialReader::process()`
@@ -519,7 +772,9 @@ WebSocket broadcast.
 
 ---
 
-## Step 7 — Tests & Hardening
+## Step 9 — Tests & Hardening
+
+**Status: ⬜ Pending**
 
 ### Objective
 
@@ -539,7 +794,7 @@ smoke test on hardware.
 
 ### Detailed Tasks
 
-#### 7.1 Write remaining unit tests
+#### 9.1 Write remaining unit tests
 
 - `tests/src/test_adc.cpp` — 6 tests ✅ (existing)
 - `tests/src/test_valve.cpp` — 2 tests ✅ (existing)
@@ -551,7 +806,7 @@ smoke test on hardware.
 - `tests/src/test_calibration.cpp` — `mlToSteps()`, `stepsToMl()`,
   `computeRamp()` ramp generation
 
-#### 7.2 Audit sdkconfig.defaults
+#### 9.2 Audit sdkconfig.defaults
 
 - Ensure all of the following are set:
 
@@ -581,7 +836,7 @@ CONFIG_MDNS_MAX_SERVICES=1
 CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=8192
 ```
 
-#### 7.3 Create partitions.csv (if needed)
+#### 9.3 Create partitions.csv (if needed)
 
 - Verify the default partition layout works for the firmware image
 - Create custom `partitions.csv` only if OTA or specific NVS sizing is
@@ -592,13 +847,13 @@ CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=8192
   factory,  app,  factory, 0x10000, 1M,
   ```
 
-#### 7.4 Run linter
+#### 9.4 Run linter
 
 - `clang-tidy -p build/ components/main components/**/*.cpp` — 0 warnings
 - `clang-format -i -n components/main components/**/*.cpp` — 0 differences
 - `python docs/validate_okf.py` — all docs pass
 
-#### 7.5 Final commit checklist (from AGENTS.md §10)
+#### 9.5 Final commit checklist (from AGENTS.md §10)
 
 - [ ] `idf.py build` — 0 errors, 0 warnings
 - [ ] `clang-tidy` — 0 warnings

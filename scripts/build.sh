@@ -34,11 +34,15 @@ case "$CMD" in
     tidy)
         ./scripts/lint.sh "${@:2}"
         ;;    
+    uart)
+        PORT="${2:-/dev/ttyACM0}"
+        timeout 30 python3 scripts/uart_test.py -p "$PORT"
+        ;;
     clean)
         rm -rf build build-tests
         ;;
     *)
-        echo "Usage: $0 {build|flash|monitor|test|tidy|clean}"
+        echo "Usage: $0 {build|flash|monitor|uart|test|tidy|clean}"
         exit 1
         ;;
 esac

@@ -5,6 +5,8 @@ idf_component_register(
         diag
         domain
         infrastructure
+        interface
+        application
         nvs_flash
         freertos
         esp_system

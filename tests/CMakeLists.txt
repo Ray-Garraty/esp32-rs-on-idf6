@@ -40,14 +40,22 @@ set(DOMAIN_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/domain/src/burette.cpp
 )
 
+# --- Interface library (host-compilable subset) ---
+set(INTERFACE_SRCS
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/interface/src/broadcast.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/interface/src/rest_api.cpp
+)
+
 add_library(ecotiter_app STATIC
     ${APPLICATION_SRCS}
     ${DOMAIN_SRCS}
+    ${INTERFACE_SRCS}
 )
 
 target_include_directories(ecotiter_app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/application/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/domain/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/interface/include
 )
 
 target_link_libraries(ecotiter_app PUBLIC nlohmann_json::nlohmann_json)
@@ -63,14 +71,16 @@ add_executable(unit_tests
     src/test_dispatch.cpp
     src/test_handlers.cpp
     src/test_state_machine.cpp
+    src/test_serial.cpp
+    src/test_broadcast.cpp
+    src/test_rest_api.cpp
 )
 
 target_include_directories(unit_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/domain/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/application/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/interface/include
 )
-
-# The old catch2/ header is not used; Catch2 comes from FetchContent
 
 target_link_libraries(unit_tests PRIVATE
     ecotiter_app
