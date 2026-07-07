@@ -4,8 +4,8 @@
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
 
-#include "domain/types.hpp"
 #include "diag/black_box.hpp"
 #include "diag/stack_monitor.hpp"
 
@@ -15,8 +15,7 @@ extern "C" void app_main(void) {
     nvs_flash_init();
     ecotiter::diag::BlackBox::instance().init();
     ecotiter::diag::StackMonitor::instance().registerMainTask();
-    ESP_LOGI(TAG, "=== ECOTITER C++ BOOT OK ===");
-    ESP_LOGI(TAG, "IDF version: %s", esp_get_idf_version());
+
 
     TickType_t last_wake = xTaskGetTickCount();
     constexpr TickType_t PACING_TICK = pdMS_TO_TICKS(10);

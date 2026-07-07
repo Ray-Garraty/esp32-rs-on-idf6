@@ -25,6 +25,7 @@ def clean_env():
         str(tools / "idf-exe/1.0.3"),
         str(tools / "cmake/4.0.3/bin"),
         str(tools / "ninja/1.12.1"),
+        str(tools / "python_env/idf6.0_py3.14_env/Scripts"),
         str(tools / "xtensa-esp-elf/esp-15.2.0_20251204/xtensa-esp-elf/bin"),
     ]
     env["PATH"] = ";".join(extra + [env.get("PATH", "")])
@@ -55,7 +56,7 @@ def main():
     if r.returncode: sys.exit(1)
 
     time.sleep(2)
-    sys.exit(monitor_port(port, timeout=30, log_dir=PROJECT_DIR / "logs"))
+    sys.exit(monitor_port(port, timeout=30, log_dir=PROJECT_DIR / "logs", no_reset=True))
 
 if __name__ == "__main__":
     main()
