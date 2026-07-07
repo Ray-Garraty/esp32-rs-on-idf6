@@ -10,7 +10,12 @@ Checks: >
   -cppcoreguidelines-avoid-magic-numbers,
   -readability-magic-numbers,
   -modernize-use-trailing-return-type,
-  -readability-identifier-length
+  -readability-identifier-length,
+  -cppcoreguidelines-pro-type-const-cast,
+  -cppcoreguidelines-avoid-do-while,
+  -readability-uppercase-literal-suffix,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-branch-clone
 WarningsAsErrors: ''
 HeaderFilterRegex: '(components|main)/.*'
 CheckOptions:

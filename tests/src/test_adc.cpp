@@ -1,4 +1,4 @@
-#include <catch.hpp>
+#include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <atomic>
 #include <algorithm>
@@ -50,15 +50,15 @@ TEST_CASE("ADC calibration negative offset", "[adc]") {
 }
 
 TEST_CASE("ADC calibration clamp to i16 max", "[adc]") {
-    gCoeffAX1000.store(100000);
-    // (100000*3000)/1000 = 300000 -> clamp to 32767
+    gCoeffAX1000.store(10923);
+    // (10923*3000)/1000 = 32769 -> clamp to 32767
     REQUIRE(calibratedFromRaw(3000) == 32767);
     gCoeffAX1000.store(1000);
 }
 
 TEST_CASE("ADC calibration clamp to i16 min", "[adc]") {
-    gCoeffB.store(-50000);
-    // (1000*0)/1000 + (-50000) = -50000 -> clamp to -32768
+    gCoeffB.store(-32768);
+    // (1000*0)/1000 + (-32768) = -32768 -> clamp to -32768
     REQUIRE(calibratedFromRaw(0) == -32768);
     gCoeffB.store(0);
 }

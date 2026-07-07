@@ -23,14 +23,20 @@ struct AdcCalibration {
     float b; // offset (mV)
 };
 
-[[nodiscard]] float adcToMv(uint16_t raw, const AdcCalibration& cal) noexcept;
+[[nodiscard]] inline float adcToMv(uint16_t raw, const AdcCalibration& cal) noexcept {
+    return static_cast<float>(raw) * cal.a + cal.b;
+}
 
 struct CalibrationData {
     float stepsPerMl;
     float nominalVolumeMl;
 };
 
-[[nodiscard]] Steps mlToSteps(Ml volume, const CalibrationData& cal) noexcept;
-[[nodiscard]] Ml stepsToMl(Steps steps, const CalibrationData& cal) noexcept;
+[[nodiscard]] inline Steps mlToSteps(Ml volume, const CalibrationData& cal) noexcept {
+    return Steps{static_cast<int32_t>(volume.value * cal.stepsPerMl)};
+}
+[[nodiscard]] inline Ml stepsToMl(Steps steps, const CalibrationData& cal) noexcept {
+    return Ml{static_cast<float>(steps.value) / cal.stepsPerMl};
+}
 
 } // namespace ecotiter::domain

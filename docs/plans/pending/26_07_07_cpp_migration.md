@@ -36,17 +36,17 @@ smoke test. No step moves forward unless the smoke test passes.
 | `infrastructure/drivers/valve` | ✅ Done | GPIO14, global atomic position |
 | `infrastructure/drivers/led` | ✅ Done | Blink SM (3 transport modes) |
 | `infrastructure/storage/nvs` | ✅ Done | RAII NvsHandle, f32 bit-cast |
-| `application/` | ⬜ Stubs | command_dispatch + state_machine stubs |
+| `application/` | ✅ Done | 10 .cpp, 8 headers, 35 Command variants, 6 handlers |
 | `interface/` | ⬜ Stubs | serial stubs |
 | `infrastructure/network/` | ⬜ Missing | WiFi, HTTP, BLE not started |
 | Thread model / `main.cpp` | ⬜ Minimal | Only diag init + pacer |
-| Tests (Catch2) | ⬜ Partial | 4 test files, 15+ test cases |
+| Tests (Catch2) | ✅ Partial | 8 test files, 133 test cases |
 
 ### Remaining Work (7 Steps)
 
 | Step | Description | Files | Smoke Test |
 |------|-------------|-------|------------|
-| **2** | Application Layer | ~12 new files | Build + flash + monitor, no crash |
+| **2** | Application Layer | ~12 new files | ✅ Done (19 new files, 133/133 tests) |
 | **3** | Interface Layer (Serial + Broadcast + REST) | ~4 new files | Build + flash + `curl /api/ping` |
 | **4** | Network Layer (WiFi + HTTP + WebUI) | ~6 new files + WebUI assets | Build + flash + AP visible on phone |
 | **5** | BLE Layer (NimBLE NUS GATT) | ~2 new files | Build + flash + BLE advertising visible |
@@ -56,6 +56,8 @@ smoke test. No step moves forward unless the smoke test passes.
 ---
 
 ## Step 2 — Application Layer (Command Dispatch + State Machine + Handlers)
+
+**Status: ✅ COMPLETED (2026-07-07)**
 
 ### Objective
 
@@ -142,10 +144,19 @@ in the application core).
 
 ### Acceptance Criteria
 
-- `idf.py build` — 0 errors, 0 warnings
-- `cd build-tests && cmake ../tests && cmake --build . && ctest` — all pass
-- `clang-tidy -p build/ components/application/**/*.cpp` — 0 new warnings
-- 30-second serial smoke test: no Guru Meditation, no WDT, no panic
+- ✅ `idf.py build` — 0 errors, 0 warnings
+- ✅ `cmake -B build-tests tests && cmake --build build-tests && ctest --test-dir build-tests` — 133/133 pass
+- ✅ 30-second serial smoke test: BOOT_OK, no Guru/WDT/panic
+
+### Results
+
+| Metric | Value |
+|--------|-------|
+| New files | 19 (10 .cpp, 7 headers, 1 CMakeLists.txt, 1 json.hpp) |
+| Modified files | 6 (application CMakeLists, tests CMakeLists, domain/*.hpp, test_adc.cpp) |
+| Command variants | 35 |
+| Test cases | 48 new (133 total with pre-existing) |
+| Build warnings | 0 (1 pre-existing deprecation from nlohmann/json) |
 
 ---
 

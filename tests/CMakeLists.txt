@@ -5,21 +5,77 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# --- nlohmann_json via FetchContent ---
+include(FetchContent)
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
+# --- Catch2 via FetchContent ---
+FetchContent_Declare(
+    Catch2
+    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+    GIT_TAG v3.15.1
+)
+FetchContent_MakeAvailable(Catch2)
+
+# --- Application library (host-compilable subset) ---
+set(APPLICATION_SRCS
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/application/src/command.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/application/src/dispatch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/application/src/state_machine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/application/src/scheduler.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/application/src/handlers/burette_ops.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/application/src/handlers/burette_cal.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/application/src/handlers/sensors.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/application/src/handlers/system.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/application/src/handlers/valve.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/application/src/handlers/serial.cpp
+)
+
+set(DOMAIN_SRCS
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/domain/src/burette.cpp
+)
+
+add_library(ecotiter_app STATIC
+    ${APPLICATION_SRCS}
+    ${DOMAIN_SRCS}
+)
+
+target_include_directories(ecotiter_app PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/application/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/domain/include
+)
+
+target_link_libraries(ecotiter_app PUBLIC nlohmann_json::nlohmann_json)
+
+# --- Unit test executable ---
 add_executable(unit_tests
     src/test_main.cpp
     src/test_types.cpp
     src/test_burette.cpp
     src/test_adc.cpp
     src/test_valve.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/domain/src/burette.cpp
+    src/test_command.cpp
+    src/test_dispatch.cpp
+    src/test_handlers.cpp
+    src/test_state_machine.cpp
 )
 
 target_include_directories(unit_tests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/catch2
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/domain/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/application/include
 )
 
-target_compile_definitions(unit_tests PRIVATE CATCH_CONFIG_MAIN=0)
+# The old catch2/ header is not used; Catch2 comes from FetchContent
+
+target_link_libraries(unit_tests PRIVATE
+    ecotiter_app
+    Catch2::Catch2WithMain
+)
 
 enable_testing()
 add_test(NAME unit_tests COMMAND unit_tests)

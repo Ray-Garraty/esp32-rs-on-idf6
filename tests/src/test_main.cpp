@@ -1,2 +1,1 @@
-#define CATCH_CONFIG_MAIN
-#include "catch.hpp"
+// Catch2 main provided by Catch2::Catch2WithMain

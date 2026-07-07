@@ -32,9 +32,8 @@ case "$CMD" in
         ctest --output-on-failure
         ;;
     tidy)
-        [ -f build/compile_commands.json ] || { echo "Run 'idf.py build' first"; exit 1; }
-        find components main -name '*.cpp' | xargs -P4 clang-tidy -p build/
-        ;;
+        ./scripts/lint.sh "${@:2}"
+        ;;    
     clean)
         rm -rf build build-tests
         ;;
