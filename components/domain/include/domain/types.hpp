@@ -31,6 +31,10 @@ struct MlMin {
 
 enum class Direction : uint8_t { Cw, Ccw };
 
+enum class ValvePosition : uint8_t { Input, Output };
+enum class TransportMode : uint8_t { UsbActive, BleAdvertising, BleConnected };
+enum class LimitSwitchId : uint8_t { Full, Home };
+
 // GR-6: stack budget constants
 inline constexpr size_t MOTOR_THREAD_STACK = 16384;
 inline constexpr size_t MAIN_TASK_STACK = 32768;

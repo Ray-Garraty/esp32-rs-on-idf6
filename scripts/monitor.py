@@ -39,33 +39,20 @@ def make_log_filename(log_dir: str) -> Path:
     return Path(log_dir) / f"serial_{ts}.log"
 
 
-def main():
-    parser = argparse.ArgumentParser(description="ESP32-S3 serial monitor")
-    parser.add_argument("port", nargs="?", default=None, help="COM port (auto-detect if omitted)")
-    parser.add_argument("--timeout", type=int, default=30, help="Monitor duration in seconds")
-    parser.add_argument("--no-reset", action="store_true", help="Skip DTR reset on connect")
-    parser.add_argument("--log-dir", default=DEFAULT_LOG_DIR, help="Directory for log files (default: project_root/logs/)")
-    parser.add_argument("--no-log", action="store_true", help="Disable log file saving")
-    args = parser.parse_args()
-
-    port = args.port or find_esp32_port()
-    if not port:
-        print("ERROR: ESP32-S3 not found. Specify port: python scripts/monitor.py COM5", flush=True)
-        return 1
-
-    log_file = None
+def monitor_port(port, timeout=30, log_dir=DEFAULT_LOG_DIR, no_reset=False, no_log=False, log_path=None):
     CRASH_STATE_IDLE = 0
     CRASH_STATE_COLLECTING = 1
     crash_state = CRASH_STATE_IDLE
     crash_buffer: list[str] = []
-    if not args.no_log:
-        log_dir = Path(args.log_dir)
+    log_path = None
+    if not no_log:
+        log_dir = Path(log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = make_log_filename(args.log_dir)
+        log_file = make_log_filename(str(log_dir))
         counter = 1
         while log_file.exists():
             stem = f"serial_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_{counter}"
-            log_file = Path(args.log_dir) / f"{stem}.log"
+            log_file = log_dir / f"{stem}.log"
             counter += 1
         log_path = log_file
 
@@ -99,7 +86,7 @@ def main():
 
         writeline(f"=== Connected to ESP32-S3 on {port} @ {BAUDRATE} baud ===")
 
-        if not args.no_reset:
+        if not no_reset:
             writeline("=== Resetting ESP32-S3 (DTR pulse) ===")
             ser.dtr = False; ser.rts = False; time.sleep(0.1)
             ser.dtr = True;  ser.rts = True;  time.sleep(1.2)
@@ -109,7 +96,7 @@ def main():
 
         found_crash = False
         found_boot = False
-        deadline = time.time() + args.timeout
+        deadline = time.time() + timeout
         buf = ""
 
         while time.time() < deadline:
@@ -170,6 +157,24 @@ def main():
     else:
         print("RESULT: No boot marker (possibly OK)", flush=True)
         return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description="ESP32-S3 serial monitor")
+    parser.add_argument("port", nargs="?", default=None, help="COM port (auto-detect if omitted)")
+    parser.add_argument("--timeout", type=int, default=30, help="Monitor duration in seconds")
+    parser.add_argument("--no-reset", action="store_true", help="Skip DTR reset on connect")
+    parser.add_argument("--log-dir", default=DEFAULT_LOG_DIR, help="Directory for log files (default: project_root/logs/)")
+    parser.add_argument("--no-log", action="store_true", help="Disable log file saving")
+    args = parser.parse_args()
+
+    port = args.port or find_esp32_port()
+    if not port:
+        print("ERROR: ESP32-S3 not found. Specify port: python scripts/monitor.py COM5", flush=True)
+        return 1
+
+    return monitor_port(port=port, timeout=args.timeout, log_dir=args.log_dir,
+                        no_reset=args.no_reset, no_log=args.no_log)
 
 
 if __name__ == "__main__":

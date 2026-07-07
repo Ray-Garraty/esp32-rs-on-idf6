@@ -6,7 +6,7 @@ from pathlib import Path
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 IDF_PATH = Path("C:/esp/v6.0/esp-idf")
-IDF_PYTHON = Path("C:/Espressif/tools/python_env/idf6.0_py3.14_env/Scripts/python.exe")
+IDF_PYTHON = Path("C:/Users/Vovan/.espressif/python_env/idf6.0_py3.14_env/Scripts/python.exe")
 
 sys.path.insert(0, str(Path(__file__).parent))
 from monitor import monitor_port

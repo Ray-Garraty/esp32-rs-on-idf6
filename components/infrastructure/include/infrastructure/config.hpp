@@ -38,4 +38,19 @@ inline constexpr uintptr_t FLASH_CACHE_START = 0x4200'0000;
 inline constexpr uintptr_t FLASH_CACHE_END   = 0x43FF'FFFF;
 inline constexpr uintptr_t UART0_BASE        = 0x6000'0000;
 
+// ADC config
+inline constexpr uint32_t ADC_SAMPLES           = 64;
+inline constexpr uint16_t ADC_DEFAULT_A_X1000    = 1000;
+inline constexpr int16_t  ADC_DEFAULT_B          = 0;
+
+// OneWire config
+inline constexpr uint32_t TEMP_CONVERSION_WAIT_MS = 800;
+
+// NVS namespaces
+inline constexpr const char* NVS_NS_STALLGUARD   = "stallguard";
+inline constexpr const char* NVS_NS_WIFI         = "wifi";
+inline constexpr const char* NVS_KEY_SG_THRESHOLD = "threshold";
+inline constexpr const char* NVS_KEY_WIFI_SSID   = "ssid";
+inline constexpr const char* NVS_KEY_WIFI_PASS   = "password";
+
 } // namespace ecotiter::config

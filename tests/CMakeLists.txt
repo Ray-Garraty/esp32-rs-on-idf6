@@ -9,6 +9,8 @@ add_executable(unit_tests
     src/test_main.cpp
     src/test_types.cpp
     src/test_burette.cpp
+    src/test_adc.cpp
+    src/test_valve.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/domain/src/burette.cpp
 )
 

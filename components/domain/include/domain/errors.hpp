@@ -10,6 +10,7 @@ enum class StepperError : uint8_t {
     InitFailed,
     Rmt,
     LimitSwitchTriggered,
+    LimitSwitchReached,
     Timeout
 };
 

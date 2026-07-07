@@ -1,11 +1,19 @@
 idf_component_register(
     SRCS
         "src/drivers/stepper.cpp"
+        "src/drivers/limitswitch.cpp"
+        "src/drivers/led.cpp"
+        "src/drivers/valve.cpp"
+        "src/drivers/adc.cpp"
+        "src/drivers/onewire.cpp"
+        "src/storage/nvs.cpp"
     INCLUDE_DIRS "include"
     REQUIRES
         domain
         esp_driver_gpio
         esp_driver_rmt
+        esp_adc
+        nvs_flash
         esp_timer
         esp_common
 )
