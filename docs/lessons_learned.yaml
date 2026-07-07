@@ -942,3 +942,77 @@ lessons:
       e) Accept AP-only mode (no STA) — current fallback works
     refs:
       - docs/crash_reports/2026-07-04_phase6_postmortem.md
+
+  - id: LL-022
+    date: 2026-07-07
+    crash_signature: "WiFi AP not visible — no crash — C app_main() called but Rust main() never executes — all stubs present in ELF"
+    category: instrumentation_gap
+    trigger_patterns:
+      - "Calling app_main\\(\\)"     # last C log before silence
+      - "no Rust output after app_main"
+      - "WiFi AP not visible"
+      - "app_main = 16 bytes"
+      - "mmio boot marker not printed"
+    lesson: >
+      Two dead-end investigations were triggered by using the wrong
+      disassembler. Key lessons:
+
+      1. GNU `xtensa-esp-elf-objdump` CANNOT decode LLVM-generated Xtensa
+         instruction encodings. The bytes are valid Xtensa — the official
+         esp-clang `llvm-objdump` decodes them correctly. This is a known
+         incompatibility between the GNU binutils disassembler and the LLVM
+         code generator, NOT a toolchain bug. Always use llvm-objdump from
+         esp-clang to disassemble Rust code:
+           /home/vlabe/.espressif/tools/esp-clang/esp-20.1.1_20250829/esp-clang/bin/llvm-objdump \
+             -d target/xtensa-esp32s3-espidf/debug/ecotiter
+
+      2. The linker map (`libespidf.map`) is the definitive source for
+         symbol resolution, not `nm` or `objdump`. When the linker map
+         shows `app_main` at a `.text.app_main` section in the Rust rlib,
+         the Rust definition IS selected — regardless of what `nm` byte
+         sizes or `objdump` decode quality suggest.
+
+      3. When the symptom is "Rust main() never executes" and the Rust
+         app_main is confirmed present and correctly linked, the next
+         suspect is NOT the linker but the runtime: stack corruption on
+         entry, PSRAM allocator mismatch, or a hardware exception before
+         the first log line. In this case, the root cause remains unknown
+         after ruling out duplicate symbols and toolchain bugs.
+
+      4. Is it possible the issue is that `main.c` IS compiled with the
+         ESP-IDF component build system (using xtensa-esp-elf-gcc), while
+         the Rust `app_main` from esp-idf-sys uses Rust's LLVM backend.
+         Can app_main work if C and Rust objects use different Xtensa
+         instruction encoding? Yes — the Xtensa ISA is the same; only the
+         binary encoding of certain instructions differs between LLVM and
+         GNU assemblers. The CPU decodes the same bytes regardless of
+         which compiler produced them. The incompatibility is in the
+         disassembler (human-readable output), NOT in the machine code.
+
+      5. Always include `llvm-objdump` in any post-mortem toolkit.
+         Update scripts/build.sh to set an alias or env var pointing to it.
+    diagnostic: >
+      1. Check which disassembler was used: xtensa-esp-elf-objdump (GNU)
+         will fail on Rust functions; llvm-objdump (esp-clang) will succeed.
+      2. Check the linker map for the source of app_main: if it's in
+         libesp_idf_sys-*.rlib, the Rust definition is linked correctly.
+      3. If both symbol link and code validity are confirmed, the root
+         cause is runtime (stack/heap/hw exception) — not build/link.
+      4. Use `nm --print-size` on the rlib archive directly to check if
+         the Rust app_main has reasonable size (16 bytes = entry + l32r +
+         callx8 + retw.n, which is correct for a thin bridge function).
+    fix: >
+      Always use the LLVM disassembler from the esp-clang toolchain for
+      Rust code:
+        alias xtensa-objdump='/home/vlabe/.espressif/tools/esp-clang/esp-20.1.1_20250829/esp-clang/bin/llvm-objdump'
+
+      When investigating "main() never executed" with the link confirmed
+      correct, move immediately to runtime diagnostics: check stack
+      watermark, PSRAM initialization sequence, and place boot markers
+      via direct MMIO UART writes (not println!/log!) to find exactly
+      where execution stops.
+    refs:
+      - docs/issues/26_07_07_wifi_ap_not_working.md
+      - ~/.espressif/tools/esp-clang/esp-20.1.1_20250829/esp-clang/bin/llvm-objdump
+      - AGENTS.md §7 (Crash Investigation — diagnostic system)
+      - src/esp_safe.rs (boot_marker — MMIO UART write)

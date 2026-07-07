@@ -585,7 +585,26 @@ const UART_TX_FIFO_SIZE: u32 = 128;
 /// Safe from any context including panic handler — no OS calls, no locks,
 /// no heap allocation. This is the same approach ESP-IDF's own panic
 /// handler uses for crash output.
-struct CrashWriter;
+pub struct CrashWriter;
+
+/// Boot marker — MMIO UART write at function entry.
+/// Call before ANY init to verify that `main()` is reached.
+/// Safe: no heap, no locks, no OS calls — same as CrashWriter.
+pub fn boot_marker() {
+    use core::ptr::{read_volatile, write_volatile};
+    unsafe {
+        let msg = b"[BOOT] Rust main()\n";
+        for &byte in msg {
+            loop {
+                let s = read_volatile(UART_STATUS);
+                if ((s >> 16) & 0xFF) < UART_TX_FIFO_SIZE {
+                    break;
+                }
+            }
+            write_volatile(UART_FIFO_AHB, byte);
+        }
+    }
+}
 
 impl core::fmt::Write for CrashWriter {
     #[link_section = ".iram1"]

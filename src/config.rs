@@ -84,10 +84,11 @@ pub const HTTP_SERVER_STACK: usize = 12288;
 
 /// Owner thread for !Send EspHttpServer.
 ///
-/// 32 KB guarantees safe C-struct init (URI matchers, httpd_start). Holds the
-/// server via RAII, never exits. (Was 16 KB in main — insufficient, caused
-/// SW_CPU_RESET during Debug format. Now isolated to dedicated 32 KB stack.)
-pub const NET_OWNER_STACK: usize = 32768;
+/// 16 KB is sufficient with PSRAM enabled — heap allocations go to SPIRAM via
+/// CONFIG_SPIRAM_USE_MALLOC, so the stack only needs room for local variables
+/// and FFI call frames (EspWifi::new, httpd_start, NimBLE init). The HTTP
+/// server task itself has a dedicated 12288-byte stack.
+pub const NET_OWNER_STACK: usize = 16384;
 
 // ── RMT ───────────────────────────────────────────────────────
 /// RMT resolution in Hz (1 MHz → 1 tick = 1 µs).

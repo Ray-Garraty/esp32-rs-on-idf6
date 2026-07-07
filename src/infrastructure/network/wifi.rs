@@ -141,14 +141,18 @@ impl<'d> WifiManager<'d> {
     /// Initialise WiFi: try STA connect → if fail, clear creds → start AP.
     ///
     /// This is a blocking call (init only). Called once at boot.
-    pub fn init(&mut self) {
+    ///
+    /// # Errors
+    ///
+    /// Returns `NetworkError::WifiConnectionFailed` if AP mode fails to start.
+    pub fn init(&mut self) -> Result<(), NetworkError> {
         // Try STA mode first if we have saved credentials
         if !self.saved_ssid.is_empty() {
             log::info!("WiFi: trying STA connect to '{}'", self.saved_ssid.as_str());
             if self.try_sta_connect() {
                 log::info!("WiFi: STA connected to '{}'", self.saved_ssid.as_str());
                 self.start_mdns();
-                return;
+                return Ok(());
             }
             // STA failed — clear saved credentials and fall back to AP
             log::warn!("WiFi: STA connection failed, clearing credentials");
@@ -159,21 +163,24 @@ impl<'d> WifiManager<'d> {
 
         // Start AP mode
         log::info!("WiFi: starting AP '{}'", config::AP_SSID);
-        self.start_ap();
+        self.start_ap()?;
         self.mode = WifiMode::ApMode;
         log::info!("WiFi: AP ready at {}", self.ap_ip);
+        Ok(())
     }
 
     /// Start AP mode with custom network interface at 192.168.4.1/24.
     ///
     /// This is a blocking call (init only).
-    fn start_ap(&mut self) {
+    ///
+    /// # Errors
+    ///
+    /// Returns `NetworkError::WifiConnectionFailed` at any step (netif, config, start).
+    fn start_ap(&mut self) -> Result<(), NetworkError> {
         use esp_idf_svc::ipv4::{Configuration as IpConfig, Mask, RouterConfiguration, Subnet};
         use esp_idf_svc::netif::{EspNetif, NetifConfiguration, NetifStack};
 
-        let Some(wifi) = self.wifi.as_mut() else {
-            return;
-        };
+        let wifi = self.wifi.as_mut().ok_or(NetworkError::WifiConnectionFailed)?;
         let _ = wifi.stop();
 
         // Create custom AP EspNetif with 192.168.4.1/24
@@ -200,18 +207,8 @@ impl<'d> WifiManager<'d> {
             custom_mac: None,
         };
 
-        match EspNetif::new_with_conf(&ap_netif_conf) {
-            Ok(custom_ap) => {
-                if let Err(e) = wifi.wifi_mut().swap_netif_ap(custom_ap) {
-                    log::error!("WiFi: swap AP netif failed: {e}");
-                    return;
-                }
-            }
-            Err(e) => {
-                log::error!("WiFi: create AP netif failed: {e}");
-                return;
-            }
-        }
+        let custom_ap = EspNetif::new_with_conf(&ap_netif_conf)?;
+        wifi.wifi_mut().swap_netif_ap(custom_ap)?;
 
         // Configure and start AP
         let ap_config = AccessPointConfiguration {
@@ -223,21 +220,12 @@ impl<'d> WifiManager<'d> {
             ..Default::default()
         };
 
-        if wifi
-            .set_configuration(&Configuration::AccessPoint(ap_config))
-            .is_err()
-        {
-            log::error!("WiFi: set_configuration (AP) failed");
-            return;
-        }
-
-        if wifi.start().is_err() {
-            log::error!("WiFi: start (AP) failed");
-            return;
-        }
+        wifi.set_configuration(&Configuration::AccessPoint(ap_config))?;
+        wifi.start()?;
 
         self.start_dns();
         self.start_mdns();
+        Ok(())
     }
 
     /// Start DNS responder on port 53 (AP IP address).

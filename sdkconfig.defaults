@@ -69,3 +69,18 @@ CONFIG_BT_NIMBLE_SVC_GAP_DEVICE_NAME="EcoTiter-"
 # interrupts for flash I/O longer than the 300ms IWDT timeout, causing
 # TG1WDT_SYS_RST boot-loop. Task WDT is handled by disable_wdt() in esp_safe.rs.
 CONFIG_ESP_INT_WDT=n
+
+# PSRAM (8MB octal SPI RAM on ESP32-S3)
+# All malloc() goes to PSRAM via SPIRAM_USE_MALLOC, freeing internal DRAM
+# for WiFi/BLE DMA buffers (MALLOC_CAP_DMA) and task stacks.
+# Internal DRAM reserved via SPIRAM_MALLOC_RESERVE_INTERNAL (32KB default).
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+# Move lwip/net80211/pp/bt BSS to PSRAM to free internal DRAM
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# WiFi/lwIP non-DMA allocations try PSRAM first, fall back to internal DRAM.
+# DMA buffers (MALLOC_CAP_DMA) always go to internal DRAM regardless.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y

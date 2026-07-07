@@ -78,6 +78,8 @@ fn main() {
 
     static LAST_TRANSPORT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0xFF);
 
+    ecotiter_fw::esp_safe::boot_marker();
+
     esp_idf_sys::link_patches();
 
     // Regression guard: verify heap integrity immediately after startup.
@@ -215,7 +217,8 @@ fn main() {
                     Err(e) => {
                         let (free, largest, dma_largest) = ecotiter_fw::esp_safe::heap_stats();
                         log::error!(
-                            "WiFi init failed: {e:?}. Heap: free={}K, largest={}K, DMA_largest={}K. Running offline.",
+                            "WiFi init failed: {e:?}. Heap: free={}K, largest={}K, DMA_largest={}K. \
+                             Check that PSRAM is enabled (CONFIG_SPIRAM=y in sdkconfig.defaults).",
                             free / 1024, largest / 1024, dma_largest / 1024,
                         );
                         WifiManager::offline(ble_active_clone)
@@ -229,7 +232,9 @@ fn main() {
 
                 // Init WiFi FIRST so HTTP server has correct IP/routing
                 if let Ok(mut wifi) = wifi_mgr_for_init.try_lock() {
-                    wifi.init();
+                    if let Err(e) = wifi.init() {
+                        log::error!("WiFi AP/STA init failed: {e:?}");
+                    }
                     diag::heap_snapshot::snapshot("wifi_init");
                     // Post-WiFi DMA heap diagnostic
                     let (free, largest, dma_largest) = ecotiter_fw::esp_safe::heap_stats();
