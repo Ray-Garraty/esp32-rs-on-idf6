@@ -57,7 +57,7 @@ fail to a pass because "no ESP32 connected".
 
 - `verified_plan`: YAML Plan with acceptance criteria
 - `implementation_report`: YAML ImplementationReport from Implementer
-  (must have `cargo_test: pass`, `cargo_xtensa_build: pass`)
+  (must have `host_test: pass`, `idf_build: pass`)
 
 ## Process
 
@@ -66,10 +66,10 @@ fail to a pass because "no ESP32 connected".
 Before touching hardware, verify Implementer did their job:
 
 ```
-IF implementation_report.check_results.cargo_test != "pass":
+IF implementation_report.check_results.host_test != "pass":
   REJECT with issue: "Implementer reported failing host tests"
-IF implementation_report.check_results.cargo_xtensa_build != "pass":
-  REJECT with issue: "Implementer reported failing xtensa build"
+IF implementation_report.check_results.idf_build != "pass":
+  REJECT with issue: "Implementer reported failing build"
 ```
 
 If either fails → return to Implementer via Orchestrator. Do NOT proceed
@@ -97,7 +97,7 @@ scripts/build.sh
 
 Record:
 - Exit code
-- Binary size: `ls -la target/xtensa-esp32-espidf/debug/ecotiter`
+- Binary size: `ls -la build/ecotiter.elf`
 - Any warnings (pass as `build_warnings` in report)
 
 If build fails → fail with build log. Return to Implementer.
@@ -123,7 +123,7 @@ If command times out without "Flashing has completed!" → re-run entirely.
 Immediately after flashing:
 
 ```bash
-timeout 30 python3 scripts/serial_monitor.py
+timeout 30 python3 scripts/monitor.py
 ```
 
 **RED FLAGS — stop and escalate:**
@@ -131,9 +131,8 @@ timeout 30 python3 scripts/serial_monitor.py
 | Pattern | Meaning | Action |
 |---------|---------|--------|
 | `Guru Meditation Error` | Fatal crash | → @debugger |
-| `abort() was called` | Rust panic / ESP-IDF abort | → @debugger |
+| `abort() was called` | ESP-IDF abort | → @debugger |
 | `rst:0x8 (TG1WDT_SYS_RESET)` | Task WDT timeout | → @debugger |
-| `thread 'main' panicked` | Rust panic | → @debugger |
 | Stack overflow | Stack too small | → @debugger |
 | `Backtrace: 0x...` | Any crash trace | → @debugger |
 
@@ -175,7 +174,7 @@ Record: PASS / FAIL with test output.
 
 This is YOUR exclusive domain.
 
-Locate script from plan's `user_instructions` (e.g., `scripts/ble_serial_test.py`).
+Locate script from plan's `user_instructions` (e.g., `scripts/ble_test.py` or `scripts/uart_test.py`).
 Run:
 
 ```bash
@@ -253,7 +252,7 @@ acceptance_criteria_results:
     status: pass | fail | partial | deferred
     verification_method: automated | integration | manual | inspection
     evidence: "<actual output or user's exact words>"
-    evidence_source: "cargo_test | integration_script | user_response | reviewer"
+    evidence_source: "host_test | integration_script | user_response | reviewer"
     hardware_involved: true | false
     deferred_reason: "<only if deferred>"
 
@@ -295,4 +294,4 @@ rework_context:
 | Trying to diagnose Guru Meditation yourself | That's @debugger's specialty |
 | Bundling 5 manual ACs into one question | User confusion → bad evidence |
 | Paraphrasing user's answer | You lose nuance; keep exact words |
-| Using `idf.py` or raw `cargo +esp` | Use `scripts/build.sh` for all build/flash commands |
+| Using `idf.py` directly | Use `scripts/build.sh` for all build/flash commands |

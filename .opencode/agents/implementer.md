@@ -2,7 +2,7 @@
 description: >
   Implements code changes per a verified plan. Follows plan scope
   exactly, adds tests for automated acceptance criteria, runs all
-  project checks (cargo test, cargo clippy, cargo build), and
+  project checks (scripts/build.sh test, scripts/build.sh tidy, scripts/build.sh build), and
   produces a detailed implementation inventory.
 mode: subagent
 hidden: true
@@ -42,9 +42,9 @@ ESP32 special rules (§9), and anti-patterns (§12).
 
 ### Step 2: Add Tests
 For every AC marked `verification_method: automated`:
-- Write `#[cfg(test)]` inline unit test or property-based test (proptest)
+- Write `TEST_CASE` in Catch2 (`#include <catch2/catch_test_macros.hpp>`)
 - Test behavior, not implementation details
-- Follow naming: `{behaviour}_{condition}`
+- Follow naming: `"{behaviour} {condition}"`
 
 ### Step 3: Build & Check
 
@@ -55,30 +55,28 @@ Run these commands to verify your changes:
 scripts/build.sh test
 
 # Format check
-scripts/build.sh fmt
+find main components -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \
+  | xargs clang-format --dry-run -Werror
 
-# Clippy (host target) — zero warnings
-scripts/build.sh clippy-host
+# Lint — zero warnings (clang-tidy via lint.sh)
+scripts/build.sh tidy
 
-# Xtensa clippy — zero warnings
-scripts/build.sh clippy
-
-# Xtensa build — verify compilation for target
-scripts/build.sh
+# Firmware build — verify compilation for target
+scripts/build.sh build
 ```
 
 Fix any failures BEFORE reporting.
 
 You are responsible for:
-- Host unit tests, fmt, clippy
-- Xtensa clippy and build verification
+- Host unit tests, format, lint
+- Firmware build verification
 
 You are NOT responsible for:
 - Flashing the device (Validator does this via `scripts/build.sh flash`)
 - Running integration scripts on hardware (Validator does this)
 - Manual hardware testing (Validator polls the user)
 
-If all checks pass, report `cargo_test: pass` and `cargo_xtensa_build: pass`.
+If all checks pass, report `host_test: pass` and `idf_build: pass`.
 Validator will take it from there with real hardware.
 
 ### Step 4: Generate Implementation Report
@@ -102,11 +100,11 @@ created_files:
     tests_created: true | false
     test_path: "<path to test>"
 check_results:
-  cargo_test: pass | fail
-  cargo_fmt: pass | fail
-  cargo_clippy: pass | fail
-  cargo_xtensa_build: pass | fail | skipped
-  cargo_xtensa_clippy: pass | fail | skipped
+  host_test: pass | fail
+  fmt_check: pass | fail
+  tidy_check: pass | fail
+  idf_build: pass | fail | skipped
+  idf_tidy: pass | fail | skipped
 state_affected:
   - module: "<module path>"
     types_added: ["<Type>"]
@@ -125,7 +123,7 @@ state_affected:
 When `mode: rework`:
 1. Read `rework_context.issues` from Validator or Reviewer
 2. Fix ONLY the exact issues listed — do NOT refactor, optimize, or clean up surrounding code unless explicitly requested
-3. If you notice an unrelated bug, do NOT fix it. Add it to the `notes` section of your report for the Orchestrator to create a new task.
+3. If you notice an unrelated bug, do NOT fix it. Add it to the `notes` section of your report for the foreman to create a new task.
 4. Re-run ALL checks
 5. Generate new report with `iteration: N+1`
 
@@ -134,4 +132,4 @@ When `mode: rework`:
 - Writing tests that verify implementation (test behavior, not code)
 - Using `setInterval` or busy-wait loops (blocking main loop)
 - Magic numbers instead of named constants
-- `unwrap()`/`expect()` in library code
+- `std::abort()` / `assert()` in library code (use `std::expected` error propagation instead)

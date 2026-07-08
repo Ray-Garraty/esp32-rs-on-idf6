@@ -42,11 +42,9 @@ Common ESP32 root causes to check:
 - Blocking call (`send_and_wait`, `lock()`, `recv()`) in main loop
 - RMT `send_and_wait()` not in dedicated motor thread
 - WDT not disabled (`esp_task_wdt_deinit()` missing)
-- GPIO pin constructed incorrectly (use `degrade_output()`)
-- `PinDriver` generic args (1 arg for MODE, not 2)
-- `EspError` from wrong crate (`esp_idf_sys`, not `esp_idf_hal`)
-- Missing `#[cfg(target_arch = "xtensa")]` on xtensa-only modules
-- `unwrap()`/`expect()` in library code
+- GPIO pin constructed incorrectly (wrong config struct or pull mode)
+- Missing CMake build-target guards on xtensa-only modules
+- `std::abort()` / `assert()` in library code (should use `std::expected`)
 
 **Drill down with "5 Whys":**
 When symptoms point to a framework or dependency issue, push past the
@@ -71,8 +69,7 @@ wrong layer cost hours of wasted debugging.
 
 ### Step 2a: Dependency Impact Assessment (mandatory if external dep suspected)
 
-If the bug involves a library, framework, or SDK (ESP-IDF, esp-idf-hal,
-esp-idf-svc, esp32-nimble, etc.):
+If the bug involves a library, framework, or SDK (ESP-IDF, ESP-IDF components, etc.):
 
 **Pre-Plan Checklist:**
 [ ] Open the CHANGELOG of the affected dependency for the version range
@@ -100,15 +97,15 @@ Identify exact files to modify or create:
 - Use `Glob` and `Grep` to find relevant source files
 - Check `src/` module layout: `domain/`, `application/`, `infrastructure/`, `interface/`
 - Identify which layer(s) are affected (domain = pure logic, infrastructure = hardware)
-- List Rust modules, types, and functions affected
+- List C++ modules, types, and functions affected
 ### Step 4: Acceptance Criteria
 
 Write testable, verifiable criteria. Each AC must have:
 - Unique ID (`AC-001`, `AC-002`, ...)
 - Clear description (what behavior is expected)
-- Verification method: from this set (visit orchestrator/Validator for execution):
+- Verification method: from this set (visit foreman/Validator for execution):
   - `automated` — host unit test via `scripts/build.sh test`
-  - `integration` — automated Python script on real ESP32 (e.g., `scripts/ble_serial_test.py`)
+  - `integration` — automated Python script on real ESP32 (e.g., `scripts/ble_test.py`)
   - `manual` — human confirms physical-world event via user polling
   - `inspection` — code review only
 - Always add smoke test on real ESP32 with flashing and monitoring for at least 30 s
@@ -121,7 +118,7 @@ gold standard. Whenever feasible, move validation toward real hardware.
 
 **Prefer stronger methods for hardware-touching behavior:**
 - Stepper movement → `manual` (human confirms rotation direction)
-- BLE connection → `integration` (`scripts/ble_serial_test.py`)
+- BLE connection → `integration` (`scripts/ble_test.py`)
 - LED blinking → `manual` (human confirms pattern)
 - Pure computation → `automated` (host test)
 
@@ -141,12 +138,12 @@ Bad AC:
 ```
 
 ### Step 5: Dependencies & Risks
-- **Modules**: Rust modules to add, modify, or delete
+- **Modules**: C++ modules to add, modify, or delete
 - **Types**: domain types affected (Steps, Hz, Ml, etc.)
 - **State machines**: BuretteState variants, TransportSM states
-- **Dependencies**: Cargo.toml changes, crate additions
+- **Dependencies**: sdkconfig changes, component additions (idf_component.yml / CMakeLists.txt)
 - **Risks**: WDT timeout, hardware damage, race conditions, memory budget overflow
-- **Mitigations**: tests, error handling, cfg gates
+- **Mitigations**: tests, error handling, build system guards
 
 ### Step 6: Rework Budget
 - `max_iterations`: default 3

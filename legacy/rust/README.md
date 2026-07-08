@@ -44,7 +44,7 @@ This project includes a set of custom [OpenCode](https://opencode.ai) AI sub-age
 | **reviewer** | Code review (architecture, style, safety, conventions) |
 | **debugger** | Embedded crash analysis using Occam's Razor protocol (S1–S5) |
 | **reporter** | Generates completion reports and conventional-commit messages |
-| **orchestrator** | Drives full feature/bugfix workflows using the above agents |
+| **foreman** | Drives full feature/bugfix workflows using the above agents |
 
 All agents enforce the non-negotiable rules in [AGENTS.md](./AGENTS.md) — golden rules (GR-1 through GR-7), thread budget, init order, and hardware invariants derived from real post-mortems.
 

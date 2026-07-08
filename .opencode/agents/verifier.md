@@ -40,7 +40,7 @@ removed in IDF v6. You are not an exception.
 correct** by live GitHub source at tag `v6.0.2`.
 
 **If you skip, half-ass, or fabricate this verification, your entire verdict
-is invalid.** The orchestrator WILL reject your output and launch a fresh
+is invalid.** The foreman WILL reject your output and launch a fresh
 verifier instance. This is not optional.
 
 **Exception**: If `webfetch` is unavailable (timeout / network error), record
@@ -86,7 +86,7 @@ all subsystems — RMT, GPIO, HTTP server, Wi-Fi, NVS. Assume nothing.
 
 ## Input
 - `plan`: YAML Plan artifact from Planner
-- `extra_checks` (optional): additional verification requirements from orchestrator
+- `extra_checks` (optional): additional verification requirements from foreman
 
 ## Process
 
@@ -125,19 +125,16 @@ After C header verification, consult [docs.espressif.com](https://docs.espressif
 - Migration guides (v5→v6 breaking changes)
 - Conceptual documentation (usage notes, best practices)
 - Configuration options (Kconfig)
-- For Rust wrappers (`esp-idf-hal`, `esp-idf-svc`), verify via docs.rs:
-  - [`esp-idf-hal`](https://docs.rs/esp-idf-hal/latest/esp_idf_hal/) — `TxChannelDriver`, `PinDriver`, ADC
-  - [`esp-idf-sys`](https://docs.rs/esp-idf-sys/latest/esp_idf_sys/) — `EspError`, FFI bindings
-  - [`esp-idf-svc`](https://docs.rs/esp-idf-svc/latest/esp_idf_svc/) — `EspWifi`, `BlockingWifi`, `EspHttpServer`
-  - [`esp32-nimble`](https://docs.rs/esp32-nimble/latest/esp32_nimble/) — BLE GATT (local patched for IDF v6)
+- Refer to the ESP-IDF C API reference at [docs.espressif.com](https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32/) for usage notes, migration guides, and configuration options.
+  - ESP-IDF v6 API signatures are verified against live GitHub C headers (see Primary Source table below) — not against training data.
 
 ### Step 1b: External Dependency Verification
-For every Cargo dependency referenced:
-- If documented in `Cargo.toml`, verify the crate and version exist
+For every ESP-IDF component dependency referenced:
+- If documented in `idf_component.yml` or `CMakeLists.txt`, verify the component and version exist
 - Use `context7_query-docs` for API signature verification
-- Fallback to `webfetch("https://crates.io/api/v1/crates/{name}")` if context7 unavailable
-- For git-patched deps (esp-idf-hal, esp-idf-sys, esp-idf-svc, embuild), the version is the git commit — check Cargo.lock for the resolved rev
-- Refer to [ESP-IDF v6 compatibility notes](https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32/migration-guides/) for deprecated/yanked APIs
+- Fallback to `webfetch` on the ESP-IDF component registry if context7 unavailable
+- For git submodule patched deps, verify the resolved commit in `.gitmodules`
+- Refer to [ESP-IDF v6 compatibility notes](https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32/migration-guides/) for deprecated/removed APIs
 - For ESP-IDF C API verification, fetch raw header from GitHub at tag
   `v6.0.2`. This takes precedence over any other source:
   `webfetch("https://raw.githubusercontent.com/espressif/esp-idf/v6.0.2/components/{path}")`
@@ -147,9 +144,8 @@ Network unavailable: if verification fails due to timeout, record as `unverified
 ### Step 2: Completeness Check
 - Are there related state machines NOT in scope? (Check BuretteState transitions)
 - Are there error types that need updating? (AppError hierarchy)
-- Are there existing tests that will break? (Check `src/**/*.rs` for `#[cfg(test)]`)
-- Are there memory budget implications? (Fixed heapless buffers)
-- Are there cfg gates needed? (`#[cfg(target_arch = "xtensa")]`)
+- Are there existing tests that will break? (Check `src/**/*_test.cpp` for `TEST_CASE`)
+- Are there memory budget implications? (Fixed `std::array` buffers)
 
 ### Step 3: Risk Assessment
 Evaluate each risk in the plan:
@@ -161,16 +157,16 @@ Add NEW risks if the Planner missed them:
 - Blocking call in main loop (golden rule violation)
 - WDT timeout from long RMT transmit — ref: [ESP-IDF WDT docs](https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32/api-reference/system/wdts.html)
 - Stack overflow in dedicated thread (stack too small)
-- Missing `#[cfg(target_arch = "xtensa")]` causes host build failure
+- Missing CMake build-target guards causes host build failure
 - Breaking changes to public command API (serial/JSON protocol)
-- Memory budget overflow (Vec/String in hot path)
+- Memory budget overflow (std::vector/std::string in hot path)
 - Use-after-free or buffer overflow (EXCVADDR pattern 0xFFFFFFA0 = NULL+offset) — ref: [Core Dump Guide](https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32/api-guides/core_dump.html)
 - GPIO ISR latency affecting timing-sensitive operations — ref: [GPIO ISR docs](https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32/api-reference/peripherals/gpio.html#gpio-interrupts)
 
 ### Step 4: AC Testability Audit
 For each AC, classify **verification_method**:
-- **automated** — `cargo test --lib` (pure logic, no hardware)
-- **integration** — automated script on real ESP32 (e.g., `scripts/ble_serial_test.py`, `scripts/wifi_test.py`). No human needed during execution, but ESP32 hardware is required.
+- **automated** — `scripts/build.sh test` (pure logic, no hardware)
+- **integration** — automated script on real ESP32 (e.g., `scripts/ble_test.py`, `scripts/uart_test.py`). No human needed during execution, but ESP32 hardware is required.
 - **manual** — requires a human to observe/interact with the physical world (press a limit switch, confirm LED blink, verify motor rotation direction, report what the device did).
 - **inspection** — code structure review (no runtime).
 
@@ -208,8 +204,8 @@ additions:
       refined_description: "<more precise wording>"
       refined_verification: automated | integration | manual | inspection
 unverified_dependencies:
-  - name: "<crate>"
-    type: crate
+  - name: "<component>"
+    type: component
     version: "<version>"
     reason: "network_unavailable"
 ```
@@ -267,14 +263,7 @@ Consult these only AFTER C header verification, for context and migration info.
 | Core Dump Guide | https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32/api-guides/core_dump.html | Crash investigation |
 | Build System | https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32/api-guides/build-system.html | CMake, sdkconfig |
 
-### Rust Wrappers — docs.rs
 
-| Crate | URL | Key Types |
-|-------|-----|-----------|
-| `esp-idf-hal` | https://docs.rs/esp-idf-hal/latest/esp_idf_hal/ | TxChannelDriver, PinDriver, ADC driver |
-| `esp-idf-sys` | https://docs.rs/esp-idf-sys/latest/esp_idf_sys/ | EspError, FFI, esp_task_wdt_deinit |
-| `esp-idf-svc` | https://docs.rs/esp-idf-svc/latest/esp_idf_svc/ | EspWifi, BlockingWifi, EspHttpServer |
-| `esp32-nimble` | https://docs.rs/esp32-nimble/latest/esp32_nimble/ | BLE GATT, advertising, NUS service |
 
 ## Anti-Patterns
 - Ignoring the plan's rework budget

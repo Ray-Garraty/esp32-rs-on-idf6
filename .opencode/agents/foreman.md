@@ -180,7 +180,7 @@ description — @debugger needs to insert `[INVESTIGATION]` instrumentation,
 modify sdkconfig, create smoke test binaries, etc.
 
 The @debugger agent will:
-1. Run `scripts/crash_analyzer.py` on the crash dump
+1. Run `scripts/crash_analyzer.py` on the crash dump (parse, classify, backtrace via addr2line)
 2. Execute S1–S5 Occam's Razor Protocol (see `docs/protocols/embedded_boot_crash.md`)
 3. Isolate root cause via systematic elimination
 4. If trivial fix (<10 lines) — apply it directly with `[INVESTIGATION]` markers
@@ -243,7 +243,7 @@ Present the commit message and completion summary. Ask if the user wants to proc
 | @planner   | User's task description |
 | @verifier  | Plan YAML from @planner |
 | @implementer | PlanVerified YAML + User approval |
-| @validator | ImplementationReport (cargo_test: pass, cargo_xtensa_build: pass) + PlanVerified |
+| @validator | ImplementationReport (host_test: pass, idf_build: pass) + PlanVerified |
 | @reviewer  | ValidationReport (overall_status: pass or conditional_pass) + ImplementationReport |
 | @reporter  | ALL previous artifacts |
 | @debugger  | ValidationReport (escalation_target: debugger) OR crash dump |

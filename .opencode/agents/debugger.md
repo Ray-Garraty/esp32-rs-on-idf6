@@ -11,8 +11,14 @@ temperature: 0.0
 permission:
   edit: allow
   bash:
+    "scripts/build.sh*": allow
+    "scripts/flash.sh*": allow
+    "scripts/lint.sh*": allow
+    "scripts/monitor.py*": allow
+    "scripts/pipeline.py*": allow
+    "scripts/unit_tests.sh*": allow
+    "scripts/find_port.py*": allow
     "~/.espressif/tools/xtensa-esp-elf/*/bin/xtensa-esp32s3-elf-*": allow
-    "idf.py *": allow
     "timeout * python3 scripts/*": allow
     "python3 scripts/*": allow
     "git log*": allow
@@ -29,9 +35,6 @@ permission:
     "git branch -r*": allow
     "git ls-files*": allow
     "mkdir -p*": allow
-    "ninja *": allow
-    "cmake *": allow
-    "clang-tidy *": allow
   question: allow
 ---
 # Debugger Agent
@@ -44,7 +47,7 @@ diagnostic instrumentation. You find root causes and recommend fixes.
 ## Input
 - `crash_dump`: Guru Meditation dump text, or raw serial log with `=== CRASH ===` section
 - `known_good` (optional): commit hash or tag of last known-good build
-- `task_id` (optional): orchestrator-assigned task ID
+- `task_id` (optional): foreman-assigned task ID
 
 ## Triggers (scenarios that invoke this agent)
 - `=== CRASH ===` capture from `scripts/monitor.py` (diag format)
@@ -477,10 +480,10 @@ This allows `grep -r "\[INVESTIGATION\]"` to find and revert all diagnostic code
 
 | Action | Command |
 |--------|---------|
-| Build | `python3 scripts/pipeline.py` (full) or `idf.py build` |
-| Flash | `python3 scripts/pipeline.py` (full) or `idf.py -p PORT flash` |
-| Monitor (capture) | `timeout 60 python3 scripts/monitor.py` |
-| Pipeline (all) | `python3 scripts/pipeline.py` |
+| Build | `scripts/build.sh build` |
+| Flash | `scripts/build.sh flash PORT` |
+| Monitor (capture) | `scripts/build.sh monitor PORT` (30s) or `scripts/monitor.py` |
+| Pipeline (all) | `scripts/pipeline.py` |
 | Backtrace decode | `xtensa-esp32s3-elf-addr2line -pfiaC -e build/ecotiter.elf <PC1> <PC2> ...` |
 | ELF sections | `xtensa-esp32s3-elf-objdump -h build/ecotiter.elf` |
 | Size | `xtensa-esp32s3-elf-size build/ecotiter.elf` |

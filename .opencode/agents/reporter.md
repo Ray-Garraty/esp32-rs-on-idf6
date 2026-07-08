@@ -86,17 +86,17 @@ Report: docs/plans/completed/<filename>.md
 **Scope** (match to changed files):
 
 | Changed files | Scope |
-|---|---|
-| `src/stepper/`, `src/domain/burette.rs` | `stepper` or `burette` |
-| `src/infrastructure/network/wifi.rs` | `wifi` |
-| `src/infrastructure/network/ble.rs` | `ble` |
-| `src/infrastructure/network/http_server.rs` | `network` |
-| `src/infrastructure/drivers/` | `drivers` |
-| `src/infrastructure/storage/nvs.rs` | `storage` |
-| `src/interface/serial.rs` | `serial` |
-| `src/application/state_machine.rs` | `state` |
-| `src/errors.rs` | `error-handling` |
-| `src/main.rs` | `main` |
+|---|---|---|
+| `main/stepper.cpp`, `main/burette*.cpp` | `stepper` or `burette` |
+| `main/wifi*.cpp` | `wifi` |
+| `main/ble*.cpp` | `ble` |
+| `main/http_server*.cpp` | `network` |
+| `main/drivers/` | `drivers` |
+| `main/nvs*.cpp` | `storage` |
+| `main/serial*.cpp` | `serial` |
+| `main/state_machine*.cpp` | `state` |
+| `main/errors*.hpp` | `error-handling` |
+| `main/main.cpp` | `main` |
 | `docs/**` | `docs` |
 | `**/*test*` or `**/*mock*` | `testing` |
 
