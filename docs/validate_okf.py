@@ -31,18 +31,24 @@ ALLOWED_TYPES = {
     "CrashReport",
 }
 
+SKIP_DIRS = frozenset({"esp_idf_v6"})
+
 REQUIRED_FIELDS = {"type", "title", "description", "tags", "timestamp"}
 ISO8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 HEADING_RE = re.compile(r"^#{1,6}\s+")
 EMOJI_RE = re.compile(
     "[\U0001F000-\U0001FFFF\U00002600-\U000027BF\U00002B50-\U00002B55\U0000FE00-\U0000FE0F]"
 )
+CYRILLIC_RE = re.compile("[\u0400-\u04FF\u0500-\u052F]")
 
 
 def find_md_files(root: Path):
     for dirpath, _dirnames, filenames in os.walk(root):
-        # skip hidden dirs
-        if any(part.startswith(".") for part in Path(dirpath).parts):
+        # skip hidden dirs and configured skip dirs
+        parts = Path(dirpath).parts
+        if any(part.startswith(".") for part in parts):
+            continue
+        if SKIP_DIRS & set(parts):
             continue
         for f in filenames:
             if not f.endswith(".md"):
@@ -128,6 +134,16 @@ def validate_file(filepath: Path) -> bool:
             ok = False
 
     if not check_first_heading(content, body_start, filepath):
+        ok = False
+
+    cyrillic_matches = list(CYRILLIC_RE.finditer(content))
+    if cyrillic_matches:
+        for m in cyrillic_matches[:10]:
+            line_num = content[: m.start()].count("\n") + 1
+            snippet = content[max(0, m.start() - 10) : m.end() + 10].replace("\n", " ")
+            print(f"FAIL: {rel} — Cyrillic character '{m.group()}' at line {line_num}: ...{snippet}...")
+        if len(cyrillic_matches) > 10:
+            print(f"  ({len(cyrillic_matches) - 10} more Cyrillic character(s))")
         ok = False
 
     if ok:

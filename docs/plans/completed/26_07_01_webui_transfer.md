@@ -32,11 +32,11 @@ dashboard displays live data correctly.
 | AC-01 | Legacy `index.html` served at `GET /` — 9 accordion sections render | Manual: browser shows temperature, ADC, valve, stepper, logs, SSE, ADC cal, pinout, burette cal sections |
 | AC-02 | All 7 JS modules served at `/js/*.js` — no 404 in browser console | Manual: open browser devtools console at `/` — all JS loads |
 | AC-03 | Dark/light theme toggle works | Manual: click moon/sun button, theme persists across reload |
-| AC-04 | Captive portal shows legacy gradient design at `GET /wifi`; submit flow works correctly | Manual: open `/wifi` — gradient background, password toggle, spinner on submit; filling form and clicking "Подключиться" shows success |
+| AC-04 | Captive portal shows legacy gradient design at `GET /wifi`; submit flow works correctly | Manual: open `/wifi` — gradient background, password toggle, spinner on submit; filling form and clicking "Connect" shows success |
 | AC-05 | SSE `status` events update hardware cards in real time | Manual: temperature, electrode mV, valve, burette status update every ~10ms |
 | AC-06 | SSE `debug` events update stepper driver panel | Manual: StallGuard value, threshold, motor busy, overheat indicator update |
-| AC-07 | SSE `log` events populate the system log textarea | Manual: log messages appear in "Системный лог" section |
-| AC-08 | SSE `limitsw` events update limit switch indicators | Manual: `hw-limit-min` and `hw-limit-max` show `✅ Активирован` when triggered |
+| AC-07 | SSE `log` events populate the system log textarea | Manual: log messages appear in "System Log" section |
+| AC-08 | SSE `limitsw` events update limit switch indicators | Manual: `hw-limit-min` and `hw-limit-max` show `✅ Activated` when triggered |
 | AC-09 | `GET /api/logs` returns `{"entries":[...]}` with real log data | Inspection: endpoint returns log entries with `level` and `msg` fields |
 | AC-10 | `GET /api/logs/download` returns plain-text log file | Manual: download button saves `ecotiter-logs.txt` |
 | AC-11 | `POST /api/command` accepts all 17 legacy commands and returns `{"status":"ok","message":"received"}` (stub) | Automated: each command format accepted without error |
@@ -224,7 +224,7 @@ Done. All 7 JS files copied verbatim, CSS combined (style.css + theme.css),
 | AC-07 | Manual | SSE `log` events: system log textarea populated |
 | AC-08 | Manual | SSE `limitsw` events: limit switch badges update |
 | AC-09 | Inspection | `curl http://esp32/api/logs` returns `{"entries":[...]}` |
-| AC-10 | Manual | Click "Выгрузить" button — browser downloads `ecotiter-logs.txt` |
+| AC-10 | Manual | Click "Download" button — browser downloads `ecotiter-logs.txt` |
 | AC-11 | Automated | `curl -X POST -d '{"id":1,"cmd":"serial.ping"}' http://esp32/api/command` → `{"status":"ok","message":"received"}` |
 | AC-12 | Automated | Pre-commit: `cargo +esp build`, `cargo clippy`, `cargo test --lib` (all pass) |
 | AC-13 | Automated | Pre-commit: `python3 scripts/check_unsafe.py` — 23 blocks |

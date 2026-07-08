@@ -705,7 +705,7 @@ ESP32 boots, valve and temperature work, but WiFi and BLE never become available
 
 ### Failed Fix Attempt
 
-Homеning was moved into the motor task (`motor_task.rs::run()`) to put blocking RMT where it architecturally belongs. This caused an immediate reboot loop:
+Homing was moved into the motor task (`motor_task.rs::run()`) to put blocking RMT where it architecturally belongs. This caused an immediate reboot loop:
 
 ```
 ***ERROR*** A stack overflow in task pthread has been detected.

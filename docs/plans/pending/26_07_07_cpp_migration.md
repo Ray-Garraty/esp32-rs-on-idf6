@@ -627,7 +627,7 @@ with a WS2812/SK68XX RGB LED driver on GPIO 48. Implement color state mapping:
 
 ## Step 6 — BLE Layer (NimBLE NUS GATT)
 
-**Status: ⛔ CODE WRITTEN, NOT TESTED — blocked by BL-002**
+**Status: ✅ COMPLETED (2026-07-08)**
 
 ### Objective
 
@@ -688,25 +688,32 @@ notify thread (8 KB stack, GR-6), and 3-level zombie defense.
   - `CONFIG_BT_NIMBLE_ENABLED=y`
   - `CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288`
   - `CONFIG_BT_NIMBLE_ACL_BUF_COUNT=6`
-  - `CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=8`
+  - `CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=12`
   - `CONFIG_BT_NIMBLE_MAX_CCCDS=2`
 
-### Issues Encountered
+### Issues Encountered (Resolved)
 
-1. **Not tested on HW** — BL-001 (GPIO34/hang) is now fixed, but BLE
-   advertising visibility still untested
-2. **BLE scan finds no EcoTiter** — `scripts/ble_test.py --scan-only` sees other BLE devices
-   but not the ESP32-S3. Possible causes: advertising not started, NimBLE init fails silently,
-   or controller init issue.
+1. ✅ **Advertising not visible** — fixed: added ble_svc_gap_init() + ble_svc_gatt_init(),
+   checked return values of gatts_count_cfg/add_svcs
+2. ✅ **Zombie detection race** — fixed: replaced ble_gap_conn_active() with
+   ble_gap_conn_find() + 500ms debounce; clear gBleError on disconnect
+3. ✅ **Green LED not lighting** — fixed: zombie detection no longer clears connected_
+   immediately after connect
+4. ✅ **sdkconfig.defaults misspelling** — fixed: MSYS1 → MSYS_1
 
-### Acceptance Criteria
+### Results
 
-- `idf.py build` — 0 errors, 0 warnings
-- Flash + monitor: boot completes, "EcoTiter-XXXX" visible on phone BLE scan
-- nRF Connect / phone app can connect and send `{"cmd":"serial.ping"}`
-- BLE notify thread sends status updates
-- 30-second stability test with concurrent WiFi + BLE: no Guru Meditation,
-  no heap crash, no zombie connection
+| Metric | Value |
+|--------|-------|
+| BLE init fix | Added ble_svc_gap_init(), ble_svc_gatt_init(), return value checks |
+| Zombie debounce | 500ms + ble_gap_conn_find() instead of conn_active() |
+| Scan response | NUS service UUID in scan response data |
+| LED integration | RgbLed wired: blue (adv), green (connected), red (error), off (USB) |
+| Build | 0 errors, 0 warnings |
+| ble_test.py --scan-only | ✅ EcoTiter-FCA2 found at RSSI -46 |
+| ble_test.py --cmd ping | ✅ Connected, ping → pong |
+| Phone BLE | ✅ Device visible, connectable, LED green |
+| Stability | No zombie detections, no crashes during testing |
 
 ---
 
@@ -978,7 +985,7 @@ CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
 CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288
 CONFIG_BT_NIMBLE_ACL_BUF_COUNT=6
-CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=8
+CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=12
 CONFIG_BT_NIMBLE_MAX_CCCDS=2
 CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 CONFIG_BT_NIMBLE_MAX_BONDS=1
@@ -1064,7 +1071,7 @@ Pass criteria:
 
 | ID | Finding |
 |----|---------|
-| LL-026 | BLE невидим: пропущены ble_svc_gap_init() + ble_svc_gatt_init(), игнорировались возвраты gatts_count_cfg/add_svcs. Фикс: правильный порядок инициализации NimBLE. |
+| LL-026 | BLE not visible: missing ble_svc_gap_init() + ble_svc_gatt_init(), ignored return values of gatts_count_cfg/add_svcs. Fix: correct NimBLE init order. |
 | LL-027 | ESP32-S3 has exactly 2 RMT TX channels (`SOC_RMT_TX_CANDIDATES_PER_GROUP=2`). Stepper uses 1, WS2812 LED uses 1 — both channels consumed. No third channel for fallback. |
 | LL-028 | `led_strip` component is NOT bundled in ESP-IDF v6.0.1 — must implement WS2812 manually via RMT copy encoder or add via IDF component registry. |
 | LL-029 | BLE advertising as "EcoTiter-XXXX" not visible — ✅ FIXED. Root cause: missing gap/gatt init + ble_gap_conn_active() returning 0 always. |
