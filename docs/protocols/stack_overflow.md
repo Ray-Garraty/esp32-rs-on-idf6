@@ -4,7 +4,7 @@ title: "Protocol: Stack Overflow"
 description: >
   Debugging protocol for ESP32 stack overflows: detection, default stack sizes
   for all tasks, instrumentation with stack watermark, and root cause analysis
-  for the esp32-rs-on-idf6 firmware.
+  for the ESP32-S3 C++23 firmware.
 tags: [esp32, debug, stack-overflow, protocol]
 timestamp: 2026-07-03
 ---
@@ -23,11 +23,12 @@ timestamp: 2026-07-03
 
 | Task | Default | Notes |
 |------|---------|-------|
-| `main` (main task) | 16384 (16 KB) | Config: `CONFIG_ESP_MAIN_TASK_STACK_SIZE` |
-| Motor thread | 8192 (8 KB) | `MOTOR_THREAD_STACK` in `src/config.rs` |
-| Temperature thread | 4096 (4 KB) | `std::thread::spawn()` |
-| UART reader | 4096 (4 KB) | `std::thread::spawn()` / `mpsc` |
-| Net owner thread | 8192 (8 KB) | Custom spawn |
+| `main` (FreeRTOS main task) | 32768 (32 KB) | `CONFIG_ESP_MAIN_TASK_STACK_SIZE` |
+| Net owner thread | 16384 (16 KB) | WiFi → HTTP → BLE init, `xTaskCreate` |
+| Motor thread | 16384 (16 KB) | RMT stepper + homing, `xTaskCreate` |
+| Temperature thread | 16384 (16 KB) | DS18B20 bitbang reads |
+| BLE notify thread | 8192 (8 KB) | NimBLE notify pushes |
+| HTTP server (FreeRTOS internal) | 12288 (12 KB) | Set via `CONFIG_HTTPD_TASK_STACK_SIZE` |
 
 ## Steps
 
@@ -40,10 +41,10 @@ timestamp: 2026-07-03
 → The crashing task is named in the message. Fix: increase its stack size.
 
 **If no explicit message — check watermark for ALL tasks:**
-```rust
-// [INVESTIGATION] check all task watermarks
-log::info!("main stack watermark: {}",
-    ecotiter_fw::esp_safe::stack_watermark());
+```cpp
+// [INVESTIGATION] check main task watermark
+UBaseType_t wm = uxTaskGetStackHighWaterMark(nullptr);
+printf("main stack watermark: %u\n", wm * sizeof(configSTACK_DEPTH_TYPE));
 ```
 
 ### Step 2: Check Backtrace for Corruption
@@ -75,9 +76,9 @@ Find the relevant config and double it:
 
 | Location | Variable | Default | Action |
 |----------|----------|---------|--------|
-| `sdkconfig.defaults` | `CONFIG_ESP_MAIN_TASK_STACK_SIZE` | 16384 | Increase by 2x |
-| `src/config.rs` | `MOTOR_THREAD_STACK` | 8192 | Increase by 2x |
-| `std::thread::spawn()` | 3rd arg | 4096 | Increase via `Builder::stack_size()` |
+| `sdkconfig.defaults` | `CONFIG_ESP_MAIN_TASK_STACK_SIZE` | 32768 | Increase by 2x |
+| `components/domain/include/domain/channels.hpp` | `MOTOR_THREAD_STACK` | 16384 | Increase by 2x |
+| `xTaskCreate()` call site | 4th arg (stack_depth) | varies | Increase by 2x |
 
 After doubling → build → flash → test.
 
@@ -95,11 +96,11 @@ Once the crash is fixed, identify the code change that pushed stack usage
 over the limit:
 
 - New deep call chains (function A → B → C → D → E)
-- New large stack allocations (`[T; N]` locals, `Vec` with inline capacity)
+- New large stack allocations (`std::array<T, N>` or C-style arrays on stack)
 - New thread spawns (each thread has its own stack)
-- New `log::info!()` calls (log buffer on stack)
+- New `ESP_LOGI` / `std::print()` calls (format_args temporaries on stack)
 - Recursive or deeply nested parser/handler
-- New `heapless::Vec<_, N>` with large `N` on the stack
+- `std::format()` or `nlohmann::json::dump()` in constrained threads
 
 ## ESP32 Stack Overflow Mechanics
 

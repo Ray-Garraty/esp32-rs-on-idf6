@@ -41,18 +41,18 @@ BEFORE assuming heap corruption.
 
 ### Step 2: Locate First Corrupting Operation
 
-Binary search via `check_heap_integrity()` checkpoints:
+Binary search via `heap_caps_check_integrity_all()` checkpoints:
 
-```rust
-// [INVESTIGATION] CHECK 1 — after link_patches
-check_heap_integrity();
-log::info!("CHECK 1: OK");
+```cpp
+// [INVESTIGATION] CHECK 1 — top of app_main
+assert(heap_caps_check_integrity_all(true));
+printf("CHECK 1: OK\n");
 
 // ... next boot step ...
 
 // [INVESTIGATION] CHECK N — after suspect call
-check_heap_integrity();
-log::info!("CHECK N: OK");
+assert(heap_caps_check_integrity_all(true));
+printf("CHECK N: OK\n");
 ```
 
 The checkpoint that FAILs identifies the operation that corrupts the heap.
@@ -63,43 +63,35 @@ Common patterns:
 
 | Pattern | Likely cause |
 |---------|--------------|
-| Crash on first `Mutex::lock()` | `pthread_mutex_t` zero-init issue. Use `EspMutex` with `PTHREAD_MUTEX_INITIALIZER` (0xFFFFFFFF) |
-| Crash on first `log::info!()` | Logger's `Mutex<RingBuffer>` triggers first heap alloc. See Step 3a |
-| Crash after `Peripherals::take()` | GPIO/peripheral allocation corrupts heap |
-| Crash after `std::thread::spawn()` | Thread stack allocation overlaps heap region |
-| Crash in `compute_ramp()` | `Vec` allocation > available heap |
+| Crash on first `std::mutex::lock()` | `pthread_mutex_t` zero-init issue. Use `PTHREAD_MUTEX_INITIALIZER` or `std::once_flag` |
+| Crash on first `ESP_LOGI()` | Logger / FIFO buffer triggers first heap alloc. See Step 3a |
+| Crash after GPIO init | Driver allocation corrupts heap |
+| Crash after `xTaskCreate()` | Thread stack allocation fragments heap region |
+| Crash in RMT motor motion | Large contiguous allocation exceeds available heap |
 
 ### Step 3a: Logger First-Alloc Analysis
 
-If the first `log::info!()` call triggers the crash:
+If the first `ESP_LOGI()` call triggers the crash:
 
-1. Comment out `logger::init()` → does the crash move or disappear?
-2. Replace `std::sync::Mutex` with raw `pthread_mutex_t` init:
-   ```rust
-   let mut m = MaybeUninit::<libc::pthread_mutex_t>::uninit();
-   unsafe {
-       libc::pthread_mutex_init(m.as_mut_ptr(), core::ptr::null());
-   }
-   ```
-3. Build & test. If crash disappears → `std::sync::Mutex::new()` zero-init is incompatible with ESP-IDF v6.
+1. Remove `esp_log_set_vprintf()` → does the crash move or disappear?
+2. Replace with direct `printf()` or `puts()` — bypasses FIFO alloc.
 
-### Step 4: Check .init_array
+### Step 4: Check Linker Map
 
 ```bash
-xtensa-esp32-elf-objdump -d -j .init_array target/xtensa-esp32-espidf/debug/ecotiter
+xtensa-esp32s3-elf-objdump -d -j .init_array build/ecotiter.elf
 ```
 
-If section exists → C++ static constructors may allocate heap before `main()`.
-If "not found" → no C++ static constructors.
+If `.init_array` section exists → C++ static constructors may allocate heap before `app_main()`.
 
 ### Step 5: Memory Layout Validation
 
 ```bash
-xtensa-esp32-elf-objdump -h target/xtensa-esp32-espidf/debug/ecotiter
+xtensa-esp32s3-elf-objdump -h build/ecotiter.elf
 ```
 
 Check that `.bss` / `.dram0.bss` end address does NOT overlap with heap start
-(typically 0x3FFDxxxx–0x3FFExxxx on ESP32).
+(typically 0x3FCExxxx–0x3FE0xxxx on ESP32-S3).
 
 ## References
 

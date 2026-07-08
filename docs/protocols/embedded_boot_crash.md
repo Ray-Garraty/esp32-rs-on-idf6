@@ -4,7 +4,7 @@ title: "Protocol: Embedded Boot Crash"
 description: >
   S1–S5 Occam's Razor protocol for debugging ESP32 boot crashes: Guru Meditation,
   WDT reset, boot hang, and incomplete flash. Mandatory systematic debugging
-  procedure for the esp32-rs-on-idf6 firmware.
+  procedure for the ESP32-S3 C++23 firmware.
 tags: [esp32, debug, boot-crash, protocol, s1-s5]
 timestamp: 2026-07-03
 ---
@@ -23,15 +23,16 @@ Execute in strict order. No exceptions.
 
 ### S1: Stack Watermark Baseline (2 min)
 
-Insert `uxTaskGetStackHighWaterMark(NULL)` immediately after `link_patches()`:
+Insert `uxTaskGetStackHighWaterMark(nullptr)` at the top of `app_main()`:
 
-```rust
+```cpp
 // [INVESTIGATION] S1: stack watermark baseline
-let wm = ecotiter_fw::esp_safe::stack_watermark();
-log::info!("[INVESTIGATION] main task stack watermark: {wm} bytes");
+UBaseType_t wm = uxTaskGetStackHighWaterMark(nullptr);
+printf("[INVESTIGATION] main task stack watermark: %u bytes\n",
+       wm * sizeof(configSTACK_DEPTH_TYPE));
 ```
 
-Build, flash, monitor.
+Build (`scripts/build.sh build`), flash, monitor.
 
 **Decision:**
 - Watermark < 2048 bytes → **root cause = stack overflow**. Skip to Phase 4.
@@ -40,35 +41,35 @@ Build, flash, monitor.
 
 ### S2: Heap Integrity Pre-Check (2 min)
 
-Insert `heap_caps_check_integrity_all(true)` before the first heap allocation
-(immediately after `link_patches()`):
+Insert `heap_caps_check_integrity_all(true)` at the top of `app_main()`:
 
-```rust
+```cpp
 // [INVESTIGATION] S2: heap integrity pre-check
-ecotiter_fw::esp_safe::check_heap_integrity();
-log::info!("[INVESTIGATION] heap integrity: OK");
+assert(heap_caps_check_integrity_all(true));
+printf("[INVESTIGATION] heap integrity: OK\n");
 ```
 
-If heap integrity check itself crashes → ESP-IDF init issue (not Rust).
-If it passes → Rust code path corrupts heap.
+If heap integrity check itself crashes → ESP-IDF init issue.
+If it passes → main.cpp code path corrupts heap.
 
-### S3: Smoke Test Binary (5 min)
+### S3: Smoke Test (5 min)
 
-Create `src/bin/smoke_test.rs`:
+Strip `main/main.cpp` to a minimal loop:
 
-```rust
-//! [INVESTIGATION] smoke test — zero allocations
-fn main() {
-    esp_idf_sys::link_patches();
-    // No log::info!, no Mutex, no heap allocs
-    loop { core::hint::spin_loop(); }
+```cpp
+// [INVESTIGATION] smoke test — zero allocations
+extern "C" void app_main(void) {
+    // No printf, no heap allocs
+    while (true) {
+        // spin
+    }
 }
 ```
 
-Build (`cargo +esp build --target xtensa-esp32-espidf`), flash, monitor.
+Build (`scripts/build.sh build`), flash, monitor.
 
 **Decision:**
-- Smoke test boots and stays alive → ESP-IDF init OK, problem is in Rust code.
+- Smoke test boots and stays alive → ESP-IDF init OK, problem is in application code.
 - Smoke test crashes too → sdkconfig / ESP-IDF configuration issue.
 
 ### S4: Delta Analysis (5 min)
@@ -77,8 +78,8 @@ Build (`cargo +esp build --target xtensa-esp32-espidf`), flash, monitor.
 git log --oneline <last-known-good>..HEAD
 git diff <last-known-good> HEAD -- sdkconfig.defaults
 git diff <last-known-good> HEAD --stat
-xtensa-esp32-elf-size target/xtensa-esp32-espidf/debug/ecotiter
-xtensa-esp32-elf-objdump -h target/xtensa-esp32-espidf/debug/ecotiter
+xtensa-esp32s3-elf-size build/ecotiter.elf
+xtensa-esp32s3-elf-objdump -h build/ecotiter.elf
 ```
 
 **Decision:**
@@ -89,12 +90,12 @@ xtensa-esp32-elf-objdump -h target/xtensa-esp32-espidf/debug/ecotiter
 ### S5: Red Flags Checklist (2 min)
 
 Check for:
-- [ ] New function returning `Vec` > 10 KB (e.g., `compute_ramp()`)
-- [ ] New `Mutex<RingBuffer>` — first heap allocation trigger
+- [ ] New `std::array` or stack-local buffer > 4 KB
+- [ ] New `std::mutex` — first heap allocation trigger
 - [ ] New threads spawned (stack usage compounding)
 - [ ] sdkconfig changes (WebSocket, NimBLE pools, stack sizes)
 - [ ] Phase N worked, Phase N+1 crashes with same hardware
-- [ ] `CONFIG_ESP_MAIN_TASK_STACK_SIZE` unchanged despite main.rs growth
+- [ ] `CONFIG_ESP_MAIN_TASK_STACK_SIZE` unchanged despite main.cpp growth
 
 **Gate: ONLY after S1–S5 pass can complex hypotheses be proposed.**
 
