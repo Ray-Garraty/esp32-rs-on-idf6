@@ -10,12 +10,15 @@ idf_component_register(
         "src/motor_task.cpp"
         "src/temp_thread.cpp"
         "network/src/ble.cpp"
+        "network/src/wifi.cpp"
+        "network/src/http_server.cpp"
     INCLUDE_DIRS
         "include"
         "network/include"
     REQUIRES
         domain
         diag
+        interface
         esp_driver_gpio
         esp_driver_rmt
         esp_adc
@@ -24,4 +27,9 @@ idf_component_register(
         esp_common
         freertos
         bt
+        esp_wifi
+        esp_http_server
+        lwip
+        esp_event
+        esp_netif
 )

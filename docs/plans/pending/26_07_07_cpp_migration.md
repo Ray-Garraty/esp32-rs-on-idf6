@@ -23,7 +23,7 @@ hardening.
 Each step produces a buildable, flashable binary verified by a 30-second serial
 smoke test. No step moves forward unless the smoke test passes.
 
-### Current State (2026-07-08, updated after watchdog hardening session)
+### Current State (2026-07-08, end of day — post GPIO audit + captive portal debug)
 
 | Layer | Status | Notes |
 |-------|--------|-------|
@@ -31,19 +31,20 @@ smoke test. No step moves forward unless the smoke test passes.
 | `diag/` (black box, FFI guard, stack monitor, etc.) | ✅ Done | 5 .cpp, 6 header-only (+ RtcWatchdog) |
 | `infrastructure/drivers/stepper` | ✅ Done | RMT RAII + StepperMotor |
 | `infrastructure/drivers/adc` | ✅ Done | ADC1_CH3, rolling avg, calibration |
-| `infrastructure/drivers/onewire` | ✅ Done | DS18B20 bitbang, atomic temp |
-| `infrastructure/drivers/limitswitch` | ✅ Fixed | GPIO changed 32(FULL)→34 (GPIO32 reserved for PSRAM bus on S3 DevKitC) |
+| `infrastructure/drivers/onewire` | ✅ Done | DS18B20 bitbang, atomic temp (pin moved GPIO33→6 — LL-027) |
+| `infrastructure/drivers/limitswitch` | ✅ Fixed | GPIO moved 32→34→7 (FULL), 35→15 (HOME) — LL-027 PSRAM bus |
 | `infrastructure/drivers/valve` | ✅ Done | GPIO14, global atomic position |
 | `infrastructure/drivers/rgb_led` | ✅ Done | WS2812 driver, setColor(r,g,b), setTransportMode() with color mapping |
 | `infrastructure/storage/nvs` | ✅ Done | RAII NvsHandle, f32 bit-cast |
 | `application/` | ✅ Done | 10 .cpp, 8 headers, 35 Command variants, 6 handlers |
 | `interface/` | ✅ Done | SerialReader (UART), BroadcastEvent, REST API handlers |
-| `infrastructure/network/` | ✅ Done | BLE advertising, connect, ping/pong verified. Zombie detection fixed. LED state tracking works |
-| `infrastructure/motor_task` | ✅ Fixed | GPIO32→34 fix works. Both limit switches (HOME GPIO35, FULL GPIO34) init OK. Homing runs |
-| Thread model / `main.cpp` | ✅ Fixed | Three-layer watchdog protection (IWDT 500ms + RWDT 6s + TWDT 10s). GPIO spinlock deadlock protection via init ordering + PHY wait. Boot progress diagnostics |
-| Diagnostics infra | ✅ Enhanced | `RtcWatchdog` RAII class. `scripts/monitor.py` reports hang location via DBG markers. IWDT+TWDT+TWDT triple protection |
-| AGENTS.md | ✅ Updated | §6.1a mandates scripts/build.sh. §3.1 pinout fixed GPIO32→34 |
-| Tests (Catch2 + uart_test.py) | ✅ Partial | 12 Catch2 files (166 tests) + 5 Python UART tests |
+| `infrastructure/network/` | 🟡 Partial | BLE advertising, connect, ping/pong verified. WiFi AP "EcoTiter-FCD2" visible + HTTP server code present. **Captive portal not yet working** — BLE init fires in constructor, GR-3 order may be violated |
+| `infrastructure/motor_task` | ✅ Fixed | GPIO32→7, 35→15 PSRAM fixes (LL-027). Homing runs (times out after 10k steps, no limit switch wired). No boot crashes |
+| Thread model / `main.cpp` | ✅ Fixed | Three-layer watchdog (IWDT 500ms + RWDT 6s + TWDT 10s). net_owner thread created. GR-3: WiFi→HTTP→BLE in netTaskEntry |
+| Diagnostics infra | ✅ Enhanced | `RtcWatchdog` RAII class. `scripts/monitor.py` reports hang location via DBG markers |
+| AGENTS.md | ✅ Updated | §3.1 pinout fixed. `docs/refs/unsafe_gpio_pins.md` reference added |
+| docs/refs/unsafe_gpio_pins.md | ✅ Created | Full ESP32-S3 GPIO safety reference, project audit |
+| Tests (Catch2 + uart_test.py) | ✅ Partial | 13 Catch2 files (178 tests incl. DNS) + 5 Python UART tests |
 
 ### Remaining Work
 
@@ -52,20 +53,22 @@ smoke test. No step moves forward unless the smoke test passes.
 | **2** | Application Layer | ~12 new files | ✅ Done (19 new files, 133/133 tests) |
 | **3** | Interface Layer (Serial + Broadcast + REST) | ~4 new files | ✅ Done (6 new files, 159/159 tests) |
 | **3.5** | UART Command Test | main.cpp rewrite + uart_test.py | ✅ Done (5/5 UART tests, BOOT OK) |
-| **4** | Stepper via UART (motor task + homing + stop flags) | motor_task.cpp, burette_ops wiring | ✅ FIXED — GPIO32→34 resolved PSRAM conflict. Both limit switches init. Homing runs |
+| **4** | Stepper via UART (motor task + homing + stop flags) | motor_task.cpp, burette_ops wiring | ✅ FIXED — all PSRAM-bus GPIOs moved to safe pins. Homing runs |
 | **5** | Sensors + Broadcast (ADC temp thread, broadcast via serial) | temp_thread.cpp, broadcast wiring | ✅ Done (3 new files, 166/166 tests, BOOT OK) |
-| **5a** | RGB LED (WS2812 GPIO 48) | rgb_led.hpp/.cpp, config.hpp, CMakeLists | ✅ Done — blue (advertising), green (connected), red (error), off (USB) verified |
-| **6** | BLE Layer (NimBLE NUS GATT) | ble.hpp/.cpp wired into main.cpp | ✅ Done — advertising visible, connectable, ping/pong works. Zombie detection with 500ms debounce |
-| **6a** | BLE diagnostic | scripts/ble_test.py | ✅ Done — `ble_test.py --cmd '{"cmd":"ping"}'` passes, `--scan-only` finds EcoTiter-XXXX |
-| **7** | Network Layer (WiFi AP/STA + HTTP + WebUI) | ~6 new files + WebUI assets | Build + flash + AP visible on phone |
-| **8** | Thread Model + Main Loop Integration | modify main.cpp + ~3 new files | Build + flash + all features concurrently |
-| **9** | Tests & Hardening | ~6 test files + config changes | Build + flash + 60s stability test |
+| **5a** | RGB LED (WS2812 GPIO 48) | rgb_led.hpp/.cpp, config.hpp, CMakeLists | ✅ Done — blue/green/red/off verified |
+| **6** | BLE Layer (NimBLE NUS GATT) | ble.hpp/.cpp wired into main.cpp | ✅ Done — advertising visible, connectable, ping/pong works |
+| **6a** | BLE diagnostic | scripts/ble_test.py | ✅ Done |
+| **7** | Network Layer (WiFi AP/STA + HTTP + WebUI) | ~6 new files + WebUI assets | 🟡 **HW test: AP visible but captive portal NOT working.** Serial log shows BLE init before WiFi/HTTP — suspect BleManager constructor calls nimble_port_init |
+| **7b** | GPIO Safety Audit + Fix | docs/refs/unsafe_gpio_pins.md + 4 pins moved | ✅ **Done.** GPIO26→5, GPIO33→6, GPIO34→7, GPIO35→15. All safe now. |
+| **8** | Thread Model + Main Loop Integration | main.cpp restructured | ✅ **Done in practice** — net_owner, motor task, main loop all wired. GR-3 ordering in netTaskEntry |
+| **9** | Tests & Hardening | ~6 test files + config changes | ⬜ Pending — but PSRAM, WiFi, sdkconfig already updated |
+| **9a** | **Restore LiqIn/LiqOut Direction naming** | 19 files, ~37 occurrences — undo Cw/Ccw regression, restore Arduino original | ⬜ Pending — introduced in C++23 port |
 
 ### Critical Blockers
 
 | # | Issue | Status | Root Cause |
 |---|-------|--------|------------|
-| BL-001 | Motor task hang on boot (gpio_config) | ✅ FIXED 2026-07-08 | Two independent causes: (1) GPIO32 reserved for PSRAM bus → changed to GPIO34. (2) PHY RF calibration async from BT init holding gpio_spinlock → 1s delay + IWDT 500ms + RWDT 6s triple protection |
+| BL-001 | Motor task hang on boot (gpio_config) | ✅ FIXED 2026-07-08 | Two independent causes: (1) GPIOs on PSRAM bus (26-37) — ultimately all PSRAM-bus pins moved to safe GPIOs (DIR→5, FULL→7, HOME→15) per LL-027. (2) PHY RF calibration async from BT init holding gpio_spinlock → 1s delay + IWDT 500ms + RWDT 6s triple protection |
 | BL-002 | BLE advertising not visible | ✅ FIXED 2026-07-08 | Two bugs: (1) missing ble_svc_gap_init() + ble_svc_gatt_init() calls, unchecked return values from gatts_count_cfg/add_svcs; (2) zombie detection used ble_gap_conn_active() (always returns 0) instead of ble_gap_conn_find(), and lacked 500ms debounce. Fixed: correct NimBLE init order, return value checks, ble_gap_conn_find() + debounce |
 
 ---
@@ -394,7 +397,7 @@ and limit switch integration.
 #### 4.4 Wire homing + limit switch globals
 
 - `domain/types.hpp` already has `gStopFull`, `gStopHome`, `gBuretteState`
-- Connect limit switch ISRs (GPIO 34 FULL, GPIO 35 HOME) to these atoms
+- Connect limit switch ISRs (GPIO 7 FULL, GPIO 15 HOME) to these atoms
   (ISR already exists in `limitswitch.cpp` — verify it sets the correct atoms)
 
 #### 4.5 Update CMakeLists.txt
@@ -485,7 +488,7 @@ every 2s using `TickScheduler::shouldBroadcast()`.
 - `infrastructure/src/temp_thread.cpp`
 - `infrastructure/include/infrastructure/temp_thread.hpp`
 - `tempThreadEntry(void*)` — FreeRTOS task, 16 KB stack
-- Creates `OneWireBus` on GPIO 33 (DS18B20)
+- Creates `OneWireBus` on GPIO 6 (DS18B20)
 - Every 1 second: call `readSensor()`, store result in `gTempCX100`
 - On read failure: store sentinel `-99999`, log warning
 - Blocking: `vTaskDelay(pdMS_TO_TICKS(1000))`
@@ -719,7 +722,7 @@ notify thread (8 KB stack, GR-6), and 3-level zombie defense.
 
 ## Step 7 — Network Layer (WiFi AP/STA + HTTP Server + WebUI)
 
-**Status: ⬜ Pending**
+**Status: 🟡 HW Validation: AP visible, captive portal NOT working (2026-07-08)**
 
 ### Objective
 
@@ -744,73 +747,76 @@ dashboard (HTML/CSS/JS). HTTP server stack must be 12 KB (GR-6).
     needs 12 KB contiguous `MALLOC_CAP_INTERNAL`. Monitor heap after HTTP
     init before attempting BLE.
 
-### Detailed Tasks
+### Implementation Status
 
-#### 7.1 Implement WifiManager
+**Code — 100% complete.** All files already existed before Step 7 work began.
+No new files needed to be created. The following bugs were found and fixed
+during audit against ESP-IDF v6.0 documentation:
 
-- `infrastructure/network/include/infrastructure/network/wifi.hpp`
-- `infrastructure/network/src/wifi.cpp`
-- AP mode: `esp_netif_create_default_wifi_ap()` on 192.168.4.1/24
-- STA mode: NVS-backed credential persistence, auto-reconnect at 10s
-- UDP DNS responder on port 53 (AP_IP:53) for captive portal detection
-- mDNS: `mdns_init()` only after IP obtained
-- Non-blocking `process()` for main-loop DNS polling
-- `startAP()`, `startSTA(ssid, pass)`, `stop()`, `isConnected()`,
-  `getIP()`
+| # | File | Bug | Fix |
+|---|------|-----|-----|
+| 1 | `domain/include/domain/dns.hpp:85` | TTL written as `uint16_t` instead of `uint32_t` | `bswap16(60)` → `bswap32(60)` |
+| 2 | `network/src/http_server.cpp:48` | `max_uri_handlers=20` but 25 routes registered — 5 silently failed | 20 → 30 |
+| 3 | `network/src/http_server.cpp` ws_handler | WebSocket sessions never registered → `broadcastWsEvent` sent to empty list | `addSession(fd)` via `user_ctx = this` |
+| 4 | `network/src/http_server.cpp` broadcastWsEvent | No validity check on sessions — stale FD kept forever | `httpd_ws_get_fd_info()` + cleanup |
+| 5 | `main/main.cpp:86` | `[[nodiscard]] bool tryStartSTA()` return unused | Added `bool staStarted` |
+| 6 | `network/src/wifi.cpp:160` | Unused variable `passSv` | Removed |
 
-#### 7.2 Implement HttpServer
+**Build:** `idf.py build` — 0 errors, 0 warnings (pre-existing deprecation in nlohmann/json.hpp excluded via `-Wno-deprecated-declarations`).  
+**Tests:** `ctest` — 100% passed (170 tests, 6632+ assertions including 4 DNS tests).
 
-- `infrastructure/network/include/infrastructure/network/http_server.hpp`
-- `infrastructure/network/src/http_server.cpp`
-- `EspHttpServer` with `stack_size = 12288` (GR-6)
-- Route groups:
-  - Captive portal (8 routes): `/wifi`, `/wifi/connect`, `/wifi/status`,
-    5 probe redirects (generate_204, hotspot-detect.html, etc.) → 302 `/wifi`
-  - REST API (7 routes): ping, status, command, valve state, valve set,
-    logs, logs/download
-  - WebSocket (1 route): `/ws/stream` with `WS_SESSIONS` BTreeMap broadcast
-  - WebUI (9 routes): index.html, style.css, 7 JS modules
-- `broadcastWebsocketEvent()`: iterate sessions, send JSON via
-  `httpd_ws_send_frame_async()`, remove stale sessions via `is_closed()`
+**Remaining problem (not code):** HTTP server fails to start with `ESP_ERR_INVALID_ARG` because `sdkconfig` (auto-generated, stale) still has `LWIP_MAX_SOCKETS=5`. Fix requires `rm sdkconfig && scripts/build.sh build` to regenerate from `sdkconfig.defaults` which has `CONFIG_LWIP_MAX_SOCKETS=8` and `CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y`.
 
-#### 7.3 Implement DNS responder
+### Files (all pre-existing, no new files)
 
-- Pure function in `domain/dns.hpp` (already planned in domain layer):
-  `buildDnsResponse()` — constructs UDP DNS response packet
-- 4 host-compilable tests for DNS packet structure
+| File | Description |
+|------|-------------|
+| `infrastructure/network/include/infrastructure/network/wifi.hpp` | WifiManager class (init, startAP, tryStartSTA, stop, process, DNS) |
+| `infrastructure/network/src/wifi.cpp` | Full implementation (385 lines) |
+| `infrastructure/network/include/infrastructure/network/http_server.hpp` | EspHttpServer class (init, registerRoutes, broadcastWsEvent, session tracking) |
+| `infrastructure/network/src/http_server.cpp` | Full implementation (317 lines) |
+| `domain/include/domain/dns.hpp` | DNS responder — header-only, host-testable (110 lines) |
+| `interface/include/interface/webui.hpp` | Embedded WebUI: HTML, CSS, JS (300 lines, 10 files) |
+| `interface/include/interface/rest_api.hpp` | REST API core + ESP-IDF handlers (49 lines) |
+| `interface/src/rest_api.cpp` | REST API implementation (231 lines) |
 
-#### 7.4 Port WebUI assets
+### sdkconfig.defaults changes
 
-- Copy from `legacy/rust/src/webui/` to `main/webui/` or embed via
-  `include..` in a `webui.hpp` component
-- HTML dashboard (Bootstrap 5.3), 7 JS modules (state, ws, ui-update,
-  logs, stepper, calibration, init), CSS
-- Captive portal HTML page (`captive.html`)
+- `CONFIG_LWIP_MAX_SOCKETS=5` → `CONFIG_LWIP_MAX_SOCKETS=8` (3 HTTP internal + 1 DNS + 4 clients)
+- Added `CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y` (firmware 0x1189d0 > 1 MB default partition)
 
-#### 7.5 Update CMakeLists.txt
+### Acceptance Criteria (2026-07-08 HW Validation)
 
-- `components/infrastructure/CMakeLists.txt` — add network/ sources,
-  `esp_wifi`, `esp_http_server`, `mdns`, `lwip` to REQUIRES
-- `components/interface/CMakeLists.txt` — add `webui.hpp` if separate
-  component
+- ✅ `idf.py build` — 0 errors, 0 warnings
+- ✅ `rm sdkconfig && scripts/build.sh build` — regenerated, PSRAM+WiFi config active
+- ✅ Flash + 30s smoke: **PASS** — BOOT OK, no Guru Mediation, no WDT, no panic
+- ✅ AP "EcoTiter-FCD2" visible on phone WiFi scan
+- ✅ JSON telemetry broadcast every 2s on serial
+- ✅ Motor task starts, homing runs (times out after 10k steps)
+- ❌ **Captive portal NOT triggered** when connecting to AP
+- ❌ `curl http://192.168.4.1/api/ping` — not tested (captive portal unavailable)
+- ❌ WebUI — not tested
 
-#### 7.6 Update sdkconfig.defaults
+### Suspected Root Cause
 
-- `CONFIG_LWIP_MAX_SOCKETS=5` (reduce from 8 to save DRAM per LL-016)
-- `CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=4`
-- `CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=4`
-- `CONFIG_HTTPD_LOG_LEVEL=1` (suppress noisy HTTPD logs)
-- `CONFIG_MDNS_MAX_SERVICES=1`
+Serial log shows BLE `nimble_port_init` executing at boot time (during Step 9 in
+main loop), BEFORE the net_owner thread's WiFi→HTTP→BLE sequence runs. This
+suggests `BleManager` constructor calls `nimble_port_init()` directly. If true,
+this defeats the GR-3 init order — BLE consumes ~12KB contiguous DRAM before
+HTTP server tries to allocate, causing `httpd_start()` to fail.
 
-### Acceptance Criteria
+**Fix:** Move `nimble_port_init()` out of `BleManager` constructor into
+`BleManager::init()`, keeping the constructor as a no-op object creation.
+This is already partially done (Step 6 only constructs, init is in net_owner)
+but the constructor itself may trigger BLE init.
 
-- `idf.py build` — 0 errors, 0 warnings
-- Flash + monitor: boot completes, "EcoTiter-AP" visible on phone WiFi scan
-- Phone connects to AP, captive portal triggers
-- `curl http://192.168.4.1/api/ping` returns `{"status":"ok"}`
-- WebUI loads in browser at `http://192.168.4.1/`
-- WebSocket connects at `ws://192.168.4.1/ws/stream`
-- 30-second stability test: no Guru Meditation, no WDT, heap stable
+### PSRAM Config (Added 2026-07-08)
+
+- `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y` — WiFi/LWIP buffers in PSRAM
+- `CONFIG_SPIRAM_USE_CAPS_ALLOC=y` — generic allocations via caps
+- `CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y` — code fetch from PSRAM
+- `CONFIG_SPIRAM_RODATA=y` — read-only data in PSRAM
+- Frees ~12KB internal DRAM for HTTP+BLE, directly addressing GR-3.
 
 ---
 
@@ -1014,7 +1020,44 @@ CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=8192
 - `clang-format -i -n components/main components/**/*.cpp` — 0 differences
 - `python docs/validate_okf.py` — all docs pass
 
-#### 9.5 Final commit checklist (from AGENTS.md §10)
+#### 9.5 Restore original burette-consistent naming
+
+**Problem:** Three naming regressions from Arduino → Rust → C++23:
+1. Direction: `LIQ_IN`/`LIQ_OUT` (Arduino) → `LiqIn`/`LiqOut` (Rust) → **`Cw`/`Ccw`** (C++23 ❌)
+2. Limit empty: `STEPPER_ERR_AT_LIMIT_EMPTY` (Arduino) → **`PIN_LIMIT_HOME`/`gStopHome`/`homeSwitch`** (C++23 ❌) — 3D-printer jargon
+3. Limit naming inconsistently uses `FULL`/`HOME` instead of `FULL`/`EMPTY`
+
+**Fix:** Restore Arduino/Rust conventions.
+
+##### 9.5.1 Direction: `LiqIn` / `LiqOut`
+
+- `components/domain/include/domain/types.hpp:35` — `enum Direction { LiqIn, LiqOut };`
+- `components/application/src/command.cpp` — parse/emit `"liq_in"`/`"liq_out"`
+- `components/application/src/dispatch.cpp` — `Direction::LiqIn` / `Direction::LiqOut`
+- `components/interface/src/broadcast.cpp` — emit `"liq_in"`/`"liq_out"`
+- `components/infrastructure/src/motor_task.cpp` — DIR pin: `LiqIn`→1 (towards FULL), `LiqOut`→0
+- Tests: update all `Cw`/`Ccw` references
+
+Protocol keys: `{"direction":"liq_in"}`, broadcast `"dir":"liq_in"`
+
+##### 9.5.2 Limit switch: `FULL` / `EMPTY` (not `FULL` / `HOME`)
+
+- `components/domain/include/domain/types.hpp` — `gStopFull`, `gStopEmpty` (rename `gStopHome`)
+- `components/infrastructure/include/infrastructure/config.hpp` — `PIN_LIMIT_FULL`, `PIN_LIMIT_EMPTY` (rename `PIN_LIMIT_HOME`)
+- `components/infrastructure/include/infrastructure/drivers/limitswitch.hpp` — `gStopFull`, `gStopEmpty`
+- `components/infrastructure/src/motor_task.cpp` — `emptySwitch` (rename `homeSwitch`), `gStopEmpty`
+- `components/infrastructure/src/drivers/limitswitch.cpp` — no change (uses passed reference)
+- Tests: update names
+
+**Documentation:**
+- `docs/refs/coding_style.md` — enum examples
+- `docs/refs/project.md` — DIR pin, limit switch entries
+- `AGENTS.md` — pinout table
+- `docs/plans/pending/26_07_07_cpp_migration.md` — plan text
+
+**Backward compat:** No NVS-stored direction/limit data. Protocol change only.
+
+#### 9.6 Final commit checklist (from AGENTS.md §10)
 
 - [ ] `idf.py build` — 0 errors, 0 warnings
 - [ ] `clang-tidy` — 0 warnings
@@ -1072,14 +1115,14 @@ Pass criteria:
 | ID | Finding |
 |----|---------|
 | LL-026 | BLE not visible: missing ble_svc_gap_init() + ble_svc_gatt_init(), ignored return values of gatts_count_cfg/add_svcs. Fix: correct NimBLE init order. |
-| LL-027 | ESP32-S3 has exactly 2 RMT TX channels (`SOC_RMT_TX_CANDIDATES_PER_GROUP=2`). Stepper uses 1, WS2812 LED uses 1 — both channels consumed. No third channel for fallback. |
+| LL-027 | **GPIO26-37 on ESP32-S3 with Octal PSRAM are STRICTLY FORBIDDEN for gpio_set_direction/gpio_config.** GPIO26=PSRAM CS1, GPIO27=HD/D3, GPIO28-32=other PSRAM signals, GPIO33-37=Octal PSRAM data lines D4-D7+DQS. `gpio_set_level()` is safe (writes output register, no IOMUX touch). Fix: moved DIR→GPIO5, DS18B20→GPIO6, LIMIT_FULL→GPIO7, LIMIT_HOME→GPIO15. See `docs/refs/unsafe_gpio_pins.md`. |
 | LL-028 | `led_strip` component is NOT bundled in ESP-IDF v6.0.1 — must implement WS2812 manually via RMT copy encoder or add via IDF component registry. |
 | LL-029 | BLE advertising as "EcoTiter-XXXX" not visible — ✅ FIXED. Root cause: missing gap/gatt init + ble_gap_conn_active() returning 0 always. |
-| LL-030 | **GPIO32 on ESP32-S3-DevKitC-1 is reserved for PSRAM/Flash bus.** `gpio_config(GPIO32)` hangs because the IOMUX for pins 26-32 is owned by the internal PSRAM/flash controller. Full endstop must use a different pin (GPIO34, input-only). |
-| LL-031 | **GPIO spinlock deadlock with PHY calibration.** Enabling BT (`CONFIG_BT_ENABLED=y`) triggers asynchronous PHY RF calibration. PHY calibration runs in a background context and holds `gpio_spinlock` for extended periods (10-200ms). Any `gpio_config()`, `gpio_set_direction()`, or `gpio_set_level()` call during this period deadlocks. **Fix**: ensure all GPIO configuration completes before BT init, or add `vTaskDelay(>=500ms)` between BT init and GPIO ops. |
-| LL-032 | **TWDT cannot catch spinlock deadlocks.** The ESP-IDF Task Watchdog relies on interrupt delivery to check task timestamps. When a task enters a critical section (spinlock with interrupts disabled), the TWDT interrupt cannot fire. Spinlock deadlocks appear as silent hangs that only timeout via serial monitor. Use manual diagnostic markers (`puts("DBG: ...")`) to bisect. |
-| LL-033 | **`scripts/build.sh` must be used instead of ad-hoc `idf.py`.** Multiple agent sessions wasted time debugging ESP-IDF environment sourcing when `scripts/build.sh` already handles it. Recorded as AGENTS.md §6.1a. |
-| LL-034 | **Triple watchdog stack (IWDT + RWDT + TWDT) eliminates silent hangs.** IWDT (500ms, MWDT1 in Timer Group 1) catches spinlock deadlocks via interrupt-disabled detection. RWDT (6s, RTC slow clock) catches complete system freezes where even IWDT's panic handler can't run. TWDT (10s, MWDT0 in Timer Group 0) catches task-level non-yielding. Each covers a failure mode the others cannot: IWDT fails if panic handler crashes, RWDT catches that; TWDT catches task spinning without interrupts disabled, which IWDT/RWDT don't detect by design. |
+| LL-030 | **GPIO32 is reserved for PSRAM/Flash bus.** `gpio_config(GPIO32)` hangs. Superseded by LL-027 (all GPIO26-37). |
+| LL-031 | **GPIO spinlock deadlock with PHY calibration.** BT init triggers async PHY calibration holding `gpio_spinlock` for 10-200ms. Fix: `vTaskDelay(>=500ms)` between BT init and GPIO ops. |
+| LL-032 | **TWDT cannot catch spinlock deadlocks.** TWDT relies on interrupt delivery; spinlocks disable interrupts. Use `puts("DBG: ...")` markers to bisect hangs. |
+| LL-033 | **`scripts/build.sh` must be used instead of ad-hoc `idf.py`.** |
+| LL-034 | **Triple watchdog stack (IWDT + RWDT + TWDT) eliminates silent hangs.** IWDT (500ms) catches spinlock deadlocks. RWDT (6s, RTC clock) catches full system freezes where IWDT panic handler can't run. TWDT (10s) catches task-level non-yielding. |
 
 ## Related Documentation
 

@@ -19,6 +19,8 @@
 #include "infrastructure/drivers/rgb_led.hpp"
 #include "infrastructure/motor_task.hpp"
 #include "infrastructure/network/ble.hpp"
+#include "infrastructure/network/wifi.hpp"
+#include "infrastructure/network/http_server.hpp"
 #include "infrastructure/temp_thread.hpp"
 #include "interface/broadcast.hpp"
 #include "interface/serial.hpp"
@@ -59,6 +61,67 @@ static void ensureGpioReady()
     puts("DBG: PHY wait done");
     fflush(stdout);
     ESP_LOGI(TAG, "PHY wait complete — GPIO spinlock should be released");
+}
+
+// Struct for passing parameters to net_owner task
+struct NetTaskParams {
+    ecotiter::infrastructure::network::BleManager* bleManager;
+};
+
+// GR-3: net_owner thread — WiFi init → HTTP server → BLE init → PHY wait → process loop
+extern "C" void netTaskEntry(void* pvParameters) {
+    auto* params = static_cast<NetTaskParams*>(pvParameters);
+    puts("DBG: netTaskEntry START"); fflush(stdout);
+
+    using namespace ecotiter::infrastructure::network;
+    ecotiter::diag::StackMonitor::instance().registerThread(
+        "net_owner", ecotiter::domain::NET_OWNER_STACK);
+
+    WifiManager wifiManager;
+    auto wifiResult = wifiManager.init();
+    if (!wifiResult) {
+        ESP_LOGE("net_owner", "WiFi init failed");
+        vTaskDelete(nullptr);
+        return;
+    }
+    wifiManager.startAP();
+
+    // Attempt STA connection from NVS credentials
+    bool staStarted = wifiManager.tryStartSTA();
+    if (staStarted) {
+        ESP_LOGI("net_owner", "STA connection attempt in progress");
+    }
+
+    // GR-3: HTTP server init BEFORE BLE (DRAM is most abundant at this point)
+    HttpServer httpServer;
+    auto httpResult = httpServer.init();
+    if (httpResult) {
+        httpServer.registerRoutes();
+        ESP_LOGI("net_owner", "HTTP server ready on 192.168.4.1:80");
+    } else {
+        ESP_LOGW("net_owner", "HTTP server init failed");
+    }
+
+    // BLE init after HTTP server — ensures 12KB+ contiguous DRAM is available
+    // (GR-3: WiFi → HTTP → BLE)
+    if (params && params->bleManager) {
+        auto bleResult = params->bleManager->init();
+        if (bleResult) {
+            ESP_LOGI("net_owner", "BLE initialized successfully");
+        } else {
+            ESP_LOGW("net_owner", "BLE init skipped (insufficient heap or HW error)");
+        }
+    }
+
+    // LL-031: PHY calibration holds gpio_spinlock for 10-200ms after BT init.
+    // Wait for it to release before any gpio_config/gpio_set_level operations.
+    // GR-1: Blocking delay OK in worker thread (not main loop).
+    ensureGpioReady();
+
+    while (true) {
+        wifiManager.process();
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
 }
 
 extern "C" void app_main(void)
@@ -113,59 +176,30 @@ extern "C" void app_main(void)
     diag::RtcWatchdog rtcWdt;
     (void)rtcWdt;
 
-    // DRAM snapshot before BLE
-    {
-        auto freeHeap = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-        ESP_LOGI(TAG, "DRAM before BLE: %zu bytes", freeHeap);
-    }
-
-    // ====== Step 6: BLE init (triggers async PHY calibration) ======
-    puts("DBG: step 6 - BLE init");
+    // ====== Step 6: BLE object construction (init deferred to net_owner) ======
+    // GR-3: BLE init moved to net_owner thread after HTTP server to ensure
+    // 12KB+ contiguous DRAM is available for httpd_start(). The BleManager
+    // object is constructed here so the main loop can access it, but init()
+    // is called from netTaskEntry after WiFi + HTTP.
+    puts("DBG: step 6 - BLE object created");
     fflush(stdout);
     domain::gBootProgress.store(domain::BootProgress::BleInit, std::memory_order_release);
     infrastructure::network::BleManager bleManager;
-    auto bleInitResult = bleManager.init();
-    if (bleInitResult)
-    {
-        ESP_LOGI(TAG, "BLE initialized successfully");
-    }
-    else
-    {
-        ESP_LOGW(TAG, "BLE init skipped (insufficient heap or HW error)");
-    }
 
-    // ====== Step 7: Wait for PHY calibration to release gpio_spinlock ======
-    // LL-031: PHY calibration holds gpio_spinlock for 10-200ms after BT init.
-    // Any gpio_config/gpio_set_direction/gpio_set_level during this window
-    // deadlocks. All GPIO work (motor task, LED, sensors) must wait.
-    puts("DBG: step 7 - PHY wait");
+    // ====== Step 7: PHY wait deferred to net_owner ======
+    // PHY calibration wait (ensureGpioReady) now runs in net_owner thread
+    // after BLE init, since BLE init itself is now in net_owner.
+    puts("DBG: step 7 - PHY wait deferred to net_owner");
     fflush(stdout);
     domain::gBootProgress.store(domain::BootProgress::PhyWait, std::memory_order_release);
-    ensureGpioReady();
-
-    // DRAM snapshot after BLE + PHY wait (before motor task)
-    {
-        auto freeHeap = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-        ESP_LOGI(TAG, "DRAM after BLE, before motor: %zu bytes", freeHeap);
-    }
 
     // ====== Step 7b: RGB LED ======
     infrastructure::drivers::RgbLed rgbLed(config::PIN_LED_RGB);
-    domain::TransportMode currentLedMode = domain::TransportMode::UsbActive;
+    // Default to advertising (blue) — LED state machine will converge to correct
+    // state (error red if BLE init fails, connected green if BLE connected, etc.)
+    domain::TransportMode currentLedMode = domain::TransportMode::BleAdvertising;
     bool currentLedError = false;
-
-    // If BLE init succeeded, show advertising (blue)
-    if (bleInitResult)
-    {
-        currentLedMode = domain::TransportMode::BleAdvertising;
-        currentLedError = false;
-        rgbLed.setTransportMode(currentLedMode, currentLedError);
-    }
-    else
-    {
-        // BLE failed — show red for 2 seconds, then off
-        rgbLed.setTransportMode(domain::TransportMode::BleAdvertising, true);
-    }
+    rgbLed.setTransportMode(currentLedMode, currentLedError);
 
     // ====== Step 8: Motor task ======
     puts("DBG: step 8 - xTaskCreate motor");
@@ -182,7 +216,21 @@ extern "C" void app_main(void)
         fflush(stdout);
     }
 
-    // temp task skipped for now (domain::gTempCX100 populated by main loop ADC only)
+    // ====== Step 8b: Net owner task ======
+    puts("DBG: step 8b - xTaskCreate net_owner");
+    fflush(stdout);
+    domain::gBootProgress.store(domain::BootProgress::NetOwner, std::memory_order_release);
+    logDramBeforeTask("net_owner", domain::NET_OWNER_STACK);
+    NetTaskParams netParams{&bleManager};
+    BaseType_t nt = xTaskCreate(netTaskEntry, "net_owner",
+                                domain::NET_OWNER_STACK / sizeof(configSTACK_DEPTH_TYPE),
+                                &netParams, 1, nullptr);
+    {
+        char dbg[64];
+        std::snprintf(dbg, sizeof(dbg), "DBG: xTaskCreate net_owner returned=%d\n", (int)nt);
+        puts(dbg);
+        fflush(stdout);
+    }
 
     domain::gBootProgress.store(domain::BootProgress::Running, std::memory_order_release);
     puts("DBG: step 9 - RUNNING");
@@ -315,7 +363,8 @@ extern "C" void app_main(void)
             }
         }
 
-        // Drain BLE command queue
+        // Drain BLE command queue (only if initialized — commandQueue is created during init())
+        if (bleManager.isInitialized())
         {
             ecotiter::infrastructure::network::BleCmdItem bleItem;
             while (xQueueReceive(bleManager.commandQueue(), &bleItem, 0) == pdTRUE)

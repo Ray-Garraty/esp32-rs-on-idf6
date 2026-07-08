@@ -14,11 +14,11 @@ inline constexpr size_t     LED_RGB_COUNT  = 1;
 inline constexpr gpio_num_t PIN_ADC_PH     = GPIO_NUM_4;   // ADC1_CH3
 inline constexpr gpio_num_t PIN_VALVE      = GPIO_NUM_14;
 inline constexpr gpio_num_t PIN_STEP       = GPIO_NUM_21;  // RMT channel
-inline constexpr gpio_num_t PIN_DIR        = GPIO_NUM_26;
+inline constexpr gpio_num_t PIN_DIR        = GPIO_NUM_5;   // GPIO26 is PSRAM CS1 (LL-027)
 inline constexpr gpio_num_t PIN_EN         = GPIO_NUM_27;  // Active LOW
-inline constexpr gpio_num_t PIN_LIMIT_FULL = GPIO_NUM_34;
-inline constexpr gpio_num_t PIN_DS18B20    = GPIO_NUM_33;
-inline constexpr gpio_num_t PIN_LIMIT_HOME = GPIO_NUM_35;
+inline constexpr gpio_num_t PIN_DS18B20    = GPIO_NUM_6;   // GPIO33 is PSRAM D4 (LL-027)
+inline constexpr gpio_num_t PIN_LIMIT_FULL = GPIO_NUM_7;   // GPIO34 is PSRAM D5 (LL-027)
+inline constexpr gpio_num_t PIN_LIMIT_HOME = GPIO_NUM_15;  // GPIO35 is PSRAM D6 (LL-027)
 
 // RMT config
 inline constexpr uint32_t RMT_RESOLUTION_HZ = 1'000'000;  // 1 tick = 1 us

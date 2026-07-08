@@ -22,12 +22,12 @@ timestamp: 2026-07-07
 | Stepper driver | TMC2209 (step/dir mode, UART config deferred) |
 | Microstepping | 16 (default), configured via TMC2209 hardware defaults |
 | Step pin | GPIO21 (RMT channel 0, TX) |
-| DIR pin | GPIO26 (Output) |
-| EN pin | GPIO27 (Output, active LOW) |
+| DIR pin | GPIO5 (Output) — moved from GPIO26 (LL-027: PSRAM CS1) |
+| EN pin | GPIO27 (Output via gpio_set_level only, active LOW) — PSRAM data bus, gpio_set_level safe, gpio_set_direction will hang |
 | Step frequency | 30-3000 Hz (period 33333-333 us) |
 | Acceleration | Trapezoidal pre-computed ramp |
-| Limit FULL | GPIO34 (pull-down, pos-edge interrupt) - syringe bottom, burette full (NOT GPIO32 — reserved for PSRAM bus) |
-| Limit EMPTY | GPIO35 (floating, pos-edge interrupt) - syringe top, burette empty |
+| Limit FULL | GPIO7 (pull-down, pos-edge interrupt) - syringe bottom, burette full (NOT GPIO34 — PSRAM D5, LL-027) |
+| Limit EMPTY | GPIO15 (floating, pos-edge interrupt) - syringe top, burette empty (NOT GPIO35 — PSRAM D6, LL-027) |
 
 ### Valve
 
@@ -42,7 +42,7 @@ timestamp: 2026-07-07
 | Sensor | Interface | Pin | Notes |
 |--------|-----------|-----|-------|
 | pH/ORP electrode | ADC1_CH3 (oneshot) | GPIO4 | 0-2900 mV range (S3) |
-| Temperature DS18B20 | OneWire software bitbang | GPIO33 | 1-Wire protocol via `ets_delay_us` |
+| Temperature DS18B20 | OneWire software bitbang | GPIO6 | 1-Wire protocol via `ets_delay_us` (moved from GPIO33: LL-027 PSRAM D4) |
 
 ### LED Indicator
 
@@ -65,13 +65,13 @@ timestamp: 2026-07-07
 | U0TXD | 1 | Serial | DO NOT TOUCH |
 | U0RXD | 3 | Serial | DO NOT TOUCH |
 | TMC2209 STEP | 21 | RMT TX (channel 0) | Pulse train |
-| TMC2209 DIR | 26 | gpio_set_level | HIGH = CW (fill) |
-| TMC2209 EN | 27 | gpio_set_level | Active LOW |
+| TMC2209 DIR | 5 | gpio_set_level | HIGH = CW (fill); moved from GPIO26 (LL-027: PSRAM CS1) |
+| TMC2209 EN | 27 | gpio_set_level | Active LOW; PSRAM data bus — gpio_set_level only, NO gpio_set_direction |
 | Valve | 14 | gpio_set_level | LOW=input, HIGH=output |
-| Limit FULL | 34 | GPIO ISR, pos-edge | Syringe bottom; NOT GPIO32 — PSRAM bus |
-| Limit EMPTY | 35 | GPIO ISR, pos-edge | Syringe top |
+| Limit FULL | 7 | GPIO ISR, pos-edge | Syringe bottom; moved from GPIO34 (LL-027: PSRAM D5) |
+| Limit EMPTY | 15 | GPIO ISR, pos-edge | Syringe top; moved from GPIO35 (LL-027: PSRAM D6) |
 | pH electrode | 4 | ADC1_CH3 (oneshot) | 0-2900 mV range (S3) |
-| DS18B20 | 33 | OneWire bitbang | 4.7k pull-up |
+| DS18B20 | 6 | OneWire bitbang | 4.7k pull-up; moved from GPIO33 (LL-027: PSRAM D4) |
 | Status LED | 2 | gpio_set_level | Active HIGH |
 
 ## Stepper Motor Control

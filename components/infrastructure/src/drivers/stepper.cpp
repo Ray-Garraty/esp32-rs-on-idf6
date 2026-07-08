@@ -75,8 +75,11 @@ StepperMotor::StepperMotor(gpio_num_t stepPin, gpio_num_t dirPin, gpio_num_t enP
     puts("DBG: StepperMotor ctor B"); fflush(stdout);
     gpio_set_direction(dirPin_, GPIO_MODE_OUTPUT);
     puts("DBG: StepperMotor ctor C"); fflush(stdout);
-    // gpio_set_direction(enPin_, GPIO_MODE_OUTPUT);  // HANGS with BT enabled
-    puts("DBG: StepperMotor ctor D1 (skipped gpio_set_direction)"); fflush(stdout);
+    // LL-027: EN pin (GPIO27) is on PSRAM data bus — gpio_set_direction() would
+    // hang (IOMUX conflict with MSPI). gpio_set_level() is safe because it only
+    // writes the output register without touching the IOMUX.
+    // gpio_set_direction(enPin_, GPIO_MODE_OUTPUT);  // HANGS — PSRAM bus pin
+    puts("DBG: StepperMotor ctor D1 (EN gpio_set_direction skipped — PSRAM pin)"); fflush(stdout);
     puts("DBG: StepperMotor ctor D2"); fflush(stdout);
 
     rmt_copy_encoder_config_t encConfig = {};

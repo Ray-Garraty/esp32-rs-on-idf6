@@ -2,17 +2,24 @@
 type: Known Issue
 title: WiFi AP not visible after ESP32-S3 migration — Rust main() never executed
 description: >
-  ESP32-S3 boots, PSRAM initialises, C app_main() is called, but Rust
-  ecotiter::main() never executes. WiFi init never runs, no AP visible.
-  Root cause remains UNKNOWN after two dead-end investigations.
-tags: [wifi, s3-migration, boot, linker, post-mortem]
-timestamp: 2026-07-07
-status: active
+  OBSOLETE — resolved by migrating from Rust to C++23. The Rust app_main()
+  never executed on ESP32-S3 (root cause unknown, possibly LLVM Xtensa
+  backend incompatibility). The C++23 rewrite works correctly.
+  See docs/plans/pending/26_07_07_cpp_migration.md for current status.
+tags: [wifi, s3-migration, boot, linker, post-mortem, obsolete]
+timestamp: 2026-07-08
+status: superseded
+superseded_by: "C++23 migration — see 26_07_07_cpp_migration.md Step 7"
 ---
 
-# WiFi AP Not Visible After ESP32-S3 Migration — Rust Main() Never Executed
+# [OBSOLETE] WiFi AP Not Visible After ESP32-S3 Migration — Rust Main() Never Executed
 
-## Problem
+**Status: SUPERSEDED (2026-07-08)** — The C++23 rewrite fixes this issue.
+The firmware now boots fully, creates a SoftAP "EcoTiter-FCD2", runs an
+HTTP server, and serves a captive portal. See the migration plan for
+current status.
+
+## Original Problem (Rust firmware)
 
 After ESP32→ESP32-S3 migration (commits 90cc950, 886b727), the WiFi AP
 "EcoTiter-AP" is not visible on any client scan. The firmware boots
@@ -20,9 +27,6 @@ correctly through the ESP-IDF C startup (PSRAM init, heap init), and the
 log shows `main_task: Calling app_main()`. However, **no Rust output
 appears after that line** — not even a boot marker placed as the very
 first statement in `fn main()` before any initialisation.
-
-Smoke-test captures of 120 seconds show only C-phase boot logs ending
-at `Calling app_main()`.
 
 ## Investigation History
 

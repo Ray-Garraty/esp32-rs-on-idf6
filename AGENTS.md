@@ -167,6 +167,9 @@ GPIO ISR, NVS, WiFi, BLE, or HTTP — copy and fill:
 
 ### 3.1 GPIO Pinout
 
+⚠️ **CRITICAL: PSRAM/Flash bus pins (26-37) are STRICTLY FORBIDDEN for gpio_set_direction/gpio_config.**
+See `docs/refs/unsafe_gpio_pins.md` for full list, explanations, and safe alternatives.
+
 | GPIO | Function | Constraint |
 |------|----------|-----------|
 | 1 | U0TXD | Serial — DO NOT TOUCH |
@@ -175,11 +178,11 @@ GPIO ISR, NVS, WiFi, BLE, or HTTP — copy and fill:
 | 4 | ADC (pH electrode) | `adc_oneshot_read()` (ADC1_CH3) — 0-2900 mV |
 | 14 | Valve | `gpio_set_level()` — LOW=input, HIGH=output |
 | 21 | TMC2209 STEP | `rmt_new_tx_channel()` — pulse train |
-| 26 | TMC2209 DIR | `gpio_set_level()` — HIGH=CW |
-| 27 | TMC2209 EN | `gpio_set_level()` — Active LOW |
-| 34 | Endstop FULL | GPIO ISR pos-edge → `std::atomic<bool>` (NOT GPIO32 — PSRAM bus) |
-| 33 | DS18B20 | OneWire bitbang — 4.7k pull-up |
-| 35 | Endstop HOME | GPIO ISR pos-edge → `std::atomic<bool>` |
+| 5 | TMC2209 DIR | `gpio_set_level()` — HIGH=CW (moved from GPIO26: LL-027 PSRAM CS1) |
+| 27 | TMC2209 EN | `gpio_set_level()` — Active LOW; **gpio_set_direction will hang** (PSRAM data bus) |
+| 7 | Endstop FULL | GPIO ISR pos-edge → `std::atomic<bool>` (NOT GPIO34 — PSRAM D5, LL-027) |
+| 6 | DS18B20 | OneWire bitbang — 4.7k pull-up (NOT GPIO33 — PSRAM D4, LL-027) |
+| 15 | Endstop EMPTY | GPIO ISR pos-edge → `std::atomic<bool>` (NOT GPIO35 — PSRAM D6, LL-027) |
 
 ### 3.2 RMT
 
@@ -367,4 +370,5 @@ Sub-agents are **forbidden** from creating `.md` or `.yaml` files inside
 | docs/protocols/embedded_boot_crash.md | S1–S5 Occam's Razor Protocol |
 | docs/protocols/heap_corruption.md | Heap triage (often misdiagnosed stack overflow) |
 | docs/protocols/stack_overflow.md | Stack triage + watermark checks |
+| docs/refs/unsafe_gpio_pins.md | Unsafe GPIO pins for ESP32-S3 with Octal PSRAM |
 | docs/guides/testing.md | 3-tier testing strategy (Catch2) |

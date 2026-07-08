@@ -33,3 +33,34 @@ CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=12
 CONFIG_BT_NIMBLE_MAX_CCCDS=2
 CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 CONFIG_BT_NIMBLE_MAX_BONDS=1
+
+# Larger factory partition (1500K) for network-enabled firmware
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+
+# WiFi / HTTP / LWIP
+CONFIG_LWIP_MAX_SOCKETS=8
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=6
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=4
+CONFIG_HTTPD_WS_SUPPORT=y
+# CONFIG_MDNS_MAX_SERVICES=1  # requires esp_mdns from IDF Component Registry
+
+# PSRAM — ESP32-S3 has 8 MB octal PSRAM (Espressif ESP32-S3-DevKitC-1)
+# Use PSRAM aggressively for heap allocations via caps, but keep DMA-critical
+# and time-critical allocations in internal DRAM (MALLOC_CAP_INTERNAL).
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+CONFIG_SPIRAM_USE_CAPS_ALLOC=y
+# Allow code fetch from PSRAM (slower but frees IRAM for critical ISRs)
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+# Allow read-only data in PSRAM (relieves DRAM pressure from constants)
+CONFIG_SPIRAM_RODATA=y
+# Speed: 80 MHz for octal PSRAM on ESP32-S3
+CONFIG_SPIRAM_SPEED_80M=y
+
+# PSRAM for WiFi and LWIP — allocate WiFi/LWIP buffers in PSRAM first,
+# fall back to internal DRAM if PSRAM is insufficient. This frees ~12 KB
+# of internal DRAM for the HTTP server and BLE, resolving the DRAM
+# fragmentation that blocked the captive portal (see GR-3).
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y

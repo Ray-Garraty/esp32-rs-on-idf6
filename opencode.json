@@ -57,6 +57,7 @@
       "cargo doc*": "allow",
       "cargo build*": "allow",
       "espflash*": "allow",
+      "idf.py*": "deny",
       "python -c*": "deny",
       "python3 -c*": "deny",
       "py -c*": "deny",
