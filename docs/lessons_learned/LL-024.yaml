@@ -1,0 +1,40 @@
+id: LL-024
+date: 2026-07-07
+crash_signature: NULL dereference — xTaskGetHandle(nullptr) in panic handler — LoadProhibited
+  inside xTaskGetHandle → recursive panic
+category: instrumentation_gap
+trigger_patterns:
+- xTaskGetHandle.*nullptr
+- xTaskGetHandle.*NULL
+- Panic handler entered multiple times
+- Saved PC.*0x4037[cC]0[0-9a-f]{2}
+lesson: 'xTaskGetHandle(NULL) is NOT a valid FreeRTOS API call. The function calls
+  strlen(pcNameToQuery) internally, which crashes on NULL input (LoadProhibited at
+  address 0). Even if strlen somehow returns, the subsequent prvSearchForNameWithinSingleList()
+  dereferences the first byte of the name string — another NULL access.
+
+  The correct API to get the current task''s stack watermark is uxTaskGetStackHighWaterMark(NULL)
+  where NULL means "current task". This is explicitly documented in FreeRTOS and does
+  NOT do a name-based task handle lookup.
+
+  Both crash_handler.cpp and stack_monitor.cpp called xTaskGetHandle(NULL) to get
+  a TaskHandle for the current task. This pattern is wrong on any FreeRTOS version.
+
+  This bug was pre-existing in the C++ port (introduced during Step 3.5 by the general
+  agent) and was never caught by code review because the panic handler was never exercised
+  until Step 4 added the motor task which triggered the primary crash (LL-023).
+
+  '
+diagnostic: "1. Search all panic handler / diagnostic code for xTaskGetHandle(nullptr)\n\
+  \   or xTaskGetHandle(NULL).\n2. Replace with uxTaskGetStackHighWaterMark(nullptr)\
+  \ which is the\n   correct API for getting the calling task's stack watermark.\n\
+  3. Review all stack monitor code for the same pattern.\n"
+fix: "Replace every instance of:\n  TaskHandle_t h = xTaskGetHandle(nullptr);\n  UBaseType_t\
+  \ wm = uxTaskGetStackHighWaterMark(h);\nwith:\n  UBaseType_t wm = uxTaskGetStackHighWaterMark(nullptr);\n\
+  The nullptr parameter is explicitly supported by FreeRTOS for uxTaskGetStackHighWaterMark\
+  \ and means \"the calling task\".\n"
+refs:
+- components/diag/src/crash_handler.cpp
+- components/diag/src/stack_monitor.cpp
+- FreeRTOS API docs (uxTaskGetStackHighWaterMark)
+- docs/lessons_learned (LL-025, LL-023)

@@ -1,0 +1,44 @@
+id: LL-017
+date: 2026-07-04
+crash_signature: Captive portal silent failure — phone connects to AP but no portal
+  pop-up — HTTP probes time out
+category: dma_heap_fragmentation
+trigger_patterns:
+- Captive portal silent failure
+- connectivity check failed
+- no internet
+- free=19KB largest=12KB http_started
+lesson: "The captive portal code (DNS responder + 5 HTTP 302 redirects) was CORRECTLY\
+  \ implemented. The portal did not appear because the system had insufficient DRAM\
+  \ (largest=12KB after HTTP init) to allocate lwIP TCP buffers for incoming client\
+  \ HTTP probes.\nWhen a client connects to the AP:\n  1. DNS resolves captive.apple.com\
+  \ / connectivitycheck.gstatic.com\n     to 192.168.4.1 — works (UDP, lightweight)\n\
+  \  2. Client sends HTTP GET to the probed URL\n  3. lwIP fails to allocate contiguous\
+  \ TCP buffer (~4-6KB per socket)\n     — largest block is only 12KB and HTTP server\
+  \ reserves sockets\n  4. HTTP probe times out → OS sees \"network error\", not HTTP\
+  \ 302\n  5. No captive portal pop-up\n\nThe fix was three-pronged:\n  (a) DRAM pressure\
+  \ relief: LOG_BUFFER_SIZE 100→20 (~27KB),\n      max_open_sockets 5→4 (~4KB), BLE\
+  \ MAX_CCCD=4 (~256B).\n      Total: ~31KB freed.\n  (b) Reduced main loop latency:\
+  \ moved debug broadcast into\n      should_broadcast() — loop dropped from ~31ms\
+  \ to ~5ms,\n      improving DNS response time.\n  (c) BLE heap threshold raised\
+  \ to 30KB (prevents C assert crash\n      when BLE init is attempted with insufficient\
+  \ memory).\n\nAfter these changes: largest after HTTP init = 23KB (was 12KB, with\
+  \ LOG_BUFFER_SIZE saving being the dominant factor).\nKey insight: A DRAM-constrained\
+  \ system can have ALL the right code and still fail. Always verify that enough contiguous\
+  \ DRAM exists for lwIP TCP buffers before concluding the HTTP/captive portal code\
+  \ is wrong.\n"
+diagnostic: "1. Connect phone to AP — if captive portal does NOT appear but\n   manual\
+  \ http://192.168.4.1 works, suspect DRAM.\n2. Check boot log for [HEAP] http_started:\
+  \ largest < 20KB. 3. lwIP needs ~4-6KB contiguous per TCP connection; with\n   max_open_sockets=5,\
+  \ reserve ~20-30KB just for sockets.\n4. If largest after HTTP init < 20KB, captive\
+  \ portal will fail\n   silently — fix DRAM, not code.\n"
+fix: "Free DRAM until largest block after HTTP init >= 20KB: - LOG_BUFFER_SIZE: 100→20\
+  \ (~27KB) - max_open_sockets: 5→4 (~4KB) - CONFIG_BT_NIMBLE_MAX_CCCD=4 (~256B) -\
+  \ Move debug broadcast inside should_broadcast() to reduce\n  main loop latency\
+  \ and improve DNS polling rate.\n"
+refs:
+- src/domain/memory.rs (LOG_BUFFER_SIZE)
+- src/infrastructure/network/http_server.rs (max_open_sockets)
+- src/main.rs (broadcast placement)
+- sdkconfig.defaults (NimBLE buffers)
+- docs/lessons_learned (LL-015, LL-016)

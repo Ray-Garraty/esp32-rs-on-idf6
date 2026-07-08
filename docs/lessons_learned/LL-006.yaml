@@ -1,0 +1,39 @@
+id: LL-006
+date: 2026-07-04
+crash_signature: 'assert failed: tcpip_send_msg_wait_sem /IDF/components/lwip/lwip/src/api/tcpip.c:454
+  (Invalid mbox) — NO ''System event loop dropped'' message — preceded by WiFi init
+  failure (create wifi task: failed to create task)'
+category: init_order_error
+trigger_patterns:
+- Invalid mbox
+- tcpip_send_msg_wait_sem
+- 'create wifi task: failed to create task'
+- 'assert failed: tcpip_send_msg_wait_sem'
+lesson: 'esp_netif_init() (which creates the lwIP TCP/IP thread and its mbox) is ONLY
+  called inside EspWifi::wrap() → EspNetif::new() → initialize_netif_stack(). When
+  EspWifi::new() fails (e.g. from DRAM exhaustion in esp_wifi_init), the wrap() is
+  never reached, so the TCP/IP thread is never created.
+
+  The LL-004 _sysloop_keepalive clone prevents killing an existing TCP/IP thread (by
+  keeping the event loop alive). But if the TCP/IP thread was NEVER created (because
+  EspWifi::wrap() never ran), the clone is pointless — the mbox is still uninitialized.
+
+  The crash signature is identical to LL-004 (assert: Invalid mbox) but WITHOUT the
+  ''System event loop dropped'' message, and WITH a preceding ''wifi:create wifi task:
+  failed to create task'' (0x3001) indicating EspWifi::new() failed before creating
+  netifs.
+
+  '
+diagnostic: "1. Check for ABSENCE of 'System event loop dropped' log message. 2. Check\
+  \ for 'wifi:create wifi task: failed to create task' (0x3001). 3. Verify that esp_netif_init()\
+  \ was called before WifiManager::new().\n   If the only call site is inside EspWifi::wrap(),\
+  \ and wrap() was\n   skipped, then esp_netif_init() was never called.\n4. Heap trajectory:\
+  \ Pre-WiFi ~136K → Post-WiFi failure ~18K (largest 6K).\n"
+fix: "Call esp_netif_init() UNCONDITIONALLY at boot, after EspSystemEventLoop::take()\
+  \ and before WifiManager::new(). Add a safe wrapper in esp_safe.rs:\n  pub fn netif_init()\
+  \ {\n      // SAFETY: esp_netif_init() is idempotent.\n      unsafe { esp_idf_sys::esp_netif_init();\
+  \ }\n  }\nesp_netif_init() is internally idempotent (guarded by a static flag),\
+  \ so calling it before WifiManager::new() has no effect if WiFi init succeeds, and\
+  \ ensures the lwIP thread exists if WiFi init fails.\n"
+refs:
+- docs/crash_reports/2026-07-04_boot_invalid_mbox.md

@@ -115,7 +115,7 @@ If no root cause after 75 minutes → escalate to human with:
 
 ## References
 
-- `docs/lessons_learned.yaml` — known crash patterns
+- `docs/lessons_learned/` — known crash patterns
 - `AGENTS.md` — golden rule, build commands, crash investigation
 - `docs/protocols/heap_corruption.md` — heap-specific triage
 - `docs/protocols/stack_overflow.md` — stack-specific triage

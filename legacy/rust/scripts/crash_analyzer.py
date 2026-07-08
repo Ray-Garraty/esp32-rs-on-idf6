@@ -3,7 +3,7 @@
 ESP32 Guru Meditation Crash Analyzer.
 
 Parses Guru Meditation dump from stdin or file, decodes backtrace via
-addr2line, classifies the crash, and checks against lessons_learned.yaml.
+addr2line, classifies the crash, and checks against docs/lessons_learned/.
 
 Usage:
     cat crash.txt | python3 scripts/crash_analyzer.py
@@ -24,7 +24,7 @@ from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent
-LESSONS_FILE = PROJECT_DIR / "docs" / "lessons_learned.yaml"
+LESSONS_DIR = PROJECT_DIR / "docs" / "lessons_learned"
 
 # ── Parsing patterns ────────────────────────────────────────────────
 
@@ -474,24 +474,23 @@ def check_lessons_learned(
     classification: dict[str, Any],
     raw_text: str = "",
 ) -> list[dict[str, Any]]:
-    """Check classified crash against lessons_learned.yaml."""
-    if not LESSONS_FILE.exists():
-        return []
-
-    try:
-        with open(LESSONS_FILE) as f:
-            data = yaml.safe_load(f)
-    except (yaml.YAMLError, OSError):
-        return []
-
-    if not data or "lessons" not in data:
+    """Check classified crash against docs/lessons_learned/."""
+    if not LESSONS_DIR.is_dir():
         return []
 
     # Build searchable text from info + raw crash dump
     searchable = raw_text + " " + yaml.dump(info)
 
     matches = []
-    for lesson in data["lessons"]:
+    for fpath in sorted(LESSONS_DIR.glob("LL-*.yaml")):
+        try:
+            with open(fpath) as f:
+                lesson = yaml.safe_load(f)
+        except (yaml.YAMLError, OSError):
+            continue
+
+        if not isinstance(lesson, dict) or "id" not in lesson:
+            continue
         # Check trigger patterns against searchable text
         for pattern in lesson.get("trigger_patterns", []):
             try:

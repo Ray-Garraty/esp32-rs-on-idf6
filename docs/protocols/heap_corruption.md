@@ -105,5 +105,5 @@ Check that `.bss` / `.dram0.bss` end address does NOT overlap with heap start
 
 - ESP-IDF v6 Memory Layout: https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32/api-reference/system/mem_alloc.html
 - TLSF allocator: https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32/api-reference/system/heap_debug.html
-- `docs/lessons_learned.yaml` LL-001
+- `docs/lessons_learned/` LL-001
 - `protocols/embedded_boot_crash.md` S1–S2

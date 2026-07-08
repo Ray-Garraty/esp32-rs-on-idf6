@@ -1,0 +1,77 @@
+id: LL-026
+date: 2026-07-08
+crash_signature: EcoTiter-FFEC not visible in BLE scans — no panic — NimBLE host sync
+  callback onHostSync() returns early without starting advertising
+category: api_misuse
+trigger_patterns:
+- EcoTiter-FFEC not visible
+- BLE device not found
+- find TX chr failed
+- adv start failed
+- Zombie connection detected
+- ble_gap_conn_active
+lesson: "Two independent bugs caused BLE to appear non-functional:\nBUG 1 — Advertising\
+  \ never starts (primary). The NimBLE init sequence in BleManager::init() was missing\
+  \ two mandatory calls: ble_svc_gap_init() and ble_svc_gatt_init(). Without these,\
+  \ the GAP and GATT services were not registered in NimBLE's internal state, causing\
+  \ ble_gatts_count_cfg() and ble_gatts_add_svcs() to fail silently (their return\
+  \ values were discarded). The host sync callback onHostSync() then failed at ble_gatts_find_chr()\
+  \ and returned without starting advertising.\nThe correct init order (from official\
+  \ ESP-IDF NimBLE_GATT_Server example):\n  1. nimble_port_init()\n  2. ble_svc_gap_init()\
+  \     ← WAS MISSING\n  3. ble_svc_gatt_init()    ← WAS MISSING\n  4. ble_svc_gap_device_name_set()\n\
+  \  5. ble_gatts_count_cfg()  ← RETURN VALUE WAS IGNORED\n  6. ble_gatts_add_svcs()\
+  \   ← RETURN VALUE WAS IGNORED\n  7. ble_hs_cfg.sync_cb / reset_cb\n  8. ble_store_config_init()\n\
+  \  9. nimble_port_freertos_init()\n\nAlso, the sdkconfig.defaults had a misspelled\
+  \ Kconfig name: CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT instead of the correct CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT,\
+  \ so the memory pool config was silently ignored by the build system.\nBUG 2 — Green\
+  \ LED never lights (secondary zombie race). The L2 zombie detection in BleManager::process()\
+  \ used ble_gap_conn_active() to check if connections exist. This function ALWAYS\
+  \ returns 0 on ESP32-S3 with this NimBLE version, even for valid active connections.\
+  \ Combined with immediate clearing of connected_ on inconsistency, every connect\
+  \ was classified as zombie. The connect event fires (connected_=true), but by the\
+  \ next main loop tick the zombie detector clears it and restarts advertising.\n\
+  Fix for BUG 2:\n  a) Use ble_gap_conn_find(connHandle_, &desc) instead of\n    \
+  \ ble_gap_conn_active() — this correctly finds connections by\n     handle and returns\
+  \ 0 on success.\n  b) Add 500ms debounce: only declare zombie if connected_ has\
+  \ been\n     true for >500ms but ble_gap_conn_find() still reports no\n     connection.\n\
+  \  c) Also clear gBleError in BLE_GAP_EVENT_DISCONNECT handler so\n     that red\
+  \ state persists only during the zombie detection window,\n     not forever.\n\n\
+  Additional operational issues noted during this session:\n  - On Linux with CP210x,\
+  \ opening /dev/ttyUSB0 via pyserial always\n    toggles DTR, resetting the ESP32\
+  \ even with dsrdtr=False and\n    setDTR(False). Use stty + cat instead for non-resetting\
+  \ reads:\n      stty -F /dev/ttyUSB0 115200 raw -echo clocal -crtscts\n      timeout\
+  \ N cat /dev/ttyUSB0\n  - The scripts/build.sh defaulted to /dev/ttyACM0 but hardware\
+  \ uses\n    /dev/ttyUSB0 on this system.\n  - ESP_LOGI messages are invisible at\
+  \ default WARN log level.\n    For critical BLE diagnostics, use puts() instead.\n"
+diagnostic: "1. If BLE device not visible in scans: check onHostSync() logs for\n\
+  \   \"find TX chr failed\" or \"adv start failed\".\n2. Verify ble_svc_gap_init()\
+  \ + ble_svc_gatt_init() are called in\n   BleManager::init().\n3. For green LED\
+  \ not lighting: look for \"Zombie connection detected\"\n   immediately after a\
+  \ BLE connect. Check if ble_gap_conn_find() is\n   used instead of ble_gap_conn_active().\n\
+  4. Add DBG: LED puts() to the state machine to trace transitions.\n"
+fix: "BUG 1 (ble.cpp):\n  // After nimble_port_init() success, BEFORE ble_hs_cfg.sync_cb:\n\
+  \  ble_svc_gap_init();\n  ble_svc_gatt_init();\n  // Replace unchecked calls:\n\
+  \  int rc = ble_gatts_count_cfg(GATT_SVCS);\n  if (rc != 0) return AppError::Hardware;\n\
+  \  rc = ble_gatts_add_svcs(GATT_SVCS);\n  if (rc != 0) return AppError::Hardware;\n\
+  \nBUG 2 (ble.cpp):\n  // Add connectTick_ member to BleManager header.\n  // In\
+  \ BLE_GAP_EVENT_CONNECT handler:\n  s_instance->connectTick_ = xTaskGetTickCount();\n\
+  \  // Replace zombie detection logic:\n  if (connected_) {\n      struct ble_gap_conn_desc\
+  \ desc;\n      int found = ble_gap_conn_find(connHandle_, &desc);\n      if (found\
+  \ != 0) {  // no active connection\n          TickType_t elapsed = xTaskGetTickCount()\
+  \ - connectTick_;\n          if (elapsed > pdMS_TO_TICKS(500)) {\n             \
+  \ ESP_LOGW(TAG, \"Zombie connection detected (L2)\");\n              connected_\
+  \ = false;\n              connHandle_ = 0;\n              ble_gap_adv_start(...);\n\
+  \              domain::gBleError.store(false, ...);\n          }\n      }\n  }\n\
+  \  // In BLE_GAP_EVENT_DISCONNECT handler:\n  domain::gBleError.store(false, std::memory_order_release);\n\
+  \nKconfig (sdkconfig.defaults):\n  CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=12\n\nbuild.sh:\n\
+  \  Change default port from /dev/ttyACM0 to /dev/ttyUSB0.\n\nAGENTS.md:\n  Added\
+  \ GR-10: AI agent MUST NEVER claim physical-world observations.\n  Only the user\
+  \ can perceive hardware behavior.\n"
+refs:
+- components/infrastructure/network/src/ble.cpp
+- components/infrastructure/network/include/infrastructure/network/ble.hpp
+- main/main.cpp
+- sdkconfig.defaults
+- scripts/build.sh
+- AGENTS.md (GR-10)
+- docs/plans/pending/26_07_07_cpp_migration.md

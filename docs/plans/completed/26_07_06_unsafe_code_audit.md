@@ -128,4 +128,4 @@ The `EspMutex` deletion removed 7 `ffi_guard::record_enter/exit` events. Assessm
 - `AGENTS.md` §8.3 — Unsafe policy, block count baseline, per-file justification
 - `AGENTS.md` §7 — Crash investigation (diagnostic instrumentation relies on unsafe black_box)
 - `scripts/check_unsafe.py` — Unsafe block count and SAFETY comment enforcement
-- `docs/lessons_learned.yaml` — LL-001 (stack overflow), LL-005 (heap fragmentation), LL-007 (C assert uncatchable)
+- `docs/lessons_learned/` — LL-001 (stack overflow), LL-005 (heap fragmentation), LL-007 (C assert uncatchable)

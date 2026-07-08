@@ -176,7 +176,7 @@ root_cause:
 | File | Change | Status |
 |------|--------|--------|
 | `src/config.rs` | `UART_THREAD_STACK: 4096 → 8192` | ✅ Applied |
-| `docs/lessons_learned.yaml` | Added LL-010 for small-stack-pthread-overflow pattern | ✅ Applied |
+| `docs/lessons_learned/` | Added LL-010 for small-stack-pthread-overflow pattern | ✅ Applied |
 
 ## Investigation Artifacts
 
@@ -199,4 +199,4 @@ root_cause:
 
 ## Lessons Learned
 
-**LL-010** added to `docs/lessons_learned.yaml`: "UART thread 4 KB stack overflow — std::io::stdin().read() FFI chain consumes 3+ KB — diagnostic log::warn!() in check_watermark() pushes critically low stack over the edge."
+**LL-010** added to `docs/lessons_learned/`: "UART thread 4 KB stack overflow — std::io::stdin().read() FFI chain consumes 3+ KB — diagnostic log::warn!() in check_watermark() pushes critically low stack over the edge."

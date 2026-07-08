@@ -1,0 +1,47 @@
+id: LL-019
+date: 2026-07-06
+crash_signature: abort() at PC 0x4211843a — panic_fmt via println!() in Logger::log
+  — print_to::<Stdout> panics on ESP-IDF v6 early boot
+category: api_misuse
+trigger_patterns:
+- abort.*called at PC 0x4211843a
+- panic_fmt.*print_to
+- Logger::log.*println
+- print_to::<Stdout>
+lesson: 'On ESP-IDF v6 at early boot (~110ms after app_main), println!() panics because
+  Rust''s std I/O stack (Stdout::write → libc::write(1, ...) → VFS → UART) is not
+  fully initialized. The print_to::<Stdout> function at stdio.rs:1165 calls `stdout().lock().write(buf)`
+  — when the underlying write returns Err (TLS/VFS init incomplete), it calls panic!("failed
+  printing to stdout: ...") which is fatal.
+
+  In this project, the crash was triggered by println!() at logger.rs:77 inside Logger::log.
+  Every log::info!() call went through println!() → panic → abort → boot loop with
+  zero application output.
+
+  Root cause chain: Logger::log → println!() → _print → print_to::<Stdout> → write(1,
+  ...) returns Err → panic → abort.
+
+  The fix is NOT to reorder init calls (disable_wdt order was a red herring) but to
+  replace println!() with a direct FFI write(1, ...) call that bypasses Rust''s std
+  I/O entirely.
+
+  Note: log::warn!() when no logger is set is silently dropped — it does NOT panic.
+  The disable_wdt() init-order theory was incorrect.
+
+  '
+diagnostic: "1. Use xtensa-esp32s3-elf-addr2line on the abort PC. If the call chain\n\
+  \   includes print_to::<Stdout> → _print → Logger::log, the issue is\n   println!(),\
+  \ not init order.\n2. Check the implementation of the Log trait in the project —\
+  \ if it uses\n   println!() or print!(), replace with direct FFI write.\n3. The\
+  \ fix is NOT reordering init. Even with logger::init() before\n   all other calls,\
+  \ println!() inside Logger::log will still panic.\n"
+fix: "Replace println!() in Logger::log with a direct FFI write(1, ...) call that\
+  \ does not use Rust's std I/O:\n  let mut out: heapless::String<N> = heapless::String::new();\n\
+  \  let _ = write!(out, \"[{}] {}\", level, record.args());\n  unsafe { esp_idf_sys::write(1,\
+  \ out.as_ptr().cast::<c_void>(), out.len()); }\nAny function that goes through libc::write()\
+  \ without Rust's Stdout wrapper will work because it doesn't depend on TLS or the\
+  \ std mutex.\n"
+refs:
+- src/logger.rs (println! replacement)
+- src/esp_safe.rs (panic_write_str — direct write FFI)
+- docs/crash_reports/2026-07-06_abort_boot_loop.md

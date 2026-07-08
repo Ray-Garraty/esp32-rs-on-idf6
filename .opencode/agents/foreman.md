@@ -186,7 +186,7 @@ The @debugger agent will:
 4. If trivial fix (<10 lines) — apply it directly with `[INVESTIGATION]` markers
 5. If complex fix — produce a CrashReport with spec for @implementer
 6. Write a CrashReport to `docs/crash_reports/`
-7. Update `docs/lessons_learned.yaml` with new findings
+7. Add new LL-XXX.yaml to `docs/lessons_learned/` with new findings
 
 **Do NOT** attempt to diagnose the crash yourself — delegate entirely to @debugger.
 

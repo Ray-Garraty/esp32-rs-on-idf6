@@ -12,7 +12,7 @@ An experimental firmware stack exploring ESP32 + Rust + ESP-IDF v6 with WiFi/BLE
 - **32 wire-protocol commands** with typed dispatch
 - **Comprehensive diagnostics**: black-box event ring, stack watermark monitor, heap snapshotter, tick watchdog, FFI guard, state tracer
 - **Extensive host-testable domain logic**: burette state machine, calibration math, motion planning (>100 unit tests)
-- **14 documented crash post-mortems**: see [docs/lessons_learned.yaml](./docs/lessons_learned.yaml) — real bugs, root causes, fixes
+- **25 documented crash post-mortems**: see [docs/lessons_learned/](./docs/lessons_learned/) — real bugs, root causes, fixes
 
 ## Current Status
 

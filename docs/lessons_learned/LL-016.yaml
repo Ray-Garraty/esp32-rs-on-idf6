@@ -1,0 +1,33 @@
+id: LL-016
+date: 2026-07-04
+crash_signature: No crash — proactive DRAM margin improvement — CONFIG_ESP_WIFI_DYNAMIC_RX/TX_BUFFER_NUM
+  8→4
+category: dma_heap_fragmentation
+trigger_patterns:
+- 'Init dynamic rx buffer num: \d+'
+- 'Init dynamic tx buffer num: \d+'
+- heap free.*largest.*after 10s
+lesson: "Reducing CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM and CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM\
+  \ from 8 to 4 each saves ~12.8KB of DRAM (2 × 4 × 1600 bytes). The change is safe\
+  \ for a laboratory instrument that only sends small status payloads and sensor readings\
+  \ over WiFi — no throughput degradation observed.\nAfter applying this change the\
+  \ build compiles with 0 errors, 0 warnings. The firmware boots and passes a 30-second\
+  \ smoke test with no Guru Meditation, WDT, or panics. The WiFi init log confirms\
+  \ the new buffer counts:\n\n  I (1679) wifi:Init dynamic tx buffer num: 4\n  I (1699)\
+  \ wifi:Init dynamic rx buffer num: 4\n\nThis is one of several \"low-hanging fruit\"\
+  \ DRAM optimizations identified by the RAM audit (see LL-015 for the full cascade).\
+  \ Combined with LOG_BUFFER_SIZE reduction (100→20, ~27KB), MAX_CCCD=4 + MSYS1=8\
+  \ (~3.5KB), max_open_sockets 5→3 (~5KB), and other tweaks, the total recoverable\
+  \ DRAM is ~39KB, which would bring the system from 3KB free to ~42KB free with a\
+  \ largest block of ~30-40KB.\n"
+diagnostic: 'Verify by checking the boot log for "Init dynamic rx buffer num" and
+  "Init dynamic tx buffer num". Also verify that heap free/largest after 10s runtime
+  has increased by at least 10KB compared to the 8→8 baseline (LL-015 trajectory).
+
+  '
+fix: "Set in sdkconfig.defaults:\n  CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=4\n  CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=4\n\
+  Then run `idf.py reconfigure` and rebuild.\n"
+refs:
+- sdkconfig.defaults
+- docs/lessons_learned (LL-015, heap trajectory)
+- src/main.rs (main loop heap logging)

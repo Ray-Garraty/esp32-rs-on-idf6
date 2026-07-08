@@ -660,7 +660,7 @@ before Rust error handling could catch it (LL-007 pattern).
 | `src/infrastructure/network/ble.rs:102` | BLE heap pre-check: 20K→30K | Prevents NimBLE crash when DRAM insufficient |
 | `src/main.rs:584-607` | Debug broadcast moved inside `should_broadcast()` | Main loop: 31ms→~5ms, faster DNS polling |
 | `sdkconfig.defaults` | Added `CONFIG_BT_NIMBLE_MAX_CCCD=4` | **~256B freed** |
-| `docs/lessons_learned.yaml` | Added LL-016, LL-017 | Documentation |
+| `docs/lessons_learned/` | Added LL-016, LL-017 | Documentation |
 
 ### Heap Trajectory Comparison
 
@@ -747,7 +747,7 @@ This WiFi failure is **independent of the homing change** — it was reproduced 
 2. **`CONFIG_LWIP_MAX_SOCKETS=8`** was added in `sdkconfig.defaults` (Phase 4). This preallocates LwIP socket buffers. After motor task (16 KB stack) + owner thread (32 KB stack) are allocated from DRAM, the largest free block may be insufficient for the WiFi driver's contiguous DMA buffer requirement (16 KB = 10 × 1600 bytes).
 3. **`EspDefaultNvsPartition::take()` consumed before `WifiManager::new()`** — `main.rs:145` takes the NVS handle. `WifiManager::new()` passes it to `EspWifi::new()`, which may internally call `EspDefaultNvsPartition::take()` again. If `take()` returns `None` on the second call, the WiFi driver runs without NVS access and uses default calibration, which requires different buffer sizes. This is speculative — the ESP-IDF v6 source for `EspWifi::new()` must be consulted.
 
-### Lessons (added to docs/lessons_learned.yaml as LL-003)
+### Lessons (added to docs/lessons_learned/ as LL-003)
 
 - **NVS partition lifecycle must outlive WiFi init.** `EspDefaultNvsPartition::take()` is a singleton — it can be called only once. If passed to `EspWifi::new()` and consumed there, subsequent NVS access attempts by the WiFi driver's internal init may silently fail. The NVS handle should either be: (a) kept alive until `EspWifi` is fully initialised, or (b) passed by reference (if API permits).
 - **`malloc buffer fail` in WiFi init is a heap-fragmentation / DMA-allocation symptom, not a root cause.** The error `"Expected to init 10 rx buffer, actual is 3"` means the WiFi driver tried to allocate 10 contiguous DMA-capable buffers of 1600 bytes each but only got 3. This indicates either heap exhaustion in the DMA memory region (`MALLOC_CAP_DMA`) or fragmentation after earlier allocations (motor task stack, owner thread stack, HTTP server stack).

@@ -121,6 +121,6 @@ A "heap corruption" crash at boot is a stack overflow until proven otherwise.
 
 - FreeRTOS stack overflow detection: https://www.freertos.org/Stacks-and-stack-overflow-checking.html
 - ESP-IDF task stack config: https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32/api-reference/system/freertos.html#task-stack
-- `docs/lessons_learned.yaml` LL-001
+- `docs/lessons_learned/` LL-001
 - `docs/protocols/embedded_boot_crash.md` S1
 - `docs/protocols/heap_corruption.md` (to understand why stack overflow looks like heap corruption)

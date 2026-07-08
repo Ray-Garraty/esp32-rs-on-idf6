@@ -1,0 +1,33 @@
+id: LL-007
+date: 2026-07-04
+crash_signature: PC=0x402cf9d7 EXCVADDR=0x00000000 A2=0x00000000 — npl_freertos_eventq_get(NULL)
+  called from blecent_host_task
+category: ignored_return_value
+trigger_patterns:
+- hci inits failed
+- nimble host init failed
+- BLE Host Task Started
+- pc=0x402cf9d7
+- npl_freertos_eventq_get
+lesson: 'The esp32-nimble crate''s BLEDevice::init() ignores the return value of nimble_port_init().
+  When this function fails (e.g. from DRAM exhaustion causing esp_nimble_hci_init()
+  to fail), the BLE host FreeRTOS task is still spawned via nimble_port_freertos_init().
+  The task immediately crashes with a NULL dereference because the default event queue
+  (g_eventq_dflt) was never initialized (ble_npl_eventq_init() happens after the early
+  return in esp_nimble_init()).
+
+  '
+diagnostic: "1. Look for \"BLE_INIT: hci inits failed\" followed by\n   \"BLE_INIT:\
+  \ nimble host init failed\" in the boot log.\n2. Confirm crash backtrace includes\
+  \ npl_freertos_eventq_get called\n   from blecent_host_task at ble_device.rs:365.\n\
+  3. Crash immediately follows \"BLE Host Task Started\" log line. 4. Check heap trajectory:\
+  \ largest contiguous block < 12K before BLE init. 5. The calling thread (net_owner)\
+  \ is stuck spinning forever in\n   BLEDevice::init() waiting for SYNCED flag that\
+  \ will never be set.\n"
+fix: "1. PATCH esp32-nimble: return early from BLEDevice::init() if\n   nimble_port_init()\
+  \ returns error — do NOT spawn the host task.\n2. Add heap pre-condition check (largest\
+  \ >= 20K) before calling\n   ble_mgr.init() in the project main.rs.\n3. Reduce WiFi\
+  \ dynamic buffer counts\n   (CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16,\n   CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16)\
+  \ to minimize\n   DRAM fragmentation.\n"
+refs:
+- docs/crash_reports/2026-07-04_ble_host_task_null_deref.md

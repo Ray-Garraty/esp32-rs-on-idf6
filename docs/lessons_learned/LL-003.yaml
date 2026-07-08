@@ -1,0 +1,45 @@
+id: LL-003
+date: 2026-07-03
+crash_signature: 'thread ''net_owner'' panicked at ''WifiManager::new(): WifiConnectionFailed''
+  — preceded by wifi:malloc buffer fail, NvsOpenFailed'
+category: dma_heap_fragmentation
+trigger_patterns:
+- 'NVS open failed: NvsOpenFailed'
+- wifi:malloc buffer fail
+- Expected to init (10|4) rx buffer, actual is
+- 'WifiManager::new\(\): WifiConnectionFailed'
+lesson: 'The root cause is persistent DMA heap fragmentation on ESP32. After Motor(16K)+Temp(16K)+UART(4K)
+  stack allocations (36K total), the largest free MALLOC_CAP_DMA block is ~5K, regardless
+  of free SRAM (137K).
+
+  ESP32''s DRAM is a single physical region used BOTH for thread stacks (MALLOC_CAP_8BIT)
+  and WiFi DMA buffers (MALLOC_CAP_DMA). Even though these are different capability
+  flags, they allocate from the same physical memory pool. Each thread stack allocation
+  fragments this pool, and the TLSF allocator cannot coalesce sufficiently for contiguous
+  DMA allocations of 6.4K+.
+
+  EspDefaultNvsPartition::take() is NOT consumed by EspWifi::new() — EspWifi::new()
+  only reads nvs.is_some() to set the nvs_enable boolean flag. The nvs_enable flag
+  controls whether the closed-source WiFi libpp.a reads PHY calibration data from
+  NVS via its own nvs_open("phy") call. This does NOT affect DMA buffer allocation
+  size.
+
+  The "NVS open failed: NvsOpenFailed" warning is a red herring — it comes from WifiManager::load_credentials_from_nvs()
+  which calls NvsManager::open("wifi") via raw FFI nvs_open(). This is completely
+  independent of the Rust EspDefaultNvsPartition. The warning means NVS partition
+  hasn''t been written yet (empty on first boot), which is normal.
+
+  '
+diagnostic: "1. Measure heap_caps_get_largest_free_block(MALLOC_CAP_DMA) at boot\n\
+  \   — this is the critical metric, not total free heap.\n2. After Motor(16K)+Temp(16K)+UART(4K)\
+  \ stacks: largest DMA ~5K. 3. CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM must be set to\
+  \ match the\n   available contiguous DMA block (3 max = 4.8K).\n4. CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=3\
+  \ is the stable maximum on\n   this hardware with current stack sizes.\n"
+fix: 'Set CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=3. This gives 3×1600=4.8K contiguous
+  DMA which fits in the available heap after 36K of thread stacks. Also clone EspSystemEventLoop
+  before passing to WifiManager::new() to keep lwIP alive if WiFi init fails.
+
+  '
+refs:
+- docs/plans/pending/26_06_30_phase4_network_report.md
+fix_applied: 2026-07-03

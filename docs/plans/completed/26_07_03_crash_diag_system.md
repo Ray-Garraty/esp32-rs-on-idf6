@@ -47,7 +47,7 @@ the ring buffer contains stale data), `diag` provides:
 | Tool | Role |
 |---|---|
 | `scripts/serial_monitor.py` | Auto-detects `=== CRASH ===` in serial output, runs inline crash_analyzer |
-| `scripts/crash_analyzer.py` | Parses both old Guru Meditation and new `=== CRASH ===` format, runs addr2line, classifies, checks `lessons_learned.yaml` |
+| `scripts/crash_analyzer.py` | Parses both old Guru Meditation and new `=== CRASH ===` format, runs addr2line, classifies, checks `docs/lessons_learned/` |
 | `scripts/analyze_last_crash.sh` | Post-hoc analysis of latest `logs/serial_*.log` |
 | `scripts/decode_backtrace.sh` | Standalone addr2line for hex addresses |
 

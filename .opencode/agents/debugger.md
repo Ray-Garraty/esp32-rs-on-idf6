@@ -74,7 +74,7 @@ Before each investigation, read relevant resources:
 | `docs/protocols/embedded_boot_crash.md` | **ALWAYS** — mandatory S1–S5 protocol |
 | `docs/protocols/heap_corruption.md` | When heap corruption suspected |
 | `docs/protocols/stack_overflow.md` | When stack overflow suspected |
-| `docs/lessons_learned.yaml` | **ALWAYS** — check for known patterns |
+| `docs/lessons_learned/` | **ALWAYS** — check for known patterns |
 | `AGENTS.md` | Build commands, golden rules, ESP32-S3 specifics |
 | `scripts/monitor.py` | Live serial capture with auto-crash detection |
 | `scripts/pipeline.py` | Build → flash → monitor pipeline |
@@ -371,7 +371,7 @@ root_cause:
 
 #### Both Cases
 
-- Add entry to `docs/lessons_learned.yaml` (unless it's a duplicate).
+- Add entry to `docs/lessons_learned/` as a new LL-XXX.yaml (unless it's a duplicate).
 - **DO NOT** commit anything (git is read-only).
 - **DO NOT** leave diagnostic instrumentation in the tree.
 

@@ -1,0 +1,42 @@
+id: LL-010
+date: 2026-07-04
+crash_signature: IllegalInstruction + stack overflow in task pthread — uart watermark=540
+  — UART_THREAD_STACK=4096 — preceded by wifi:malloc buffer fail
+category: stack_overflow
+trigger_patterns:
+- stack overflow in task pthread
+- uart watermark=540
+- UART_THREAD_STACK
+- Thread 3 'uart' low stack
+lesson: 'Rust std::thread tasks using `std::io::stdin().read()` need MORE than 4 KB
+  stack. The FFI call chain (Rust std → libc → ESP-IDF VFS → UART driver → FreeRTOS
+  xQueueReceive) consumes 3+ KB of stack. With CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=8192,
+  the std::thread default is 8 KB — any explicit stack_size below 8 KB for threads
+  doing FFI I/O will overflow.
+
+  The diagnostic routine `check_watermark()` triggers `log::warn!()` when the watermark
+  drops below 1024 bytes. The `log::warn!()` call itself consumes ~300-400 bytes of
+  stack for format_args! temporaries and FFI calls (mutex_lock/unlock, esp_timer_get_time).
+  This means the diagnostic code can push an already-critical thread over the edge
+  — the warning becomes the final straw.
+
+  ALL threads showing watermark=0 in the crash dump does NOT mean all threads overflowed.
+  The emergency_dump() renders `u16::MAX` (never checked) as 0. Only the thread that
+  was registered AND checked before the crash has a meaningful watermark.
+
+  '
+diagnostic: "1. Check which thread has a non-zero watermark — that's the only thread\n\
+  \   whose stack was checked before the crash.\n2. Check `src/config.rs` for the\
+  \ thread's stack size — anything below\n   8192 for threads doing FFI calls is suspicious.\n\
+  3. Verify the `UART_THREAD_STACK` (and any other small-stack thread)\n   against\
+  \ the AGENTS.md GR-6 budget table.\n4. If `check_watermark` fires a warning on a\
+  \ critically low stack, the\n   `log::warn!()` call itself may push the stack over\
+  \ — reduce log\n   verbosity or increase the stack.\n"
+fix: 'Set UART_THREAD_STACK to at least 8192 (matching the CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT).
+  For threads doing blocking FFI I/O, 16384 is safer. Review ALL thread stack sizes
+  against the GR-6 budget table in AGENTS.md.
+
+  '
+refs:
+- src/config.rs
+- docs/crash_reports/2026-07-04_uart_stack_overflow.md

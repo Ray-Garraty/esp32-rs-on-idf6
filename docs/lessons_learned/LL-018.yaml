@@ -1,0 +1,45 @@
+id: LL-018
+date: 2026-07-04
+crash_signature: 'assert failed: ble_hs_init ble_hs.c:975 (rc == 0) — NimBLE host
+  init C assert uncaught by Rust — largest=23KB, threshold was 20KB'
+category: heap_exhaustion
+trigger_patterns:
+- ble_hs_init
+- assert failed.*ble_hs
+- BLEDevice::init.*crash
+- BLE init skipped.*heap too fragmented
+lesson: 'The NimBLE heap pre-check threshold (20KB) was too low. After HTTP init the
+  largest contiguous block was 23KB — barely above the threshold. BLE init was attempted,
+  but NimBLE''s internal `ble_hs_init()` assert fired (C-level assert), killing the
+  entire ESP32 process before Rust error handling could catch it. The C assert is
+  uncatchable from Rust.
+
+  The fix: raise the heap pre-check threshold to 30KB. This is conservative enough
+  to prevent BLE init from being attempted when insufficient memory exists, while
+  still allowing BLE when DRAM is healthy (>30KB largest).
+
+  Key insight: The check MUST be conservative. A "barely enough" heap check (20KB
+  vs 23KB, 15% margin) is worse than no check at all — it creates a false sense of
+  safety and leads to a process-killing C assert. Minimum 30% margin recommended for
+  NimBLE host init.
+
+  The debug broadcast was also running every tick (~10ms) instead of every ~300ms
+  (should_broadcast rate). This bloated the main loop from ~5ms to ~31ms, delaying
+  DNS polling and WebSocket delivery. Moving it inside should_broadcast() restored
+  main loop performance.
+
+  '
+diagnostic: '1. Check for "assert failed: ble_hs_init" in crash log. 2. Check heap
+  at http_started phase: if largest < 30KB, BLE will crash. 3. Check ble.rs threshold:
+  must be >= 30_000. 4. If BLE is consistently skipped, verify largest >= 30KB after
+  HTTP.
+
+  '
+fix: "Raise BLE heap pre-check threshold from 20KB to 30KB in ble.rs:\n  if largest\
+  \ < 30_000 { skip BLE init }\nAlso move debug broadcast inside should_broadcast()\
+  \ in main.rs to keep main loop under 10ms per tick.\n"
+refs:
+- src/infrastructure/network/ble.rs (heap pre-check threshold)
+- src/main.rs (debug broadcast placement)
+- docs/plans/pending/26_07_01_ble_issues.md
+- docs/lessons_learned (LL-007, LL-015)

@@ -261,7 +261,7 @@ t0 main watermark=0  t1 motor watermark=0 ...
 | Live capture | `timeout 60 python3 scripts/serial_monitor.py` |
 | Raw crash text | `python3 scripts/crash_analyzer.py < crash.txt` |
 
-### Known Patterns (from docs/lessons_learned.yaml)
+### Known Patterns (from docs/lessons_learned/)
 
 | Signature | Real Cause | Fix |
 |-----------|-----------|------|
@@ -363,7 +363,7 @@ Sub-agents are **forbidden** from creating `.md` or `.yaml` files inside
 |----------|---------|
 | docs/refs/project.md | HW pinout, thread/stack budget, init order, network stack, NVS, API |
 | docs/refs/coding_style.md | C++23 conventions, error hierarchy, RAII, memory budget, low-level ops |
-| docs/lessons_learned.yaml | Crash patterns & fixes (LL-001–LL-004) |
+| docs/lessons_learned/ | Crash patterns & fixes (LL-001–LL-004) |
 | docs/protocols/embedded_boot_crash.md | S1–S5 Occam's Razor Protocol |
 | docs/protocols/heap_corruption.md | Heap triage (often misdiagnosed stack overflow) |
 | docs/protocols/stack_overflow.md | Stack triage + watermark checks |

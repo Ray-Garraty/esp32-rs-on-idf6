@@ -1086,6 +1086,6 @@ Pass criteria:
 - AGENTS.md — Golden Rules (GR-1 through GR-7), pre-flight checklist
 - `docs/refs/project.md` — Architecture reference, pinout, thread model
 - `docs/refs/coding_style.md` — C++23 conventions, error handling
-- `docs/lessons_learned.yaml` — Crash patterns (LL-001 through LL-026)
+- `docs/lessons_learned/` — Crash patterns (LL-001 through LL-026)
 - `docs/guides/testing.md` — 3-tier testing strategy
 - `legacy/rust/src/` — Original Rust implementation for reference

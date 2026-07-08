@@ -1,0 +1,22 @@
+id: LL-001
+date: 2026-07-02
+crash_signature: PC=0x40359c07 A2=0xFFFFFFFC EXCVADDR=0x0
+category: stack_overflow
+trigger_patterns:
+- A2:\s*0x[fF]{8}
+- A2=0xFFFFFFFC
+- EXCVADDR.*0x00000000
+- tlsf_check
+- heap_caps_.*free
+lesson: 'On ESP32 with ESP-IDF v6, boot-time heap corruption crashes (A2=0xFFFFFFFC,
+  TLSF free-list corrupted) are usually caused by main task stack overflow, not by
+  actual heap corruption. Stack overflow writes into adjacent TLSF metadata, producing
+  misleading heap allocator crash signatures. ALWAYS check uxTaskGetStackHighWaterMark(NULL)
+  FIRST before analyzing heap, ELF sections, or pthread_mutex_t.
+
+  '
+diagnostic: S1_stack_watermark
+fix: CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768 (or larger)
+refs:
+- docs/plans/completed/26_07_02_phase5_postmortem.md
+- docs/protocols/stack_overflow.md

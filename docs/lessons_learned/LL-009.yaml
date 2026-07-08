@@ -1,0 +1,48 @@
+id: LL-009
+date: 2026-07-04
+crash_signature: wifi:malloc buffer fail — Expected to init (3|8) rx buffer, actual
+  is 0 — preceded by free=108K largest=108K
+category: dma_heap_fragmentation
+trigger_patterns:
+- wifi:malloc buffer fail
+- Expected to init.*rx buffer, actual is 0
+- ESP_ERR_HTTPD_TASK
+- error code 45064
+lesson: 'Reducing WiFi dynamic buffer counts (32→16→8) does NOT fix WiFi init failure
+  when the static RX buffer allocation itself fails. The static RX buffers use CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=3
+  (minimum viable) and require MALLOC_CAP_INTERNAL contiguous memory. After thread
+  stack allocations (Motor 16K + Temp 16K + UART 4K + net_owner 32K = 68K), the available
+  MALLOC_CAP_INTERNAL contiguous block is insufficient for the WiFi driver''s internal
+  allocation pattern.
+
+  The heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT) reports 108K but this includes
+  MALLOC_CAP_8BIT memory that is NOT usable for WiFi''s MALLOC_CAP_INTERNAL allocations.
+  The two pools overlap in physical DRAM but have different alignment/capability requirements
+  that TLSF cannot satisfy simultaneously after fragmentation.
+
+  The ESP-IDF v6.0.1 WiFi init sequence: 1. Allocate WiFi driver task stack (3.5 KB,
+  MALLOC_CAP_INTERNAL) 2. Allocate static RX buffers (3×1600 = 4.8K, MALLOC_CAP_INTERNAL)
+  3. Allocate dynamic buffer pools (8×1600 each ×4 = 51.2K, MALLOC_CAP_INTERNAL) 4.
+  Register Rx callbacks
+
+  Step 1 or 2 fails → deinit also fails (0x3001) → memory leaked → HTTP cannot allocate
+  12K for server task → BLE cannot allocate 20K for HCI.
+
+  The CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=3 is ALREADY the minimum. Further reduction
+  is not possible without patching ESP-IDF source.
+
+  '
+diagnostic: "1. Check heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) before\n\
+  \   WiFi init — this is the critical metric, NOT MALLOC_CAP_DEFAULT.\n2. Check CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM\
+  \ — if already 3, the\n   issue is not buffer count but MALLOC_CAP_INTERNAL fragmentation.\n\
+  3. After WiFi failure, check if ESP_ERR_NO_MEM (0x3001) on deinit\n   confirms the\
+  \ memory leak.\n4. If pre-WiFi largest INTERNAL block < 12K+overhead, WiFi will\
+  \ fail.\n"
+fix: "Proper fix requires one of: a) Allocate thread stacks from MALLOC_CAP_INTERNAL-excluded\
+  \ memory\n   (needs esp-idf-hal patch)\nb) Move WiFi init to a dedicated memory\
+  \ partition (ESP32 memory\n   layout change)\nc) Allocate stacks via a custom allocator\
+  \ that doesn't fragment\n   INTERNAL memory\nd) Upgrade to ESP-IDF v6.1+ which may\
+  \ have fixed the WiFi driver\n   allocation sequence\ne) Accept AP-only mode (no\
+  \ STA) — current fallback works\n"
+refs:
+- docs/crash_reports/2026-07-04_phase6_postmortem.md

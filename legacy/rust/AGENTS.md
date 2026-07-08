@@ -382,7 +382,7 @@ Task(@debugger, "Crash dump: <paste === CRASH === section>
 known_good: <last working commit hash>")
 ```
 
-### Known Patterns (from `docs/lessons_learned.yaml`)
+### Known Patterns (from `docs/lessons_learned/`)
 
 | Signature | Real Cause | Fix |
 |---|---|---|
@@ -405,7 +405,7 @@ known_good: <last working commit hash>")
   - `scripts/crash_analyzer.py` — parse + classify + addr2line + lessons
   - `scripts/serial_monitor.py` — live capture with auto-crash detection
   - `scripts/decode_backtrace.sh` — standalone addr2line
-- **Knowledge base:** `docs/lessons_learned.yaml`
+- **Knowledge base:** `docs/lessons_learned/`
 - **Crash dump format:** `=== CRASH ===` (see `src/esp_safe.rs:423`)
 
 ---
@@ -588,7 +588,7 @@ for the insight gained.*
 |---|---|
 | `docs/refs/project.md` | Hardware pinout, thread model, error hierarchy, state machines, NVS layout |
 | `docs/refs/coding_style.md` | 4-layer architecture, enum over trait, heapless hot paths, concurrency rules |
-| `docs/lessons_learned.yaml` | Crash patterns & fixes (LL-001, LL-002, etc.) |
+| `docs/lessons_learned/` | Crash patterns & fixes (LL-001, LL-002, etc.) |
 | `docs/protocols/embedded_boot_crash.md` | S1–S5 Occam's Razor Protocol |
 | `docs/protocols/heap_corruption.md` | Heap triage (often misdiagnosed stack overflow) |
 | `docs/protocols/stack_overflow.md` | Stack triage + watermark checks |

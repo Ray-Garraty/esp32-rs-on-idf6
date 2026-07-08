@@ -1,0 +1,37 @@
+id: LL-004
+date: 2026-07-03
+crash_signature: 'assert failed: tcpip_send_msg_wait_sem /IDF/components/lwip/lwip/src/api/tcpip.c:454
+  (Invalid mbox) — preceded by ''System event loop dropped'''
+category: sysloop_lifecycle
+trigger_patterns:
+- System event loop dropped
+- tcpip_send_msg_wait_sem
+- Invalid mbox
+lesson: "When EspWifi::new() fails (e.g. from DMA malloc buffer fail), the EspSystemEventLoop\
+  \ parameter is consumed by value and dropped on the error return path. The EspSystemEventLoop\
+  \ destructor stops the lwIP tcpip thread (via internal FreeRTOS queue deletion).\
+  \ Any subsequent lwIP operation — HTTP server bind, BLE GATT init, UdpSocket::bind\
+  \ for DNS — crashes with:\n  assert failed: tcpip_send_msg_wait_sem ... (Invalid\
+  \ mbox)\n\nThis is an architectural invariant: EspSystemEventLoop must outlive ALL\
+  \ lwIP consumers. Since it's consumed by value in WifiManager::new(), the caller\
+  \ MUST clone it FIRST and keep the clone alive in the same scope.\n"
+diagnostic: 'Look for "System event loop dropped" in the boot log. If present, all
+  subsequent lwIP operations will fail with Invalid mbox assert. The assert is a secondary
+  symptom — the primary cause is the dropped event loop.
+
+  '
+fix: "Clone EspSystemEventLoop before passing to WifiManager::new() and keep the clone\
+  \ alive for the entire owner thread scope:\n  let _sysloop_keepalive = sys_loop.clone();\n\
+  \  let wifi_mgr = WifiManager::new(modem, sys_loop, ...);\n  // _sysloop_keepalive\
+  \ lives here → lwIP stays alive\n  // even if WifiManager::new() returns Err\nNOTE:\
+  \ This fix is NECESSARY but NOT SUFFICIENT (see LL-006). It only prevents killing\
+  \ an existing TCP/IP thread; it does NOT create one if esp_netif_init() was never\
+  \ called.\n"
+refs:
+- docs/plans/pending/26_06_30_phase4_network_report.md
+- docs/crash_reports/2026-07-04_boot_invalid_mbox.md
+note: 'The LL-004 fix prevents the ''System event loop dropped'' sub-case but does
+  NOT address the case where esp_netif_init() was never called. For the complete fix,
+  see LL-006 (call esp_netif_init() unconditionally at boot before any network operations).
+
+  '
