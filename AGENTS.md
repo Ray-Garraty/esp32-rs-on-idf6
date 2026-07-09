@@ -206,10 +206,11 @@ EN pin active LOW: `gpio_set_level(en, 0)` in constructor.
 
 | Command | Purpose | Timeout |
 |---------|---------|---------|
-| `scripts/build.sh build` | Build firmware | ≥ 120 s |
+| `scripts/build.sh build` | Build firmware (auto‑removes stale `sdkconfig`) | ≥ 120 s |
 | `scripts/build.sh flash` | Flash firmware | ≥ 60 s |
 | `scripts/build.sh monitor` | Smoke test | 30 s |
 | `scripts/build.sh uart` | UART command test | 60 s |
+| `scripts/build.sh reconfigure` | Remove `sdkconfig` + `idf.py reconfigure` | ≥ 60 s |
 | `scripts/build.sh test` | Host unit tests (Catch2) | 60 s |
 | `scripts/build.sh tidy` | clang-tidy | 60 s |
 | `scripts/build.sh clean` | Remove build dirs | 15 s |
@@ -222,12 +223,22 @@ ESP-IDF environment setup and provides consistent error handling.
 ### 4.3 sdkconfig Policy
 
 Edit only `sdkconfig.defaults` — never `sdkconfig` (auto-generated).
-Never run `idf.py menuconfig`. After changing defaults, run
-`scripts/build.sh reconfigure`.
+Never run `idf.py menuconfig`.
+
+**`scripts/build.sh build` always removes stale `sdkconfig` first** — this
+forces CMake to regenerate from `sdkconfig.defaults`, exposing config
+mismatches that a stale file would silently hide.
+
+After changing `sdkconfig.defaults`, also available:
+`scripts/build.sh reconfigure` (remove + `idf.py reconfigure` without full
+build).
 
 Key defaults: `CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768`,
 `CONFIG_BROWNOUT_DET=n`, `CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288`,
-`CONFIG_FREERTOS_HZ=1000`.
+`CONFIG_FREERTOS_HZ=1000`,
+`CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=6`.
+**Constraint:** `WIFI_DYNAMIC_RX_BUFFER_NUM` MUST be ≥ `WIFI_RX_BA_WIN`
+(see Known Patterns §5).
 
 ### 4.4 Partitions & Dependencies
 
@@ -273,6 +284,7 @@ t0 main watermark=0  t1 motor watermark=0 ...
 | wifi:fail to alloc timer, type=9 | WiFi timer after BLE+HTTP ate DRAM | Reduce WiFi buffer counts |
 | StoreProhibited EXCVADDR=0x28 | Dangling httpd_req_t (GR-5) | WebSocket API; no stored C pointers |
 | IllegalInstruction + heap 6 KB largest | DRAM fragment → HTTP alloc fail (LL-004) | Keep event loop handle alive |
+| `wifi_init.c:52` `#error "WIFI_RX_BA_WIN > WIFI_DYNAMIC_RX_BUFFER_NUM"` | Stale `sdkconfig` hid changed `sdkconfig.defaults` | `scripts/build.sh build` auto‑removes `sdkconfig`; also fix `WIFI_DYNAMIC_RX_BUFFER_NUM` in defaults |
 
 ---
 
@@ -333,6 +345,7 @@ Sub-agents are **forbidden** from creating `.md` or `.yaml` files inside
 - [ ] 30 s serial smoke test: no Guru Meditation, no WDT, no panics
 - [ ] Code style follows `docs/refs/coding_style.md`
 - [ ] Hardware refs match `docs/refs/project.md`
+- [ ] `sdkconfig.defaults` constraint: `WIFI_DYNAMIC_RX_BUFFER_NUM` ≥ `WIFI_RX_BA_WIN`
 
 ---
 
@@ -357,6 +370,7 @@ Sub-agents are **forbidden** from creating `.md` or `.yaml` files inside
 | Naked `rmt_channel_handle_t` | RAII wrapper class | coding_style.md §9.5 |
 | Naked `httpd_handle_t` / etc. | RAII wrapper class | coding_style.md §9.5 |
 | Functions returning -1 on error | `std::expected<T, Error>` | coding_style.md §2 |
+| Stale `sdkconfig` hiding config mismatches | `scripts/build.sh build` auto‑removes it | §4.3 |
 
 ---
 

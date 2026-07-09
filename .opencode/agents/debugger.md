@@ -301,8 +301,9 @@ before `app_main()`.
 #### Technique E: sdkconfig Isolation
 
 1. Revert ALL Phase N+1 sdkconfig changes to Phase N values.
-2. Flash → does crash stop?
-3. If yes → add changes back one by one, testing each.
+2. Run `scripts/build.sh reconfigure` to regenerate `sdkconfig` from `sdkconfig.defaults`.
+3. Flash → does crash stop?
+4. If yes → add changes back one by one, testing each.
 
 #### Technique F: Binary Search via git (Plan Only, No Exec)
 
@@ -480,9 +481,10 @@ This allows `grep -r "\[INVESTIGATION\]"` to find and revert all diagnostic code
 
 | Action | Command |
 |--------|---------|
-| Build | `scripts/build.sh build` |
+| Build | `scripts/build.sh build` (auto‑removes stale `sdkconfig`) |
 | Flash | `scripts/build.sh flash PORT` |
 | Monitor (capture) | `scripts/build.sh monitor PORT` (30s) or `scripts/monitor.py` |
+| Reconfigure | `scripts/build.sh reconfigure` (remove `sdkconfig` + `idf.py reconfigure`) |
 | Pipeline (all) | `scripts/pipeline.py` |
 | Backtrace decode | `xtensa-esp32s3-elf-addr2line -pfiaC -e build/ecotiter.elf <PC1> <PC2> ...` |
 | ELF sections | `xtensa-esp32s3-elf-objdump -h build/ecotiter.elf` |

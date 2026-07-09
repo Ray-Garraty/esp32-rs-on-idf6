@@ -25,6 +25,7 @@ CMD="${1:-build}"
 
 case "$CMD" in
     build)
+        rm -f "$PROJECT_DIR/sdkconfig"
         idf.py build
         ;;
     flash)
@@ -49,11 +50,15 @@ case "$CMD" in
         PORT="${2:-/dev/ttyUSB0}"
         timeout 30 python3 scripts/uart_test.py -p "$PORT"
         ;;
+    reconfigure)
+        rm -f "$PROJECT_DIR/sdkconfig"
+        idf.py reconfigure
+        ;;
     clean)
         rm -rf build build-tests
         ;;
     *)
-        echo "Usage: $0 {build|flash|monitor|uart|test|tidy|clean}"
+        echo "Usage: $0 {build|flash|monitor|uart|reconfigure|test|tidy|clean}"
         exit 1
         ;;
 esac
