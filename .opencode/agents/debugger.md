@@ -12,10 +12,9 @@ permission:
   edit: allow
   bash:
     "scripts/build.sh*": allow
-    "scripts/flash.sh*": allow
     "scripts/lint.sh*": allow
     "scripts/monitor.py*": allow
-    "scripts/pipeline.py*": allow
+    "scripts/smoke_test.py*": allow
     "scripts/unit_tests.sh*": allow
     "scripts/find_port.py*": allow
     "~/.espressif/tools/xtensa-esp-elf/*/bin/xtensa-esp32s3-elf-*": allow
@@ -77,7 +76,7 @@ Before each investigation, read relevant resources:
 | `docs/lessons_learned/` | **ALWAYS** — check for known patterns |
 | `AGENTS.md` | Build commands, golden rules, ESP32-S3 specifics |
 | `scripts/monitor.py` | Live serial capture with auto-crash detection |
-| `scripts/pipeline.py` | Build → flash → monitor pipeline |
+| `scripts/smoke_test.py` | Build → flash → monitor (uses build.sh for IDF ops) |
 | `components/diag/include/diag/black_box.hpp` | Black box event types (FFI, heap, transitions) |
 | `components/diag/include/diag/stack_monitor.hpp` | Thread registration + watermark slot IDs |
 | `components/diag/include/diag/ffi_guard.hpp` | FFI boundary IDs for black box events |
@@ -121,7 +120,7 @@ and reports `RESULT: CRASH DETECTED` with the log file path.
 #### 1c. If executing the full pipeline
 
 ```
-python3 scripts/pipeline.py
+python3 scripts/smoke_test.py
 ```
 
 Builds → flashes → monitors for 30s. If a crash occurs during monitoring,
@@ -161,7 +160,7 @@ printf("[INVESTIGATION] main task stack watermark: %u bytes\n",
 Build, flash, monitor (15s is enough for boot):
 
 ```
-python3 scripts/pipeline.py
+python3 scripts/smoke_test.py
 ```
 
 **Decision:**
@@ -207,7 +206,7 @@ Build by temporarily replacing `main.cpp`:
 ```bash
 mv main/main.cpp main/main.cpp.bak
 mv main/main_smoke.cpp main/main.cpp
-python3 scripts/pipeline.py
+python3 scripts/smoke_test.py
 # Restore:
 mv main/main.cpp main/main_smoke.cpp
 mv main/main.cpp.bak main/main.cpp
@@ -485,7 +484,7 @@ This allows `grep -r "\[INVESTIGATION\]"` to find and revert all diagnostic code
 | Flash | `scripts/build.sh flash PORT` |
 | Monitor (capture) | `scripts/build.sh monitor PORT` (30s) or `scripts/monitor.py` |
 | Reconfigure | `scripts/build.sh reconfigure` (remove `sdkconfig` + `idf.py reconfigure`) |
-| Pipeline (all) | `scripts/pipeline.py` |
+| Smoke test | `scripts/smoke_test.py` |
 | Backtrace decode | `xtensa-esp32s3-elf-addr2line -pfiaC -e build/ecotiter.elf <PC1> <PC2> ...` |
 | ELF sections | `xtensa-esp32s3-elf-objdump -h build/ecotiter.elf` |
 | Size | `xtensa-esp32s3-elf-size build/ecotiter.elf` |

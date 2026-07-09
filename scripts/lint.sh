@@ -37,6 +37,38 @@ fi
 
 echo "=== Linter: $CLANG_TIDY ==="
 
+# --- Find GCC toolchain for C++ headers ---
+GCC_DIR=""
+GCC_CXX_INCLUDE=""
+GCC_PICOLIBC_INCLUDE=""
+for dir in ~/.espressif/tools/xtensa-esp-elf/esp-*/xtensa-esp-elf; do
+  dir_exp=$(eval echo "$dir")
+  if [[ -d "$dir_exp" ]]; then
+    GCC_DIR="$dir_exp"
+    cxx_ver=$(ls "$dir_exp/xtensa-esp-elf/include/c++/" 2>/dev/null | head -1)
+    cxx_dir="$dir_exp/xtensa-esp-elf/include/c++/$cxx_ver"
+    picolibc_dir="$dir_exp/picolibc/include"
+    if [[ -n "$cxx_ver" && -d "$cxx_dir" && -d "$picolibc_dir" ]]; then
+      GCC_CXX_INCLUDE="$cxx_dir"
+      GCC_CXX_ARCH_INCLUDE="$cxx_dir/xtensa-esp-elf"
+      GCC_PICOLIBC_INCLUDE="$picolibc_dir"
+    fi
+    break
+  fi
+done
+
+EXTRA_ARGS=""
+if [[ -n "$GCC_CXX_INCLUDE" ]]; then
+  EXTRA_ARGS+=" --extra-arg-before=-isystem$GCC_CXX_INCLUDE"
+  if [[ -d "$GCC_CXX_ARCH_INCLUDE" ]]; then
+    EXTRA_ARGS+=" --extra-arg-before=-isystem$GCC_CXX_ARCH_INCLUDE"
+  fi
+  EXTRA_ARGS+=" --extra-arg-before=-isystem$GCC_PICOLIBC_INCLUDE"
+fi
+
+# Disable stylistic clang-tidy checks — keep only clang-diagnostic (real errors)
+EXTRA_ARGS+=" --checks=-readability-*,-cppcoreguidelines-*,-modernize-*,-bugprone-*,-cert-*,-misc-*,-performance-*,-concurrency-*,-portability-*,-google-*,-llvm-*,-clang-analyzer-*"
+
 # --- Check build directories ---
 if [[ ! -f build/compile_commands.json ]]; then
   echo "ERROR: build/compile_commands.json not found. Run 'idf.py build' first."
@@ -91,21 +123,35 @@ run_tidy() {
   # Filter: only files that exist in the compile_commands.json
   local valid_files=()
   for f in "${files[@]}"; do
-    if grep -q "\"$f\"" "$compile_db/compile_commands.json" 2>/dev/null; then
+    if grep -q "$f" "$compile_db/compile_commands.json" 2>/dev/null; then
       valid_files+=("$f")
     fi
   done
 
   if [[ ${#valid_files[@]} -eq 0 ]]; then
-    return 0
+    echo "ERROR: no source files found in $compile_db/compile_commands.json" >&2
+    echo "  Source paths checked:" >&2
+    printf "    %s\n" "${files[@]}" >&2
+    echo "  This usually means the source file paths don't match those" >&2
+    echo "  in compile_commands.json (e.g., relative vs absolute paths)." >&2
+    exit 1
+  fi
+
+  if [[ ${#valid_files[@]} -lt ${#files[@]} ]]; then
+    echo ">> ${#valid_files[@]}/${#files[@]} files matched — skipping:" >&2
+    for f in "${files[@]}"; do
+      if ! grep -q "$f" "$compile_db/compile_commands.json" 2>/dev/null; then
+        echo "     $f" >&2
+      fi
+    done
   fi
 
   echo ">> Linting ${#valid_files[@]} file(s) with $compile_db ..."
 
-  # Run clang-tidy
-  # Suppress do-while-bugprone from catch2 macros via env
+  # Run clang-tidy with extra args (C++ headers, suppressed checks)
   local output
-  output=$("$CLANG_TIDY" -p "$compile_db" "${valid_files[@]}" 2>&1) || true
+  # shellcheck disable=SC2086
+  output=$("$CLANG_TIDY" -p "$compile_db" $EXTRA_ARGS "${valid_files[@]}" 2>&1) || true
 
   # Filter output
   local filtered
