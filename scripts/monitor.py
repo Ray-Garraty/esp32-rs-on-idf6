@@ -152,7 +152,7 @@ def monitor_port(port, timeout=30, log_dir=DEFAULT_LOG_DIR, no_reset=False, no_l
                             if "Rebooting..." in line or "!!! EXCEPTION END !!!" in line:
                                 crash_state = CRASH_STATE_IDLE
                         else:
-                            if "BOOT_OK_MARKER" in line:
+                            if "BOOT_OK_MARKER" in line or line.startswith('{"t":'):
                                 found_boot = True
                             writeline(f"[{ts}] {line}")
                 else:
