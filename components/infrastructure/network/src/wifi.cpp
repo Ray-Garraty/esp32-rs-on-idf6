@@ -10,6 +10,7 @@
 #include "esp_mac.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
+#include "lwip/inet.h"
 // mdns not in IDF v6 built-in components; handled via idf_component.yml
 // #include "mdns.h"
 
@@ -42,6 +43,20 @@ std::expected<void, domain::AppError> WifiManager::init() {
         esp_err_t err = esp_event_loop_create_default();
         if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
             ESP_LOGE(TAG, "event loop create: %s", esp_err_to_name(err));
+            return std::unexpected(domain::AppError::Hardware);
+        }
+
+        // Create AP and STA netif BEFORE esp_wifi_init — required by ESP-IDF
+        // (official captive portal example creates netif before wifi init).
+        // esp_wifi_init() picks up already-created default interfaces.
+        apNetif_ = esp_netif_create_default_wifi_ap();
+        if (apNetif_ == nullptr) {
+            ESP_LOGE(TAG, "Failed to create AP netif");
+            return std::unexpected(domain::AppError::Hardware);
+        }
+        staNetif_ = esp_netif_create_default_wifi_sta();
+        if (staNetif_ == nullptr) {
+            ESP_LOGE(TAG, "Failed to create STA netif");
             return std::unexpected(domain::AppError::Hardware);
         }
 
@@ -89,9 +104,8 @@ void WifiManager::startAP() {
 
     diag::FfiGuard guard(71);
 
-    apNetif_ = esp_netif_create_default_wifi_ap();
     if (apNetif_ == nullptr) {
-        ESP_LOGE(TAG, "Failed to create AP netif");
+        ESP_LOGE(TAG, "AP netif not created (init() must be called first)");
         return;
     }
 
@@ -102,11 +116,11 @@ void WifiManager::startAP() {
     esp_netif_dhcps_stop(apNetif_);
     esp_netif_set_ip_info(apNetif_, &ipInfo);
 
-    // DHCP option 6 (DNS Server): advertise ESP32 as DNS server (192.168.4.1)
-    // ESP-IDF v6 removed LWIP_DHCPS_ADD_DNS, so must set explicitly
-    uint32_t dnsIp = AP_IP;
+    // DHCP option 6 (DNS Server): enable DNS server advertisement via DHCP
+    // ESP_NETIF_DOMAIN_NAME_SERVER expects a uint8_t: 1 = enable, 0 = disable
+    uint8_t dnsEnabled = 1;
     esp_netif_dhcps_option(apNetif_, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER,
-                           &dnsIp, sizeof(dnsIp));
+                           &dnsEnabled, sizeof(dnsEnabled));
 
     // Set DNS info on the netif so lwip resolves via 192.168.4.1
     esp_netif_dns_info_t dnsInfo{};
@@ -183,9 +197,8 @@ bool WifiManager::tryStartSTA() {
 
     diag::FfiGuard guard(72);
 
-    staNetif_ = esp_netif_create_default_wifi_sta();
     if (staNetif_ == nullptr) {
-        ESP_LOGE(TAG, "Failed to create STA netif");
+        ESP_LOGE(TAG, "STA netif not created (init() must be called first)");
         return false;
     }
 
@@ -285,6 +298,21 @@ void WifiManager::process() {
                                 reinterpret_cast<sockaddr*>(&from), &fromLen);
         if (len <= 0) return;
 
+        // Diagnostic: log DNS query source and domain name
+        char domainBuf[256]{};
+        size_t domainLen = domain::extractDomainName(
+            query.data(), static_cast<size_t>(len),
+            domainBuf, sizeof(domainBuf));
+        char srcIp[16]{};
+        inet_ntop(AF_INET, &from.sin_addr, srcIp, sizeof(srcIp));
+        if (domainLen > 0) {
+            ESP_LOGI(TAG, "DNS query from %s:%d: %d bytes (domain=%s)",
+                     srcIp, ntohs(from.sin_port), len, domainBuf);
+        } else {
+            ESP_LOGI(TAG, "DNS query from %s:%d: %d bytes",
+                     srcIp, ntohs(from.sin_port), len);
+        }
+
         domain::memory::DnsBuf response{};
         auto result = domain::tryBuildDnsResponse(
             query.data(), static_cast<size_t>(len),
@@ -294,6 +322,8 @@ void WifiManager::process() {
         size_t written = *result;
         lwip_sendto(dnsSocket_, response.data(), written, 0,
                     reinterpret_cast<sockaddr*>(&from), sizeof(from));
+        ESP_LOGI(TAG, "DNS response to %s:%d: %zu bytes",
+                 srcIp, ntohs(from.sin_port), written);
     }
 }
 

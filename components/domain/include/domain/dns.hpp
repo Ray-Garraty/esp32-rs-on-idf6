@@ -107,4 +107,58 @@ enum class DnsError : uint8_t {
     return written;
 }
 
+/// Extract the queried domain name from a DNS query for diagnostic logging.
+/// Writes the domain name (e.g., "captive.apple.com") into outBuf.
+/// Returns the number of bytes written (excluding null terminator), or 0 on error.
+/// outBuf is always null-terminated when outCap > 0 and parsing succeeds.
+[[nodiscard]] inline size_t extractDomainName(
+    const uint8_t* query, size_t queryLen,
+    char* outBuf, size_t outCap) {
+
+    if (queryLen < sizeof(DnsHeader) || outCap == 0) return 0;
+
+    const uint8_t* qptr = query + sizeof(DnsHeader);
+    const uint8_t* qend = query + queryLen;
+    size_t written = 0;
+    bool first = true;
+
+    while (qptr < qend) {
+        uint8_t len = *qptr;
+
+        // Zero-length label marks end of domain name
+        if (len == 0) {
+            ++qptr;
+            break;
+        }
+
+        // Bounds check: need len data bytes after the length byte
+        if (qptr + 1 + len > qend) {
+            if (outCap > 0) outBuf[0] = '\0';
+            return 0;
+        }
+
+        // Dot separator between labels
+        if (!first) {
+            if (written + 1 >= outCap) {
+                if (outCap > 0) outBuf[0] = '\0';
+                return 0;
+            }
+            outBuf[written++] = '.';
+        }
+        first = false;
+
+        // Copy label bytes
+        if (written + len >= outCap) {
+            if (outCap > 0) outBuf[0] = '\0';
+            return 0;
+        }
+        std::memcpy(outBuf + written, qptr + 1, len);
+        written += len;
+        qptr += 1 + len;
+    }
+
+    outBuf[written] = '\0';
+    return written;
+}
+
 } // namespace ecotiter::domain

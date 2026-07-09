@@ -1,6 +1,0 @@
-# Lessons Learned — split into individual files
-#
-# Each lesson is now in its own file under docs/lessons_learned/LL-XXX.yaml.
-# See docs/lessons_learned/ for the full set of crash patterns.
-#
-# LL-001 through LL-026 (with gaps where lessons were merged or skipped).

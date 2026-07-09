@@ -155,3 +155,79 @@ TEST_CASE("CaptivePortal: DNS response flag is standard (0x8180)", "[captive][dn
     REQUIRE(__builtin_bswap16(rsp->ancount) == 1);
     REQUIRE(__builtin_bswap16(rsp->arcount) == 0);
 }
+
+// --- extractDomainName tests ---
+
+TEST_CASE("DNS: extractDomainName parses simple name", "[dns][extract]") {
+    // Build a query for "example.com"
+    auto query = makeQuery("example.com", 0x1234);
+
+    char buf[256]{};
+    size_t len = extractDomainName(query.data(), query.size(), buf, sizeof(buf));
+
+    REQUIRE(len > 0);
+    REQUIRE(len == 11);  // "example.com" = 11 chars
+    REQUIRE(std::strcmp(buf, "example.com") == 0);
+}
+
+TEST_CASE("DNS: extractDomainName parses captive.apple.com", "[dns][extract]") {
+    auto query = makeQuery("captive.apple.com", 0x4321);
+
+    char buf[256]{};
+    size_t len = extractDomainName(query.data(), query.size(), buf, sizeof(buf));
+
+    REQUIRE(len > 0);
+    REQUIRE(len == 17);  // "captive.apple.com" = 17 chars
+    REQUIRE(std::strcmp(buf, "captive.apple.com") == 0);
+}
+
+TEST_CASE("DNS: extractDomainName parses connectivitycheck.gstatic.com", "[dns][extract]") {
+    // This is a long domain name used by Android/Chrome
+    auto query = makeQuery("connectivitycheck.gstatic.com", 0x5678);
+
+    char buf[256]{};
+    size_t len = extractDomainName(query.data(), query.size(), buf, sizeof(buf));
+
+    REQUIRE(len > 0);
+    REQUIRE(len == 29);  // "connectivitycheck.gstatic.com" = 29 chars
+    REQUIRE(std::strcmp(buf, "connectivitycheck.gstatic.com") == 0);
+}
+
+TEST_CASE("DNS: extractDomainName returns 0 for too-short query", "[dns][extract]") {
+    uint8_t tiny[5] = {};
+
+    char buf[256]{};
+    size_t len = extractDomainName(tiny, sizeof(tiny), buf, sizeof(buf));
+
+    REQUIRE(len == 0);
+}
+
+TEST_CASE("DNS: extractDomainName returns 0 for empty buffer", "[dns][extract]") {
+    uint8_t data[20] = {};
+
+    char buf[1]{};
+    size_t len = extractDomainName(data, sizeof(data), buf, sizeof(buf));
+
+    REQUIRE(len == 0);
+}
+
+TEST_CASE("DNS: extractDomainName round-trips with makeQuery", "[dns][extract]") {
+    const char* domains[] = {
+        "example.com",
+        "captive.apple.com",
+        "connectivitycheck.gstatic.com",
+        "msftncsi.com",
+        "a.b.c.d.e.example.com",
+    };
+
+    for (auto* domain : domains) {
+        auto query = makeQuery(domain, 0xABCD);
+
+        char buf[256]{};
+        size_t len = extractDomainName(query.data(), query.size(), buf, sizeof(buf));
+
+        REQUIRE(len > 0);
+        REQUIRE(len == std::strlen(domain));
+        REQUIRE(std::strcmp(buf, domain) == 0);
+    }
+}

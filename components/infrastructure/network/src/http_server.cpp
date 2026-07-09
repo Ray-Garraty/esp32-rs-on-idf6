@@ -36,6 +36,12 @@ std::expected<void, domain::AppError> HttpServer::init() {
 
     diag::FfiGuard guard(80);
 
+    // Suppress httpd noise — captive portal generates many "invalid requests"
+    // (as recommended in the official ESP-IDF captive portal example)
+    esp_log_level_set("httpd_uri", ESP_LOG_ERROR);
+    esp_log_level_set("httpd_txrx", ESP_LOG_ERROR);
+    esp_log_level_set("httpd_parse", ESP_LOG_ERROR);
+
     size_t freeHeap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
     ESP_LOGI(TAG, "DRAM before HTTP server: free=%zu bytes, largest_block=%zu bytes",
@@ -48,14 +54,16 @@ std::expected<void, domain::AppError> HttpServer::init() {
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = STACK_SIZE;
-    config.max_uri_handlers = 30;
     config.lru_purge_enable = true;
-    // LWIP_MAX_SOCKETS=5, HTTP server uses 3 internally → 2 for clients
-    config.max_open_sockets = 4;
+    // max_open_sockets=13 as in official ESP-IDF captive portal example.
+    // HTTPD_MAX_SOCKETS = max(CONFIG_LWIP_MAX_SOCKETS, 16) → 13+3=16 ≤ 16 ✓
+    config.max_open_sockets = 13;
 
     esp_err_t err = httpd_start(&handle_, &config);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "httpd start: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "httpd config: stack_size=%u, max_uri_handlers=%u, max_open_sockets=%d, lru_purge=%d",
+                 config.stack_size, config.max_uri_handlers, config.max_open_sockets, config.lru_purge_enable);
         return std::unexpected(domain::AppError::Hardware);
     }
 
@@ -65,18 +73,16 @@ std::expected<void, domain::AppError> HttpServer::init() {
 
 namespace {
 
-esp_err_t captive_redirect_handler(httpd_req_t* req) {
-    diag::FfiGuard guard(81);
-    httpd_resp_set_status(req, "302 Found");
-    httpd_resp_set_hdr(req, "Location", "/wifi");
-    httpd_resp_send(req, nullptr, 0);
-    return ESP_OK;
-}
-
 esp_err_t captive_wifi_page_handler(httpd_req_t* req) {
     diag::FfiGuard guard(81);
-    httpd_resp_set_type(req, "text/html; charset=utf-8");
     auto sv = interface::webui::getFile("/wifi");
+    ESP_LOGI(TAG, "Serving /wifi: %zu bytes", sv.size());
+    if (sv.empty()) {
+        ESP_LOGW(TAG, "/wifi content is empty!");
+        httpd_resp_send_404(req);
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_send(req, sv.data(), static_cast<ssize_t>(sv.size()));
     return ESP_OK;
 }
@@ -228,13 +234,6 @@ void HttpServer::registerRoutes() {
     reg({ .uri = "/wifi/connect", .method = HTTP_POST, .handler = captive_wifi_connect_handler });
     reg({ .uri = "/wifi/status", .method = HTTP_GET, .handler = captive_wifi_status_handler });
 
-    // Probe redirects
-    reg({ .uri = "/generate_204", .method = HTTP_GET, .handler = captive_redirect_handler });
-    reg({ .uri = "/hotspot-detect.html", .method = HTTP_GET, .handler = captive_redirect_handler });
-    reg({ .uri = "/library/test/success.html", .method = HTTP_GET, .handler = captive_redirect_handler });
-    reg({ .uri = "/connecttest.txt", .method = HTTP_GET, .handler = captive_redirect_handler });
-    reg({ .uri = "/redirect", .method = HTTP_GET, .handler = captive_redirect_handler });
-
     // REST API
     reg({ .uri = "/api/ping", .method = HTTP_GET, .handler = api_ping_handler });
     reg({ .uri = "/api/status", .method = HTTP_GET, .handler = api_status_handler });
@@ -263,6 +262,20 @@ void HttpServer::registerRoutes() {
     reg({ .uri = "/js/stepper.js", .method = HTTP_GET, .handler = webui_file_handler });
     reg({ .uri = "/js/calibration.js", .method = HTTP_GET, .handler = webui_file_handler });
     reg({ .uri = "/js/init.js", .method = HTTP_GET, .handler = webui_file_handler });
+
+    // Catch-all 404 handler redirects unknown URLs to captive portal page.
+    // Redirect to /wifi (self-contained HTML) rather than / (dashboard with CDN deps)
+    // to avoid infinite redirect loops from secondary resource requests.
+    // iOS requires content in the response to detect a captive portal
+    // (simply redirecting is not sufficient — official ESP-IDF note).
+    httpd_register_err_handler(handle_, HTTPD_404_NOT_FOUND,
+        [](httpd_req_t* req, httpd_err_code_t err) -> esp_err_t {
+            httpd_resp_set_status(req, "302 Found");
+            httpd_resp_set_hdr(req, "Location", "/wifi");
+            httpd_resp_send(req, "Redirect to the captive portal", HTTPD_RESP_USE_STRLEN);
+            ESP_LOGI(TAG, "Redirecting to /wifi");
+            return ESP_OK;
+        });
 
     ESP_LOGI(TAG, "All routes registered");
 }

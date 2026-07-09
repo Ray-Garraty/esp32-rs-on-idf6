@@ -1,0 +1,53 @@
+id: LL-036
+date: 2026-07-09
+crash_signature: "Serving /wifi: 3 bytes instead of full CAPTIVE_HTML (blank page)"
+category: cpp_constexpr_sizeof_trap
+trigger_patterns:
+  - "sizeof.*constexpr auto.*string.*3"
+  - "captive portal page blank.*3 bytes"
+  - "/wifi.*content-length.*3"
+lesson: >
+  In C++, sizeof() on a constexpr auto string literal declared at namespace scope
+  gives the size of the array (string length + null terminator), which is correct.
+  
+  BUT: if the constexpr auto is declared inside a lambda, or if the variable is
+  implicitly converted to const char* (pointer decay), sizeof returns the pointer
+  size (4 bytes on Xtensa ESP32) instead of the string length.
+  
+  In this case, std::string_view(CAPTIVE_HTML, sizeof(CAPTIVE_HTML) - 1) produced
+  a string_view with size = 3 (4 - 1) instead of ~1500 bytes.
+  
+  Root cause: the constexpr auto CAPTIVE_HTML was passed through a lambda or
+  intermediate function that decayed the array to a pointer, causing sizeof to
+  return pointer size.
+  
+  To prevent this, always use one of these alternatives when creating string_views
+  from string literals:
+  
+  1. Use explicit std::string_view literal (C++17):
+     static constexpr std::string_view CAPTIVE_HTML = R"html(...)html"sv;
+  
+  2. Use constexpr std::string_view constructor:
+     static constexpr std::string_view CAPTIVE_HTML{R"html(...)html",
+                                                    sizeof(R"html(...)html") - 1};
+  
+  3. Avoid passing auto string variables through function boundaries that
+     could decay the array to pointer.
+  
+  4. For compile-time string length, use constexpr strlen or std::char_traits::
+     length() with a static_assert to verify the expected size.
+  
+  When debugging: add ESP_LOGI to print the string_view size at runtime —
+  a size of 3 or 4 is a clear indicator of pointer decay.
+diagnostic: >
+  Add ESP_LOGI(TAG, "/wifi content: %zu bytes", sv.size()) in the handler.
+  If the size is 3 or 4 instead of the expected ~1500, sizeof() has decayed
+  to pointer size.
+fix: >
+  Change the declaration of CAPTIVE_HTML and other embedded file constants
+  from 'constexpr auto' to 'constexpr std::string_view' to prevent
+  array-to-pointer decay.
+refs:
+  - docs/issues/active/26_07_09_captive_portal_not_working.md
+  - https://en.cppreference.com/w/cpp/language/constexpr
+  - https://en.cppreference.com/w/cpp/language/sizeof
