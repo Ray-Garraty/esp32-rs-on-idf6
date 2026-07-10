@@ -313,6 +313,91 @@ TEST_CASE("handler: cal.calcSpeed with 2 points returns valid result", "[handler
 
 // --- sensors ---
 
+static uint16_t s_mockSampleVal = 1500;
+static uint16_t mockSampleRead() { return s_mockSampleVal; }
+
+static std::expected<void, ecotiter::domain::ResourceError> mockAdcCalWrite(uint16_t a, int16_t b) {
+  (void)a;
+  (void)b;
+  return {};
+}
+
+TEST_CASE("handler: adc.cal full flow", "[handlers][sensors][adc.cal]") {
+  // Start with reset to guarantee clean state
+  auto resetRsp = sensors::handleAdcCalReset(mockAdcCalWrite);
+  REQUIRE(resetRsp);
+  REQUIRE(resetRsp->kind == ResponseKind::Single);
+
+  // Compute should fail with no points
+  auto computeFail = sensors::handleAdcCalCompute(mockAdcCalWrite);
+  REQUIRE(computeFail);
+  REQUIRE(computeFail->kind == ResponseKind::Error);
+
+  // Measure point 0
+  s_mockSampleVal = 1500;
+  auto rsp0 = sensors::handleAdcCalMeasure(std::nullopt, mockSampleRead, mockAdcCalWrite);
+  REQUIRE(rsp0);
+  REQUIRE(rsp0->kind == ResponseKind::Single);
+  std::string_view sv0(rsp0->body.data(), rsp0->bodySize);
+  REQUIRE(sv0.find("1500") != std::string_view::npos);
+  REQUIRE(sv0.find("\"point\":0") != std::string_view::npos);
+
+  // Measure point 1
+  s_mockSampleVal = 1800;
+  auto rsp1 = sensors::handleAdcCalMeasure(std::nullopt, mockSampleRead, mockAdcCalWrite);
+  REQUIRE(rsp1);
+  std::string_view sv1(rsp1->body.data(), rsp1->bodySize);
+  REQUIRE(sv1.find("1800") != std::string_view::npos);
+  REQUIRE(sv1.find("\"point\":1") != std::string_view::npos);
+
+  // Compute should still fail (need 5 points)
+  computeFail = sensors::handleAdcCalCompute(mockAdcCalWrite);
+  REQUIRE(computeFail);
+  REQUIRE(computeFail->kind == ResponseKind::Error);
+
+  // Fill remaining 3 points
+  s_mockSampleVal = 2000;
+  auto rsp2 = sensors::handleAdcCalMeasure(std::nullopt, mockSampleRead, mockAdcCalWrite);
+  REQUIRE(rsp2);
+  REQUIRE(std::string_view(rsp2->body.data(), rsp2->bodySize).find("\"point\":2") != std::string_view::npos);
+
+  s_mockSampleVal = 2200;
+  auto rsp3 = sensors::handleAdcCalMeasure(std::nullopt, mockSampleRead, mockAdcCalWrite);
+  REQUIRE(rsp3);
+  REQUIRE(std::string_view(rsp3->body.data(), rsp3->bodySize).find("\"point\":3") != std::string_view::npos);
+
+  s_mockSampleVal = 2500;
+  auto rsp4 = sensors::handleAdcCalMeasure(std::nullopt, mockSampleRead, mockAdcCalWrite);
+  REQUIRE(rsp4);
+  REQUIRE(std::string_view(rsp4->body.data(), rsp4->bodySize).find("\"point\":4") != std::string_view::npos);
+
+  // 6th point should fail
+  s_mockSampleVal = 3000;
+  auto rsp5 = sensors::handleAdcCalMeasure(std::nullopt, mockSampleRead, mockAdcCalWrite);
+  REQUIRE(rsp5);
+  REQUIRE(rsp5->kind == ResponseKind::Error);
+
+  // Compute should now succeed
+  auto computeOk = sensors::handleAdcCalCompute(mockAdcCalWrite);
+  REQUIRE(computeOk);
+  REQUIRE(computeOk->kind == ResponseKind::Single);
+  std::string_view svCompute(computeOk->body.data(), computeOk->bodySize);
+  REQUIRE(svCompute.find("\"a\"") != std::string_view::npos);
+  REQUIRE(svCompute.find("\"b\"") != std::string_view::npos);
+
+  // Reset clears everything
+  auto resetRsp2 = sensors::handleAdcCalReset(mockAdcCalWrite);
+  REQUIRE(resetRsp2);
+  REQUIRE(resetRsp2->kind == ResponseKind::Single);
+  REQUIRE(std::string_view(resetRsp2->body.data(), resetRsp2->bodySize).find("\"status\":\"ok\"") != std::string_view::npos);
+
+  // After reset, measure should start at point 0
+  s_mockSampleVal = 1600;
+  auto rspAfterReset = sensors::handleAdcCalMeasure(std::nullopt, mockSampleRead, mockAdcCalWrite);
+  REQUIRE(rspAfterReset);
+  REQUIRE(std::string_view(rspAfterReset->body.data(), rspAfterReset->bodySize).find("\"point\":0") != std::string_view::npos);
+}
+
 TEST_CASE("handler: temperature.read formats celsius", "[handlers][sensors]") {
   auto rsp = sensors::handleReadTemperature(2530); // 25.30C
   REQUIRE(rsp);

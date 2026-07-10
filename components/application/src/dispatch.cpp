@@ -12,14 +12,16 @@
 
 namespace ecotiter::application {
 
-// Stub callbacks — wired at integration time (Step 6).
 namespace {
 auto readCal = infrastructure::storage::calibrationRead;
 auto writeCal = infrastructure::storage::calibrationWrite;
-void stubAdcCalRead(uint16_t&, int16_t&) {}
-std::expected<void, domain::ResourceError> stubAdcCalWrite(uint16_t, int16_t) {
-  return std::unexpected(domain::ResourceError::NvsOpenFailed);
+void stubAdcCalRead(uint16_t& a, int16_t& b) {
+  infrastructure::storage::adcCalibrationRead(a, b);
 }
+std::expected<void, domain::ResourceError> stubAdcCalWrite(uint16_t a, int16_t b) {
+  return infrastructure::storage::adcCalibrationWrite(a, b);
+}
+uint16_t stubSampleRead() { return 0; }
 } // anonymous namespace
 
 std::expected<CommandResponse, domain::AppError> dispatch(
@@ -100,6 +102,12 @@ std::expected<CommandResponse, domain::AppError> dispatch(
       return sensors::handleAdcCalGet(stubAdcCalRead);
     case CommandType::AdcCalSave:
       return sensors::handleAdcCalSave(std::nullopt, std::nullopt, stubAdcCalWrite);
+    case CommandType::AdcCalMeasure:
+      return sensors::handleAdcCalMeasure(cmd.refMv, stubSampleRead, stubAdcCalWrite);
+    case CommandType::AdcCalCompute:
+      return sensors::handleAdcCalCompute(stubAdcCalWrite);
+    case CommandType::AdcCalReset:
+      return sensors::handleAdcCalReset(stubAdcCalWrite);
     case CommandType::StallGuardGet:
       return sensors::handleStallGuardGet(0);
     case CommandType::StallGuardSetThreshold:

@@ -48,6 +48,10 @@ private:
 [[nodiscard]] domain::Result<domain::CalibrationData, domain::ResourceError> calibrationRead();
 [[nodiscard]] domain::Result<void, domain::ResourceError> calibrationWrite(const domain::CalibrationData& cal);
 
+// ADC calibration — persisted as a_x1000 (uint16_t) and b (int16_t)
+void adcCalibrationRead(uint16_t& aX1000, int16_t& b);
+[[nodiscard]] domain::Result<void, domain::ResourceError> adcCalibrationWrite(uint16_t aX1000, int16_t b);
+
 template <size_t N>
 [[nodiscard]] domain::Result<std::optional<std::string_view>, domain::ResourceError> wifiReadStr(
     const char* key, char (&buf)[N]) {

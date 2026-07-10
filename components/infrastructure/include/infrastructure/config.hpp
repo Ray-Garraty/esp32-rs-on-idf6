@@ -65,4 +65,9 @@ inline constexpr const char* NVS_KEY_CAL_MIN_FREQ = "min_freq";
 inline constexpr const char* NVS_KEY_CAL_MAX_FREQ = "max_freq";
 inline constexpr const char* NVS_KEY_CAL_DATE     = "cal_date";
 
+// ADC calibration NVS
+inline constexpr const char* NVS_NS_ADC_CAL       = "adc_cal";
+inline constexpr const char* NVS_KEY_ADC_A_X1000  = "a_x1000";
+inline constexpr const char* NVS_KEY_ADC_B        = "b";
+
 } // namespace ecotiter::config

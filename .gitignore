@@ -18,6 +18,7 @@ components_esp32.lock
 # C++ project build artifacts
 /build/
 /build-tests/
+/tests/build/
 /compile_commands.json
 /sdkconfig
 /sdkconfig.old

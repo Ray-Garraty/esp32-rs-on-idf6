@@ -11,6 +11,7 @@ namespace ecotiter::application::handlers::sensors {
 
 using AdcCalReadCb = void(*)(uint16_t& aX1000, int16_t& b);
 using AdcCalWriteCb = std::expected<void, domain::ResourceError>(*)(uint16_t aX1000, int16_t b);
+using AdcSampleReadCb = uint16_t(*)(void);
 
 [[nodiscard]] std::expected<CommandResponse, domain::AppError> handleReadTemperature(
     int32_t tempCX100);
@@ -18,6 +19,14 @@ using AdcCalWriteCb = std::expected<void, domain::ResourceError>(*)(uint16_t aX1
     AdcCalReadCb read);
 [[nodiscard]] std::expected<CommandResponse, domain::AppError> handleAdcCalSave(
     std::optional<uint16_t> aX1000, std::optional<int16_t> b,
+    AdcCalWriteCb write);
+[[nodiscard]] std::expected<CommandResponse, domain::AppError> handleAdcCalMeasure(
+    std::optional<float> refMv,
+    AdcSampleReadCb readSample,
+    AdcCalWriteCb write);
+[[nodiscard]] std::expected<CommandResponse, domain::AppError> handleAdcCalCompute(
+    AdcCalWriteCb write);
+[[nodiscard]] std::expected<CommandResponse, domain::AppError> handleAdcCalReset(
     AdcCalWriteCb write);
 [[nodiscard]] std::expected<CommandResponse, domain::AppError> handleStallGuardGet(
     uint8_t threshold);

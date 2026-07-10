@@ -39,9 +39,12 @@ constexpr CmdName kCmdNames[] = {
   {"cal.reset",         CommandType::CalReset},
   {"cal.run",           CommandType::CalRun},
   {"cal.getResult",     CommandType::CalGetResult},
-  {"temperature.read",  CommandType::TempRead},
-  {"adc.cal.get",       CommandType::AdcCalGet},
-  {"adc.cal.save",      CommandType::AdcCalSave},
+  {"temperature.read",    CommandType::TempRead},
+  {"adc.cal.get",         CommandType::AdcCalGet},
+  {"adc.cal.save",        CommandType::AdcCalSave},
+  {"adc.cal.measure",     CommandType::AdcCalMeasure},
+  {"adc.cal.compute",     CommandType::AdcCalCompute},
+  {"adc.cal.reset",       CommandType::AdcCalReset},
   {"stallGuard.get",    CommandType::StallGuardGet},
   {"stallGuard.setThreshold", CommandType::StallGuardSetThreshold},
   {"valve.setPosition", CommandType::ValveSetPosition},
@@ -168,6 +171,12 @@ std::expected<Command, domain::ProtocolError> parseCommand(
     auto it = j.find("freq_hz");
     if (it != j.end() && it->is_number()) {
       cmd.freqHz = static_cast<float>(it->get<double>());
+    }
+  }
+  {
+    auto it = j.find("ref_mv");
+    if (it != j.end() && it->is_number()) {
+      cmd.refMv = static_cast<float>(it->get<double>());
     }
   }
 

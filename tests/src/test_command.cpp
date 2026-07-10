@@ -119,6 +119,32 @@ TEST_CASE("parseCommand: adc.cal.save", "[command]") {
   REQUIRE(cmd->type == CommandType::AdcCalSave);
 }
 
+TEST_CASE("parseCommand: adc.cal.measure", "[command]") {
+  auto cmd = parseCommand(R"({"cmd":"adc.cal.measure"})");
+  REQUIRE(cmd);
+  REQUIRE(cmd->type == CommandType::AdcCalMeasure);
+}
+
+TEST_CASE("parseCommand: adc.cal.measure with ref_mv", "[command]") {
+  auto cmd = parseCommand(R"({"cmd":"adc.cal.measure","ref_mv":1500})");
+  REQUIRE(cmd);
+  REQUIRE(cmd->type == CommandType::AdcCalMeasure);
+  REQUIRE(cmd->refMv.has_value());
+  REQUIRE(*cmd->refMv == 1500.0f);
+}
+
+TEST_CASE("parseCommand: adc.cal.compute", "[command]") {
+  auto cmd = parseCommand(R"({"cmd":"adc.cal.compute"})");
+  REQUIRE(cmd);
+  REQUIRE(cmd->type == CommandType::AdcCalCompute);
+}
+
+TEST_CASE("parseCommand: adc.cal.reset", "[command]") {
+  auto cmd = parseCommand(R"({"cmd":"adc.cal.reset"})");
+  REQUIRE(cmd);
+  REQUIRE(cmd->type == CommandType::AdcCalReset);
+}
+
 TEST_CASE("parseCommand: stallGuard.get", "[command]") {
   auto cmd = parseCommand(R"({"cmd":"stallGuard.get"})");
   REQUIRE(cmd);

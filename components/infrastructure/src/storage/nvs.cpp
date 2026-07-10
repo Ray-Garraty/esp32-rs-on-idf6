@@ -1,5 +1,6 @@
 #include "infrastructure/storage/nvs.hpp"
 #include "infrastructure/config.hpp"
+#include "infrastructure/drivers/adc.hpp"
 #include "domain/calibration.hpp"
 #include "esp_log.h"
 
@@ -218,6 +219,43 @@ domain::Result<void, domain::ResourceError> calibrationWrite(const domain::Calib
     if (!r5) return std::unexpected(r5.error());
     auto r6 = nvs.setI32(config::NVS_KEY_CAL_DATE, 0);
     if (!r6) return std::unexpected(r6.error());
+    return {};
+}
+
+void adcCalibrationRead(uint16_t& aX1000, int16_t& b) {
+    auto nvs = NvsHandle(config::NVS_NS_ADC_CAL, false);
+    if (!nvs.isValid()) {
+        aX1000 = config::ADC_DEFAULT_A_X1000;
+        b = config::ADC_DEFAULT_B;
+        return;
+    }
+    {
+        auto r = nvs.getU32(config::NVS_KEY_ADC_A_X1000);
+        aX1000 = (r && r->has_value())
+            ? static_cast<uint16_t>(r->value() & 0xFFFF)
+            : config::ADC_DEFAULT_A_X1000;
+    }
+    {
+        auto r = nvs.getI32(config::NVS_KEY_ADC_B);
+        b = (r && r->has_value())
+            ? static_cast<int16_t>(r->value())
+            : config::ADC_DEFAULT_B;
+    }
+}
+
+domain::Result<void, domain::ResourceError> adcCalibrationWrite(uint16_t aX1000, int16_t b) {
+    auto nvs = NvsHandle(config::NVS_NS_ADC_CAL, true);
+    if (!nvs.isValid()) return std::unexpected(domain::ResourceError::NvsOpenFailed);
+
+    auto r1 = nvs.setU32(config::NVS_KEY_ADC_A_X1000, static_cast<uint32_t>(aX1000));
+    if (!r1) return std::unexpected(r1.error());
+    auto r2 = nvs.setI32(config::NVS_KEY_ADC_B, static_cast<int32_t>(b));
+    if (!r2) return std::unexpected(r2.error());
+
+    // Update runtime globals
+    drivers::gCoeffAX1000.store(aX1000, std::memory_order_relaxed);
+    drivers::gCoeffB.store(b, std::memory_order_relaxed);
+
     return {};
 }
 

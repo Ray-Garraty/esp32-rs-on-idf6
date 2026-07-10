@@ -43,6 +43,9 @@ enum class CommandType : uint8_t {
   TempRead,
   AdcCalGet,
   AdcCalSave,
+  AdcCalMeasure,
+  AdcCalCompute,
+  AdcCalReset,
   StallGuardGet,
   StallGuardSetThreshold,
   // Valve
@@ -82,6 +85,8 @@ struct Command {
   std::optional<float> massG;
   std::optional<float> temperature;
   std::optional<float> pressure;
+  // For adc.cal.measure
+  std::optional<float> refMv;
 
   // For cal.calcSpeed
   static constexpr size_t MAX_MEASUREMENTS = 16;
