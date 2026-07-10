@@ -30,6 +30,9 @@ struct AdcCalibration {
 struct CalibrationData {
     float stepsPerMl;
     float nominalVolumeMl;
+
+    static constexpr inline float kDefaultStepsPerMl = 7730.0f;
+    static constexpr inline float kDefaultNominalVolumeMl = 8.14f;
 };
 
 [[nodiscard]] inline Steps mlToSteps(Ml volume, const CalibrationData& cal) noexcept {

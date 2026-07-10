@@ -37,7 +37,7 @@ TEST_CASE("serializeBroadcast: builds valid JSON with all fields", "[broadcast]"
     REQUIRE(j["vlv"] == "in");
     REQUIRE(j["brt"]["sts"] == "idle");
     REQUIRE(j["brt"]["vl"] == Catch::Approx(50.0));
-    REQUIRE(j["brt"]["spd"] == Catch::Approx(20.0));
+    REQUIRE(j["brt"]["spd"] == Catch::Approx(7.8));
     REQUIRE(j["dir"] == "cw");
     REQUIRE(j["spd"] == 1000);
     REQUIRE(j["acc"] == 500);

@@ -3,11 +3,11 @@
 #include <cstdio>
 #include <cstring>
 
+#include "domain/calibration.hpp"
+
 namespace ecotiter::interface {
 
 namespace {
-
-constexpr float kDefaultStepsPerMl = 3000.0f;
 
 const char* valveStr(domain::ValvePosition v) {
     return (v == domain::ValvePosition::Input) ? "in" : "out";
@@ -57,7 +57,7 @@ std::string_view serializeBroadcast(
     }
 
     double spdMlMin = static_cast<double>(evt.speed) * 60.0
-        / static_cast<double>(kDefaultStepsPerMl);
+        / static_cast<double>(domain::CalibrationData::kDefaultStepsPerMl);
 
     int n = std::snprintf(buf.data(), buf.size(),
         R"({"t":%lu,"temp":%s,"mv":%u,"vlv":"%s",)"

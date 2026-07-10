@@ -96,7 +96,10 @@ std::expected<CommandResponse, domain::AppError> handleCalcSpeed(
 std::expected<CommandResponse, domain::AppError> handleSaveCalibration(
     std::optional<float> stepsPerMl, std::optional<float> nomVolume,
     WriteCalCb writeCal) {
-  domain::CalibrationData cal{1000.0f, 50.0f}; // defaults
+  domain::CalibrationData cal{
+      domain::CalibrationData::kDefaultStepsPerMl,
+      domain::CalibrationData::kDefaultNominalVolumeMl
+  };
   if (stepsPerMl) cal.stepsPerMl = *stepsPerMl;
   if (nomVolume) cal.nominalVolumeMl = *nomVolume;
   auto result = writeCal(cal);
@@ -111,7 +114,10 @@ std::expected<CommandResponse, domain::AppError> handleSaveCalibration(
 
 std::expected<CommandResponse, domain::AppError> handleResetCalibration(
     WriteCalCb writeCal) {
-  domain::CalibrationData defaults{1000.0f, 50.0f};
+  domain::CalibrationData defaults{
+      domain::CalibrationData::kDefaultStepsPerMl,
+      domain::CalibrationData::kDefaultNominalVolumeMl
+  };
   auto result = writeCal(defaults);
   if (!result) {
     return makeErrorResponse("failed to reset calibration");

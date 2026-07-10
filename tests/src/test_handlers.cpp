@@ -214,8 +214,8 @@ TEST_CASE("handler: cal.reset restores defaults", "[handlers][cal]") {
   REQUIRE(rsp);
   REQUIRE(rsp->kind == ResponseKind::Single);
   REQUIRE(gCalResetCalled);
-  REQUIRE(approx(gResetCal.stepsPerMl, 1000.0f));
-  REQUIRE(approx(gResetCal.nominalVolumeMl, 50.0f));
+  REQUIRE(approx(gResetCal.stepsPerMl, 7730.0f));
+  REQUIRE(approx(gResetCal.nominalVolumeMl, 8.14f));
 }
 
 TEST_CASE("handler: cal.run returns AckThen", "[handlers][cal]") {

@@ -97,8 +97,11 @@ def monitor_port(port, timeout=30, log_dir=DEFAULT_LOG_DIR, no_reset=False, no_l
             ser.dtr = False
             ser.rts = False
             time.sleep(1.0)
-            # Note: no reset_input_buffer — we want to capture BOOT_OK_MARKER
-            # from early app_main. Garbage lines are filtered below.
+
+        # Flush ROM bootloader binary garbage before reading.
+        # BOOT_OK_MARKER arrives from app_main() hundreds of ms later.
+        time.sleep(0.3)
+        ser.reset_input_buffer()
 
         if log_file:
             writeline(f"=== Logging to {log_file} ===")
