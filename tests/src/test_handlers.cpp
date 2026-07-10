@@ -230,6 +230,87 @@ TEST_CASE("handler: cal.run returns AckThen", "[handlers][cal]") {
   REQUIRE(rsp->kind == ResponseKind::AckThen);
 }
 
+static auto stubCalRead = []() -> std::expected<CalibrationData, ResourceError> {
+  CalibrationData c{};
+  c.stepsPerMl = 7730.0f;
+  c.nominalVolumeMl = 8.14f;
+  c.speedCoeff = 0.03052f;
+  c.minFreqHz = 30;
+  c.maxFreqHz = 3000;
+  return c;
+};
+
+TEST_CASE("handler: cal.calcVolume with valid mass returns z_factor", "[handlers][cal]") {
+  auto rsp = burette_cal::handleCalcVolume(
+      std::nullopt, 10.0f, std::nullopt, std::nullopt, stubCalRead);
+  REQUIRE(rsp);
+  REQUIRE(rsp->kind == ResponseKind::Single);
+  std::string_view sv(rsp->body.data(), rsp->bodySize);
+  REQUIRE(sv.find("cal.calcVolume") != std::string_view::npos);
+  REQUIRE(sv.find("z_factor") != std::string_view::npos);
+  REQUIRE(sv.find("actual_volume_ml") != std::string_view::npos);
+  REQUIRE(sv.find("new_steps_per_ml") != std::string_view::npos);
+  REQUIRE(sv.find("relative_error_pct") != std::string_view::npos);
+}
+
+TEST_CASE("handler: cal.calcVolume missing mass_g returns error", "[handlers][cal]") {
+  auto rsp = burette_cal::handleCalcVolume(
+      std::nullopt, std::nullopt, std::nullopt, std::nullopt, stubCalRead);
+  REQUIRE(rsp);
+  REQUIRE(rsp->kind == ResponseKind::Error);
+  std::string_view sv(rsp->body.data(), rsp->bodySize);
+  REQUIRE(sv.find("mass_g") != std::string_view::npos);
+}
+
+TEST_CASE("handler: cal.calcVolume mass_g <= 0 returns error", "[handlers][cal]") {
+  auto rsp = burette_cal::handleCalcVolume(
+      std::nullopt, 0.0f, std::nullopt, std::nullopt, stubCalRead);
+  REQUIRE(rsp);
+  REQUIRE(rsp->kind == ResponseKind::Error);
+}
+
+TEST_CASE("handler: cal.calcVolume with custom temp/pressure", "[handlers][cal]") {
+  auto rsp = burette_cal::handleCalcVolume(
+      std::nullopt, 10.0f, 20.0f, 80.0f, stubCalRead);
+  REQUIRE(rsp);
+  REQUIRE(rsp->kind == ResponseKind::Single);
+  std::string_view sv(rsp->body.data(), rsp->bodySize);
+  REQUIRE(sv.find("z_factor") != std::string_view::npos);
+}
+
+TEST_CASE("handler: cal.calcSpeed valid measurements returns k", "[handlers][cal]") {
+  float freqs[] = {100.0f, 500.0f, 1000.0f};
+  float speeds[] = {3.052f, 15.26f, 30.52f};
+  auto rsp = burette_cal::handleCalcSpeed(freqs, speeds, 3, stubCalRead);
+  REQUIRE(rsp);
+  REQUIRE(rsp->kind == ResponseKind::Single);
+  std::string_view sv(rsp->body.data(), rsp->bodySize);
+  REQUIRE(sv.find("cal.calcSpeed") != std::string_view::npos);
+  REQUIRE(sv.find("k") != std::string_view::npos);
+  REQUIRE(sv.find("r_squared") != std::string_view::npos);
+  REQUIRE(sv.find("min_freq") != std::string_view::npos);
+  REQUIRE(sv.find("max_freq") != std::string_view::npos);
+}
+
+TEST_CASE("handler: cal.calcSpeed less than 2 points returns error", "[handlers][cal]") {
+  float freqs[] = {100.0f};
+  float speeds[] = {3.052f};
+  auto rsp = burette_cal::handleCalcSpeed(freqs, speeds, 1, stubCalRead);
+  REQUIRE(rsp);
+  REQUIRE(rsp->kind == ResponseKind::Error);
+}
+
+TEST_CASE("handler: cal.calcSpeed with 2 points returns valid result", "[handlers][cal]") {
+  float freqs[] = {100.0f, 200.0f};
+  float speeds[] = {3.0f, 6.0f};
+  auto rsp = burette_cal::handleCalcSpeed(freqs, speeds, 2, stubCalRead);
+  REQUIRE(rsp);
+  REQUIRE(rsp->kind == ResponseKind::Single);
+  std::string_view sv(rsp->body.data(), rsp->bodySize);
+  REQUIRE(sv.find("\"k\"") != std::string_view::npos);
+  REQUIRE(sv.find("\"r_squared\"") != std::string_view::npos);
+}
+
 // --- sensors ---
 
 TEST_CASE("handler: temperature.read formats celsius", "[handlers][sensors]") {

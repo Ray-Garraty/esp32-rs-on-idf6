@@ -7,6 +7,8 @@
 #include "application/command.hpp"
 #include "domain/calibration.hpp"
 #include "domain/memory.hpp"
+#include "domain/ols.hpp"
+#include "domain/z_factor.hpp"
 #include "infrastructure/motor_task.hpp"
 
 namespace ecotiter::application::handlers::burette_cal {
@@ -37,6 +39,16 @@ CommandResponse makeCalResponse(const char* cmdName,
   return rsp;
 }
 
+static domain::CalibrationData gPendingCal = []() {
+  domain::CalibrationData c{};
+  c.stepsPerMl = domain::CalibrationData::kDefaultStepsPerMl;
+  c.nominalVolumeMl = domain::CalibrationData::kDefaultNominalVolumeMl;
+  c.speedCoeff = domain::CalibrationData::kDefaultSpeedCoeff;
+  c.minFreqHz = domain::CalibrationData::kDefaultMinFreqHz;
+  c.maxFreqHz = domain::CalibrationData::kDefaultMaxFreqHz;
+  return c;
+}();
+
 } // anonymous namespace
 
 std::expected<CommandResponse, domain::AppError> handleGetCalibration(
@@ -61,53 +73,70 @@ std::expected<CommandResponse, domain::AppError> handleGetCalibration(
 }
 
 std::expected<CommandResponse, domain::AppError> handleCalcVolume(
-    std::optional<domain::Steps> steps, ReadCalCb readCal) {
-  if (!steps) {
-    return makeErrorResponse("cal.calcVolume requires 'steps' param");
+    std::optional<domain::Steps> steps,
+    std::optional<float> massG,
+    std::optional<float> temperature,
+    std::optional<float> pressure,
+    ReadCalCb readCal) {
+  (void)steps;
+  if (!massG || *massG <= 0.0f) {
+    return makeErrorResponse("cal.calcVolume requires 'mass_g' > 0");
   }
   auto cal = readCal();
   if (!cal) {
     return makeErrorResponse("calibration not available");
   }
-  auto vol = domain::stepsToMl(*steps, *cal);
+  float temp = temperature.value_or(25.0f);
+  float press = pressure.value_or(101.3f);
+  float z = domain::getZFactor(temp, press);
+  float actualVol = *massG * z;
+  float newSpm = domain::calculateNewStepsPerMl(
+      cal->stepsPerMl, cal->nominalVolumeMl, actualVol);
+  float relError = (actualVol - cal->nominalVolumeMl) /
+      cal->nominalVolumeMl * 100.0f;
+
+  gPendingCal.stepsPerMl = newSpm;
+  gPendingCal.nominalVolumeMl = actualVol;
+
   return makeCalResponse("cal.calcVolume",
-                         R"(,"steps":%ld,"volume":%.1f)",
-                         static_cast<long>(steps->value),
-                         static_cast<double>(vol.value));
+      R"(,"z_factor":%.6f,"actual_volume_ml":%.4f,)"
+      R"("new_steps_per_ml":%.1f,"relative_error_pct":%.2f)",
+      static_cast<double>(z), static_cast<double>(actualVol),
+      static_cast<double>(newSpm), static_cast<double>(relError));
 }
 
 std::expected<CommandResponse, domain::AppError> handleCalcSpeed(
-    std::optional<uint32_t> intervalUs, ReadCalCb readCal) {
-  if (!intervalUs || *intervalUs == 0) {
-    return makeErrorResponse("cal.calcSpeed requires 'intervalUs' param");
+    const float* frequencies, const float* speeds, size_t count,
+    ReadCalCb readCal) {
+  if (count < 2) {
+    return makeErrorResponse("cal.calcSpeed requires >= 2 measurements");
   }
   auto cal = readCal();
   if (!cal) {
     return makeErrorResponse("calibration not available");
   }
-  float stepsPerSec = cal->stepsPerMl * 1'000'000.0f /
-      static_cast<float>(*intervalUs);
+  auto result = domain::calculateSpeedCalibration(frequencies, speeds, count);
+
+  gPendingCal.speedCoeff = result.k;
+
   return makeCalResponse("cal.calcSpeed",
-                         R"(,"intervalUs":%lu,"stepsPerSec":%.1f)",
-                         static_cast<unsigned long>(*intervalUs),
-                         static_cast<double>(stepsPerSec));
+      R"(,"k":%.6f,"r_squared":%.4f,"min_freq":%u,"max_freq":%u)",
+      static_cast<double>(result.k),
+      static_cast<double>(result.rSquared),
+      cal->minFreqHz, cal->maxFreqHz);
 }
 
 std::expected<CommandResponse, domain::AppError> handleSaveCalibration(
     std::optional<float> stepsPerMl, std::optional<float> nomVolume,
     WriteCalCb writeCal) {
-  domain::CalibrationData cal{};
-  cal.stepsPerMl = domain::CalibrationData::kDefaultStepsPerMl;
-  cal.nominalVolumeMl = domain::CalibrationData::kDefaultNominalVolumeMl;
-  cal.speedCoeff = domain::CalibrationData::kDefaultSpeedCoeff;
-  cal.minFreqHz = domain::CalibrationData::kDefaultMinFreqHz;
-  cal.maxFreqHz = domain::CalibrationData::kDefaultMaxFreqHz;
+  domain::CalibrationData cal = gPendingCal;
   if (stepsPerMl) cal.stepsPerMl = *stepsPerMl;
   if (nomVolume) cal.nominalVolumeMl = *nomVolume;
   auto result = writeCal(cal);
   if (!result) {
     return makeErrorResponse("failed to save calibration");
   }
+  gPendingCal = cal;
   return makeCalResponse("cal.save",
                          R"(,"stepsPerMl":%.1f,"nominalVolume":%.1f)",
                          static_cast<double>(cal.stepsPerMl),

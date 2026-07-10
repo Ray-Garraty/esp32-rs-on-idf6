@@ -77,6 +77,19 @@ struct Command {
   std::optional<uint32_t> configSensorValue;
   std::optional<std::string> mode;
   std::optional<float> freqHz;
+
+  // For cal.calcVolume
+  std::optional<float> massG;
+  std::optional<float> temperature;
+  std::optional<float> pressure;
+
+  // For cal.calcSpeed
+  static constexpr size_t MAX_MEASUREMENTS = 16;
+  struct {
+    float freqs[MAX_MEASUREMENTS];
+    float speeds[MAX_MEASUREMENTS];
+    size_t count;
+  } measurements;
 };
 
 enum class ResponseKind : uint8_t {

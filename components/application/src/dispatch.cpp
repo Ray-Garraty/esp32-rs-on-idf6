@@ -72,9 +72,12 @@ std::expected<CommandResponse, domain::AppError> dispatch(
     case CommandType::CalGet:
       return burette_cal::handleGetCalibration(readCal);
     case CommandType::CalCalcVolume:
-      return burette_cal::handleCalcVolume(cmd.steps, readCal);
+      return burette_cal::handleCalcVolume(
+          cmd.steps, cmd.massG, cmd.temperature, cmd.pressure, readCal);
     case CommandType::CalCalcSpeed:
-      return burette_cal::handleCalcSpeed(cmd.speed, readCal);
+      return burette_cal::handleCalcSpeed(
+          cmd.measurements.freqs, cmd.measurements.speeds,
+          cmd.measurements.count, readCal);
     case CommandType::CalSave:
       return burette_cal::handleSaveCalibration(
           cmd.volume ? std::optional<float>{cmd.volume->value} : std::nullopt,

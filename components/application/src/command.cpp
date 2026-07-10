@@ -171,6 +171,46 @@ std::expected<Command, domain::ProtocolError> parseCommand(
     }
   }
 
+  {
+    auto it = j.find("mass_g");
+    if (it != j.end() && it->is_number()) {
+      cmd.massG = static_cast<float>(it->get<double>());
+    }
+  }
+  {
+    auto it = j.find("temp_c");
+    if (it != j.end() && it->is_number()) {
+      cmd.temperature = static_cast<float>(it->get<double>());
+    }
+  }
+  {
+    auto it = j.find("pressure_kpa");
+    if (it != j.end() && it->is_number()) {
+      cmd.pressure = static_cast<float>(it->get<double>());
+    }
+  }
+
+  {
+    auto it = j.find("measurements");
+    if (it != j.end() && it->is_array()) {
+      size_t count = 0;
+      for (const auto& m : *it) {
+        if (count >= Command::MAX_MEASUREMENTS) break;
+        if (m.is_object()) {
+          auto fIt = m.find("freq_hz");
+          auto sIt = m.find("speed_ml_min");
+          if (fIt != m.end() && fIt->is_number() &&
+              sIt != m.end() && sIt->is_number()) {
+            cmd.measurements.freqs[count] = static_cast<float>(fIt->get<double>());
+            cmd.measurements.speeds[count] = static_cast<float>(sIt->get<double>());
+            ++count;
+          }
+        }
+      }
+      cmd.measurements.count = count;
+    }
+  }
+
   return cmd;
 }
 

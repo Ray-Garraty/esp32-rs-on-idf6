@@ -78,45 +78,22 @@ ESP-IDF:
 | **BLE Zombie** | 2 levels | Full | 3 levels (improved) |
 | **Transport** | USB/BLE selection | Full | Partial |
 
-### 4. ISO 8655 Gravimetric Correction — Not Ported
+### 4. ISO 8655 Gravimetric Correction — ✅ DONE (Phase 4)
 
 <!-- grep: z-factor-table -->
 
-```cpp
-// Arduino: Full 31 × 6 bilinear interpolation table
-float get_z_factor(float temperature, float pressure);
+**Status:** Full 31×6 Z-factor table with bilinear interpolation in
+`domain/z_factor.hpp`. `handleCalcVolume` accepts `mass_g`, `temp_c`,
+`pressure_kpa` — applies Z-factor, computes new stepsPerMl, returns result.
 
-// Temperature: 15.0 °C → 30.0 °C, step 0.5 °C
-// Pressure:    80.0, 85.3, 90.7, 96.0, 101.3, 106.7 kPa
-
-// Gravimetric formula:
-float calculate_new_steps_per_ml(float current_s_p_ml,
-                                 float target_vol_ml,
-                                 float actual_vol_ml) {
-    return current_s_p_ml * target_vol_ml / actual_vol_ml;
-}
-
-// Actual volume from mass:
-actual_volume = mass_g * z_factor
-```
-
-**Status:** Struct definitions exist in `calibration.hpp`; Z-table data and
-interpolation function are absent.
-
-### 5. OLS Speed Regression — Not Ported
+### 5. OLS Speed Regression — ✅ DONE (Phase 4)
 
 <!-- grep: ols-regression -->
 
-```cpp
-// Arduino: OLS with intercept
-k = (Σ(f·v) - Σ(f)·Σ(v)/n) / (Σ(f²) - (Σ(f))²/n)
-
-SS_res = Σ(v_i - k·f_i)²
-SS_tot = Σ(v_i - mean_v)²
-R² = 1 - SS_res / SS_tot
-```
-
-**Status:** `cal.calcSpeed` handler returns hardcoded response. No OLS math.
+**Status:** Full OLS regression with intercept in `domain/ols.hpp`.
+`handleCalcSpeed` accepts `measurements[]` array, runs OLS, returns
+`{k, r_squared, min_freq, max_freq}`. `handleSaveCalibration` stores
+computed `k` as `speedCoeff` in NVS.
 
 ### 6. ADC Calibration — Partial
 
@@ -211,6 +188,24 @@ Arduino: 300 ms  →  ESP-IDF: ~2000 ms
 
 The 2-second latency will cause BLE/HTTP clients to see stale state,
 especially during fast dosing operations.
+
+### 12. Broadcast JSON Format — Mismatch with Spec
+
+<!-- grep: broadcast-format -->
+
+The ESP-IDF broadcast output does not match the legacy `SERIAL_API.md` spec:
+
+| Field | Legacy Spec | ESP-IDF (current) |
+|-------|-------------|-------------------|
+| `ts` (timestamp) | `"ts"` | `"t"` — wrong key |
+| Motor config `dir` | Not in broadcast | `"dir":"liq_in"` — extra field |
+| Motor config `spd` (Hz) | Not in broadcast | `"spd":1000` — extra field |
+| Motor config `acc` | Not in broadcast | `"acc":500` — extra field |
+| Motor config `vol` | Not in broadcast | `"vol":50.0` — duplicate of `brt.vl` |
+| Motor config `steps` | Not in broadcast | `"steps":12345` — extra field |
+
+**Fix:** Remove `dir`, `spd`, `acc`, `vol`, `steps` from broadcast JSON. Rename
+`"t"` → `"ts"`. Remove unused fields from `BroadcastEvent` struct.
 
 ---
 
@@ -352,18 +347,34 @@ All 4 state machines implemented and wired:
 
 **Smoke test:** ✅ BOOT OK — build, flash, 30s monitor, no panics.
 
-### Phase 4: ISO 8655 Z-Factor + OLS (MEDIUM priority)
+### Phase 4: ISO 8655 Z-Factor + OLS — ✅ COMPLETED (2026-07-10)
 
 <!-- grep: phase-4 -->
 
-1. Embed Z-factor table (31×6) as `constexpr float Z_TABLE[31][6]`
-2. Implement bilinear interpolation: `float getZFactor(float temp, float pressure)`
-3. Implement gravimetric formula in `handleCalCalcVolume`
-4. Implement OLS regression with intercept in `handleCalCalcSpeed`
-5. Return R² in response
+1. **Z-factor table** (`domain/include/domain/z_factor.hpp`, 85 lines)
+   - 31×6 table from ISO 8655 (15–30°C × 80–106.7 kPa)
+   - `getZFactor(temp, pressure)` — bilinear interpolation with clamping
+   - `calculateNewStepsPerMl(currentSpm, targetVol, actualVol)` — gravimetric formula
 
-**Tests:** Z-table: verify interpolation at table vertices and midpoints.
-OLS: verify against known dataset, check R² = 1 for perfect fit.
+2. **OLS regression** (`domain/include/domain/ols.hpp`, 52 lines)
+   - `SpeedCalResult` struct with `k` (slope) and `rSquared` (R²)
+   - `calculateSpeedCalibration(frequencies, speeds, count)` — OLS with intercept
+   - Validates ≥ 2 points, returns {0,0} if insufficient
+
+3. **Handler updates** (`burette_cal.cpp`):
+   - `handleCalcVolume` — accepts `mass_g`, `temp_c`, `pressure_kpa`, applies Z-factor
+   - `handleCalcSpeed` — accepts `measurements[]` array, runs OLS, returns k + R²
+   - `handleSaveCalibration` — reads from `gPendingCal` (intermediate storage from calcVolume/calcSpeed)
+   - `handleGetCalResult` — already wired from Phase 3
+
+4. **Command updates** (`command.hpp`, `command.cpp`):
+   - Added `massG`, `temperature`, `pressure` fields for cal.calcVolume
+   - Added `measurements` struct with `freqs[16]`/`speeds[16]`/`count` for cal.calcSpeed
+   - Parsing from JSON keys `mass_g`, `temp_c`, `pressure_kpa`, `measurements`
+
+**Tests:** 20 Z-factor/OLS tests in `test_cal_math.cpp`, 7 handler tests in `test_handlers.cpp`. Total: 29 new test cases, 71 new assertions.
+
+**Smoke test:** ✅ BOOT OK — build, flash, 30s monitor, no panics.
 
 ### Phase 5: ADC Calibration (MEDIUM priority)
 
@@ -403,9 +414,21 @@ OLS: verify against known dataset, check R² = 1 for perfect fit.
 
 **Tests:** Host-based HTTP request/response tests. Manual mDNS resolution test.
 
-### Phase 8: Diagnostics (LOW priority)
+### Phase 8: Broadcast Format Fix (LOW priority)
 
 <!-- grep: phase-8 -->
+
+1. Fix `"t"` → `"ts"` in broadcast JSON key
+2. Remove extra fields from broadcast: `dir`, `spd`, `acc`, `vol`, `steps`
+3. Remove unused `dir`, `accel`, `dispensedSteps` from `BroadcastEvent` struct
+4. Update `main.cpp` — stop populating removed fields
+5. Update tests to match new format
+
+**Tests:** Broadcast tests must pass with legacy-compatible format.
+
+### Phase 9: Diagnostics (LOW priority)
+
+<!-- grep: phase-9 -->
 
 1. Add pending watchdog (60 s timeout) in `ApplicationStateMachine::tick()`
 2. Add USB heartbeat timeout (10000 ms) for transport SM decision
@@ -491,7 +514,16 @@ OLS: verify against known dataset, check R² = 1 for perfect fit.
 | `components/infrastructure/src/network/wifi.cpp` | AP password |
 | `components/infrastructure/src/network/main.cpp` | mDNS init |
 
-### Phase 8 — Diagnostics
+### Phase 8 — Broadcast Format Fix
+
+| File | Change |
+|------|--------|
+| `components/interface/include/interface/broadcast.hpp` | Remove `dir`, `accel`, `dispensedSteps` |
+| `components/interface/src/broadcast.cpp` | Fix `t`→`ts`, remove extra fields |
+| `main/main.cpp` | Stop populating removed fields |
+| `tests/src/test_broadcast.cpp` | Match new format |
+
+### Phase 9 — Diagnostics
 
 | File | Change |
 |------|--------|
@@ -529,6 +561,7 @@ Before Phase 2-4 codegen, the following headers in
 | 5 | 150 lines | — | Medium — ADC timing |
 | 6 | 200 lines | — | Medium — UART on PSRAM |
 | 7 | 50 lines | — | Low — routes + mDNS |
-| 8 | 80 lines | — | Low — timeouts |
+| 8 | 30 lines | — | Low — broadcast format |
+| 9 | 80 lines | — | Low — timeouts |
 
-**Total:** ~1430 lines added, ~540 lines changed.
+**Total:** ~1460 lines added, ~560 lines changed.

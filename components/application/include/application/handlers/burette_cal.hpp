@@ -18,9 +18,14 @@ using WriteCalCb = std::expected<void, domain::ResourceError>(*)(const domain::C
 [[nodiscard]] std::expected<CommandResponse, domain::AppError> handleGetCalibration(
     ReadCalCb readCal);
 [[nodiscard]] std::expected<CommandResponse, domain::AppError> handleCalcVolume(
-    std::optional<domain::Steps> steps, ReadCalCb readCal);
+    std::optional<domain::Steps> steps,
+    std::optional<float> massG,
+    std::optional<float> temperature,
+    std::optional<float> pressure,
+    ReadCalCb readCal);
 [[nodiscard]] std::expected<CommandResponse, domain::AppError> handleCalcSpeed(
-    std::optional<uint32_t> intervalUs, ReadCalCb readCal);
+    const float* frequencies, const float* speeds, size_t count,
+    ReadCalCb readCal);
 [[nodiscard]] std::expected<CommandResponse, domain::AppError> handleSaveCalibration(
     std::optional<float> stepsPerMl, std::optional<float> nomVolume,
     WriteCalCb writeCal);
