@@ -3,7 +3,7 @@ type: Architecture Reference
 title: Coding Style Guide
 description: Coding conventions, error hierarchy, state machine patterns, memory budget, and concurrency rules for ecotiter C++23 firmware
 tags: [coding-style, conventions, architecture, c++23]
-timestamp: 2026-07-07
+timestamp: 2026-07-10
 ---
 
 # Coding Style Guide (C++23 / ESP-IDF v6)
@@ -23,7 +23,7 @@ Three-level typed errors with `std::expected`:
 
 ```cpp
 // domain/errors.hpp
-enum class StepperError { InitFailed, Rmt, LimitSwitchTriggered, Timeout };
+enum class StepperError { InitFailed, Rmt, LimitSwitchTriggered, LimitSwitchReached, Timeout };
 enum class SensorError { AdcReadFailed, TempSensorNotDetected, TempReadGlitch };
 enum class NetworkError { WifiConnectionFailed };
 
@@ -36,7 +36,8 @@ enum class AppError { Hardware, Protocol, State, Resource };
 ```
 
 ```cpp
-// Domain-layered error type with std::expected
+// Flat error type hierarchy with std::expected
+// Each domain enum is used directly as the error type — not nested
 using Result = std::expected<T, E>;  // alias in domain/errors.hpp
 
 [[nodiscard]] Result<void, StepperError> moveSteps(Steps steps, Hz speed);
@@ -49,6 +50,7 @@ using Result = std::expected<T, E>;  // alias in domain/errors.hpp
 |-------|-------------|--------|
 | `NetworkError` | Yes | Retry after STA_RECONNECT_INTERVAL |
 | `StepperError::Rmt` | Yes | Retry chunk transmission |
+| `StepperError::LimitSwitchReached` | Yes | Stop motor, log event, return to Idle |
 | `StepperError::Timeout` | No | Enter error state, require manual reset |
 | `StateError` | No | Fix caller logic |
 | `ProtocolError` | No | Log and ignore malformed command |
@@ -244,12 +246,22 @@ ESP_LOGE(TAG, "Limit switch triggered, emergency stop");
 ## 9. ESP32-S3 Special Rules
 
 ### 9.1 WDT
-Must be disabled at boot -- `rmt_tx_wait_all_done()` blocks > 250 ms.
+
+Three watchdog timers are active with specific roles. TWDT remains enabled (10 s timeout) — RMT block time (~250 ms per chunk) is within budget.
+
+**TWDT (Task WDT):** Enabled via `CONFIG_ESP_TASK_WDT_INIT=y`, 10 s timeout. Motor task feeds TWDT between RMT chunks. Not disabled.
+
+**IWDT (Interrupt WDT):** Enabled via `CONFIG_ESP_INT_WDT=y`, 500 ms timeout.
+
+**RWDT (RTC WDT):** Configured at boot via `RtcWatchdog` RAII class (6 s timeout). Provides hardware-level reset on complete freeze.
 
 ```cpp
-// Use safe wrapper only
-esp_safe::disableWdt();  // calls esp_task_wdt_deinit() once at boot
+// RWDT configuration — use RtcWatchdog RAII class
+#include "diag/rtc_watchdog.hpp"
+auto rtc_watchdog = RtcWatchdog::create(std::chrono::seconds(6));
 ```
+
+Never call `esp_task_wdt_deinit()` directly — TWDT is NOT fully disabled.
 
 ### 9.2 RMT Stepper
 - `rmt_new_tx_channel()` wrapped in `RmtChannel` RAII class
@@ -389,9 +401,9 @@ stepper.moveSteps(STEPS_HOMING, Hz{HOMING_SPEED_HZ});
 - [ ] Every `// CONTRACT:` comment present on low-level operations
 
 ### Testing
-- [ ] `ctest --output-on-failure` passes
-- [ ] `clang-tidy -p build/` -- 0 warnings
-- [ ] `idf.py build` -- 0 errors, 0 warnings
+- [ ] `scripts/build.sh test` — all pass
+- [ ] `scripts/build.sh tidy` — 0 warnings
+- [ ] `scripts/build.sh build` — 0 errors, 0 warnings
 
 ## Summary
 
@@ -401,7 +413,7 @@ stepper.moveSteps(STEPS_HOMING, Hz{HOMING_SPEED_HZ});
 | **Error Handling** | Typed enums + `std::expected`. No ignored errors. |
 | **Memory** | Fixed-size `std::array` for hot paths. `std::vector` only at init/config-change. |
 | **State Machine** | Explicit enum + exhaustive switch. Pipeline: Safety -> Busy -> State -> Params -> Execute. |
-| **Concurrency** | `std::atomic` for ISR->task. FreeRTOS queues for task->task. **Never block main loop.** `try_lock()`. |
+| **Concurrency** | `std::atomic` for ISR→task. FreeRTOS queues for task→task. **Never block main loop.** `try_lock()` only. Correct `std::memory_order` semantics (Release/Acquire/AcqRel). |
 | **Types** | Strong-typed wrappers for domain units (`Steps`, `Hz`, `Ml`). Named constants -- no magic numbers. |
 | **Testing** | Host units (Catch2) + on-device integration + pytest HIL. |
 | **Anti-patterns** | No global state, no blocking in main loop, no ignored errors, no magic numbers. |

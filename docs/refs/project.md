@@ -3,7 +3,7 @@ type: Architecture Reference
 title: Project Specification
 description: Hardware pinout, architecture, protocol, state machines, NVS layout, thread model, and error hierarchy for ecotiter C++23 firmware
 tags: [architecture, specification, hardware, c++23]
-timestamp: 2026-07-07
+timestamp: 2026-07-10
 ---
 
 # Project Specification (C++23)
@@ -51,7 +51,7 @@ timestamp: 2026-07-07
 
 | Signal | Pin | Behaviour |
 |--------|-----|-----------|
-| Status LED | GPIO2 | OFF (USB active), breathing (BLE connected), steady light (advertising) |
+| Status LED | GPIO48 (RGB WS2812) | RGB patterns via RMT TX channel — OFF (USB active), breathing (BLE connected), steady light (advertising) |
 
 ### Communication
 
@@ -75,7 +75,7 @@ timestamp: 2026-07-07
 | Limit EMPTY | 15 | GPIO ISR, pos-edge | Syringe top; moved from GPIO35 (LL-027: PSRAM D6) |
 | pH electrode | 4 | ADC1_CH3 (oneshot) | 0-2900 mV range (S3) |
 | DS18B20 | 6 | OneWire bitbang | 4.7k pull-up; moved from GPIO33 (LL-027: PSRAM D4) |
-| Status LED | 2 | gpio_set_level | Active HIGH |
+| Status LED | 48 | RMT TX (WS2812 protocol) | RGB WS2812 via RMT — NOT gpio_set_level |
 
 ## Stepper Motor Control
 
@@ -136,12 +136,12 @@ Motor thread reads `cmd_queue`, writes atomics. Main loop polls atomics, publish
 ### Thread Architecture
 
 ```
-MOTOR THREAD (prio 20, 16 KB):
-  std::thread. Owns RmtChannel exclusively.
+MOTOR TASK (prio 1, 16 KB):
+  FreeRTOS task (xTaskCreate). Owns RmtChannel exclusively.
   loop { read atomic target -> rmt_tx_wait_all_done -> write atomic position }
   rmt_tx_wait_all_done() blocks only this task, NOT main loop
 
-MAIN LOOP (prio 10, 32 KB):
+MAIN LOOP (prio default/app_main, 32 KB):
   loop {
     cmd_queue.process()           -> set motor target atomics
     wifi_process()                -> DNS poll, reconnect logic
@@ -153,19 +153,22 @@ MAIN LOOP (prio 10, 32 KB):
     vTaskDelayUntil(10ms)         -> pacing tick
   }
 
-NET_OWNER THREAD (prio 15, 16 KB):
-  std::thread. Owns init order: WiFi → HTTP → BLE.
-  init: wifi.init() → wait_for_ip() → HttpServer::create() → ble.init()
+NET_OWNER TASK (prio 1, 16 KB):
+  FreeRTOS task (xTaskCreate). Owns init order: WiFi → HTTP → BLE.
+  init: wifi.init() → startAP() → tryStartSTA() → HttpServer::create() → ble.init() → ensureGpioReady()
   loop { wifi_process(); http_events(); ble_process(); vTaskDelay(10ms) }
+  Also spawns BLE notify thread (std::thread, 8 KB) as a child.
 
-TEMPERATURE THREAD (prio 15, 16 KB):
+TEMPERATURE TASK (prio 1, 16 KB):
+  FreeRTOS task (xTaskCreate).
   loop {
     OneWire bitbang sequence
     store result in std::atomic<int32_t>
     vTaskDelay(1000ms)
   }
 
-BLE NOTIFY THREAD (prio 15, 8 KB):
+BLE NOTIFY THREAD (spawned by net_owner, 8 KB):
+  std::thread, detached.
   loop { xQueueReceive -> ble_gatts_notify }
 
 HTTP SERVER (FreeRTOS internal, 12 KB):
@@ -195,10 +198,14 @@ Neither alive?    -> fallback to USB, start BLE advertising
 
 Three-way DRAM conflict — init order MUST be: **WiFi → HTTP → BLE**.
 
-1. WiFi driver init (low DRAM cost, ~3.5 KB)
-2. Wait for IP (`wait_for_ip()`)
-3. HTTP server bind to 0.0.0.0:80
-4. BLE NimBLE host init (needs 12 KB contiguous MALLOC_CAP_INTERNAL)
+1. WiFi driver init (~3.5 KB DRAM)
+2. `wifi.startAP()` — AP mode on 192.168.4.1/24
+3. `wifi.tryStartSTA()` — async STA connect (non-blocking)
+4. HTTP server bind to 0.0.0.0:80 (12 KB contiguous MALLOC_CAP_INTERNAL)
+5. BLE NimBLE init (12 KB contiguous MALLOC_CAP_INTERNAL)
+6. `ensureGpioReady()` — wait for PHY calibration (LL-031)
+
+Note: `tryStartSTA()` is non-blocking — STA connects asynchronously. HTTP and BLE init do NOT wait for IP. After BLE init, `ensureGpioReady()` calls `esp_phy_deinit()` + `esp_phy_init()` to prevent PHY calibration spinlock deadlock (LL-031).
 
 Forbidden reorderings: HTTP→BLE→WiFi (7+ s latency), BLE→WiFi→HTTP (`ESP_ERR_HTTPD_TASK`), WiFi→BLE→HTTP (timer alloc fail).
 
@@ -209,14 +216,16 @@ Forbidden reorderings: HTTP→BLE→WiFi (7+ s latency), BLE→WiFi→HTTP (`ESP
 | GET | `/api/ping` | Health check `{"status":"ok"}` |
 | GET | `/api/status` | Device status (WiFi, temp, pH, burette) |
 | POST | `/api/command` | Generic command dispatch `{"cmd":"doseVolume","ml":5.0}` |
-| POST | `/api/valve/set` | Valve control `{"position":"input"}` |
-| GET | `/api/valve/state` | Current valve position |
-| GET | `/api/events` | WebSocket stream (status + log events) |
+| POST | `/api/valve` | Valve control `{"position":"input"}` |
+| GET | `/api/valve` | Current valve position |
+| GET | `/ws/stream` | WebSocket stream (status + log events) |
 | GET | `/api/logs` | Ring-buffer logs (JSON) |
+| GET | `/api/logs/download` | Log download (TXT) |
 | GET | `/wifi` | Captive portal setup page |
 | POST | `/wifi/connect` | WiFi credentials + connect |
 | GET | `/wifi/status` | WiFi connection status |
 | GET | `/` | WebUI dashboard (embedded) |
+| GET | `/style.css`, `/js/*.js` | WebUI static assets |
 
 Captive portal probe handlers (302 -> `/wifi`): `/generate_204`, `/hotspot-detect.html`, `/ncsi.txt`, `/connecttest.txt`.
 
@@ -262,22 +271,34 @@ Custom service UUID: based on NUS (Nordic UART Service) pattern.
 | `rinse` | `cycles` | Rinse burette |
 | `stop` | -- | Soft stop with stepper position tracking |
 | `emergencyStop` | -- | Immediate motor disable with stepper position reset |
-| `stepper.getCalibration` | -- | Get steps/ml + Z-factor |
-| `stepper.calcVolume` | `steps` | Convert steps to ml |
-| `stepper.calcSpeed` | `steps_per_sec` | Convert steps/s to ml/min |
-| `stepper.saveCalibration` | `steps_per_ml`, ... | Save to NVS |
-| `stepper.run` | `steps`, `speed_hz` | Raw stepper run (test) |
-| `sensor.temp` | -- | Read temperature |
-| `sensor.stallGuard` | -- | Get StallGuard value |
-| `sensor.setThreshold` | `value` | Set StallGuard threshold |
+| `moveSteps` | `steps`, `speed_hz`, `direction` | Raw stepper run (test) |
+| `setDirection` | `direction` | Set direction (CW/CCW) |
+| `setSpeed` | `speed_hz` | Set speed |
+| `setAccel` | `accel_steps` | Set acceleration steps |
+| `setVolume` | `ml` | Set target volume |
+| `configMove` | `steps`, `speed_hz`, `direction`, `accel` | Full move config |
+| `configHome` | `speed_hz`, `direction` | Homing config |
+| `configSensor` | `type`, `pin` | Sensor config |
+| `cal.get` | -- | Get calibration (steps/ml + Z-factor) |
+| `cal.calcVolume` | `steps` | Convert steps to ml |
+| `cal.calcSpeed` | `steps_per_sec` | Convert steps/s to ml/min |
+| `cal.save` | `steps_per_ml`, `nominal_vol`, `speed_coeff` | Save calibration to NVS |
+| `cal.reset` | -- | Reset calibration to defaults |
+| `cal.run` | `ml` | Run calibration cycle |
+| `cal.getResult` | -- | Get calibration result |
+| `temperature.read` | -- | Read temperature |
+| `stallGuard.get` | -- | Get StallGuard value |
+| `stallGuard.setThreshold` | `value` | Set StallGuard threshold |
 | `valve.setPosition` | `position` | `"input"` or `"output"` |
 | `valve.getState` | -- | Current valve position |
 | `system.getStatus` | -- | Full device status |
-| `system.readLog` | -- | Ring-buffer log |
-| `adc.getCalibration` | -- | Get ADC calibration coeffs |
-| `adc.measure` | -- | Live mV reading |
-| `adc.saveCalibration` | `a`, `b` | Save to NVS |
-| `ping` | -- | Health check |
+| `system.getFormattedLogs` | -- | Ring-buffer log (formatted) |
+| `system.reboot` | -- | Reboot device |
+| `system.firmwareVersion` | -- | Firmware version string |
+| `adc.cal.get` | -- | Get ADC calibration coeffs |
+| `adc.cal.save` | `a`, `b` | Save ADC calibration to NVS |
+| `serial.ping` | -- | Health check (USB-Serial only) |
+| `ping` | -- | Health check (all transports) |
 
 ## State Machine
 
@@ -326,46 +347,40 @@ NO_ACTIVE -> TRANSPORT_USB (fallback) + BLE advertising
 
 ### WDT & Brownout
 
-WDT must be disabled at boot — `rmt_tx_wait_all_done()` blocks > 250 ms.
+Three watchdog timers are active with specific roles:
+
+| Watchdog | State | Timeout | Role |
+|----------|-------|---------|------|
+| TWDT (Task WDT) | Enabled via `CONFIG_ESP_TASK_WDT_INIT=y` | 10 s (`CONFIG_ESP_TASK_WDT_TIMEOUT_S=10`) | Protects against task-level hangs; motor task feeds it between RMT chunks |
+| IWDT (Interrupt WDT) | Enabled via `CONFIG_ESP_INT_WDT=y` | 500 ms | Protects ISR handlers |
+| RWDT (RTC WDT) | Configured at boot via `RtcWatchdog` RAII class | 6 s (configured) | Hardware-level reset on complete freeze |
+
+TWDT is NOT fully disabled — RMT block time (> 250 ms) is within the 10 s budget. The `RtcWatchdog` class (in `components/diag/`) provides an RAII wrapper for RWDT configuration.
 
 ```cpp
-// Use safe wrapper only — never call esp_task_wdt_deinit() directly
-#include "esp_safe.hpp"
-esp_safe::disable_wdt();
+// RWDT configuration at boot — use RtcWatchdog RAII class
+#include "diag/rtc_watchdog.hpp"
+auto rtc_watchdog = RtcWatchdog::create(std::chrono::seconds(6));
 ```
 
-Brownout detector: Disabled via sdkconfig.defaults (`CONFIG_BROWNOUT_DET=n`), **NOT** via `WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0)` at runtime.
+Brownout detector: Should be disabled via sdkconfig.defaults (`CONFIG_BROWNOUT_DET=n` if set), **NOT** via `WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0)` at runtime. Note: `CONFIG_BROWNOUT_DET=n` is not yet in `sdkconfig.defaults` — needs to be added.
 
 ## Error Handling
 
-Three-level typed hierarchy with `std::expected`:
+Flat enum-based hierarchy with `std::expected<T, E>`:
 
-```
-AppError
- +-- Hardware(HardwareError)
- |    +-- StepperMotor(StepperError)
- |    |    +-- InitFailed
- |    |    +-- Rmt
- |    |    +-- LimitSwitchTriggered
- |    |    +-- Timeout
- |    +-- Sensor(SensorError)
- |    |    +-- AdcReadFailed
- |    |    +-- TempSensorNotDetected
- |    |    +-- TempReadGlitch
- |    +-- Network(NetworkError)
- |         +-- WifiConnectionFailed
- +-- Protocol(ProtocolError)
- |    +-- InvalidJson
- |    +-- UnknownCommand
- |    +-- MissingParam
- +-- State(StateError)
- |    +-- Busy
- |    +-- InvalidTransition
- |    +-- AlreadyRunning
- +-- Resource(ResourceError)
-      +-- NvsOpenFailed
-      +-- OutOfMemory
-```
+| Enum | Variants |
+|------|----------|
+| `StepperError` | `InitFailed`, `Rmt`, `LimitSwitchTriggered`, `LimitSwitchReached`, `Timeout` |
+| `SensorError` | `AdcReadFailed`, `TempSensorNotDetected`, `TempReadGlitch` |
+| `NetworkError` | `WifiConnectionFailed` |
+| `ProtocolError` | `InvalidJson`, `UnknownCommand`, `MissingParam` |
+| `StateError` | `Busy`, `InvalidTransition`, `AlreadyRunning` |
+| `ResourceError` | `NvsOpenFailed`, `OutOfMemory` |
+| `HardwareError` | Generic hardware wrapper (flat, no sub-enum nesting) |
+| `AppError` | Top-level variant over `Hardware`, `Protocol`, `State`, `Resource` |
+
+Note: The error model is **flat** — `StepperError`, `SensorError`, etc. are standalone enums used directly as `std::expected<void, StepperError>` return types. The documented nested hierarchy accurately represents the classification but the actual implementation uses flat enums.
 
 All errors: logged via ESP-IDF `esp_log` (ring buffer, 100 entries), reported in JSON responses, broadcast via WebSocket.
 
@@ -387,17 +402,21 @@ All errors: logged via ESP-IDF `esp_log` (ring buffer, 100 entries), reported in
 ecotiter/
 +-- CMakeLists.txt                 # Top-level ESP-IDF project, C++23
 +-- sdkconfig.defaults             # ESP-IDF Kconfig defaults
++-- partitions.csv                 # Partition table
 +-- AGENTS.md                      # AI-agent rules (not for humans)
 +-- docs/
 |   +-- refs/project.md            # This file
 |   +-- refs/coding_style.md       # Coding conventions
+|   +-- refs/unsafe_gpio_pins.md   # GPIO safety for Octal PSRAM
 |   +-- guides/testing.md          # 3-tier testing strategy
+|   +-- lessons_learned/           # Crash patterns (LL-001 through LL-042)
+|   +-- protocols/                 # Debug protocols
 |
 +-- scripts/
-|   +-- build.sh                   # Build wrapper
-|   +-- flash.sh                   # Flash wrapper
-|   +-- monitor.sh                 # Serial monitor
-|   +-- serial_monitor.py          # Python serial monitor
+|   +-- build.sh                   # Build wrapper (all subcommands)
+|   +-- smoke_test.py              # Automated smoke test
+|   +-- monitor.py                 # Python serial monitor
+|   +-- crash_analyzer.py          # Crash log analyzer
 |
 +-- main/
 |   +-- CMakeLists.txt             # Main component registration
@@ -408,7 +427,7 @@ ecotiter/
     +-- domain/                    # Pure business logic -- NO esp-idf headers
     |   +-- include/domain/
     |   |   +-- types.hpp          # Ml, Steps, Hz, MlMin, Direction
-    |   |   +-- errors.hpp         # AppError three-level hierarchy
+    |   |   +-- errors.hpp         # Error enums (flat hierarchy)
     |   |   +-- burette.hpp        # BuretteState enum
     |   |   +-- calibration.hpp    # Steps/ml math
     |   |   +-- memory.hpp         # Fixed-size buffer type aliases
@@ -419,20 +438,43 @@ ecotiter/
     |   +-- include/application/
     |   |   +-- command_dispatch.hpp
     |   |   +-- state_machine.hpp
+    |   |   +-- scheduler.hpp
+    |   |   +-- broadcast.hpp
+    |   |   +-- handlers/
+    |   |       +-- burette_ops.hpp
+    |   |       +-- burette_cal.hpp
+    |   |       +-- sensors.hpp
+    |   |       +-- serial.hpp
+    |   |       +-- system.hpp
+    |   |       +-- valve.hpp
     |   +-- src/
     |       +-- command_dispatch.cpp
+    |       +-- scheduler.cpp
+    |       +-- broadcast.cpp
+    |       +-- handlers/
+    |           +-- burette_ops.cpp
+    |           +-- burette_cal.cpp
+    |           +-- sensors.cpp
+    |           +-- serial.cpp
+    |           +-- system.cpp
+    |           +-- valve.cpp
     |
     +-- infrastructure/            # Hardware & platform -- imports esp-idf
     |   +-- include/infrastructure/
     |   |   +-- config.hpp         # GPIO pins, stack sizes, constants
+    |   |   +-- motor_task.hpp
+    |   |   +-- temp_thread.hpp
     |   |   +-- drivers/
-    |   |       +-- stepper.hpp    # RAII RmtChannel + RmtStepper
+    |   |       +-- stepper.hpp    # RAII RmtChannel + StepperMotor
     |   |       +-- adc.hpp
     |   |       +-- onewire.hpp
     |   |       +-- limitswitch.hpp
     |   |       +-- valve.hpp
     |   |       +-- led.hpp
+    |   |       +-- rgb_led.hpp    # RGB WS2812 via RMT
     |   +-- src/
+    |       +-- motor_task.cpp
+    |       +-- temp_thread.cpp
     |       +-- drivers/
     |       |   +-- stepper.cpp
     |       |   +-- adc.cpp
@@ -440,10 +482,12 @@ ecotiter/
     |       |   +-- limitswitch.cpp
     |       |   +-- valve.cpp
     |       |   +-- led.cpp
+    |       |   +-- rgb_led.cpp
     |       +-- network/
     |       |   +-- wifi.cpp
     |       |   +-- http_server.cpp
     |       |   +-- ble.cpp
+    |       |   +-- ble_notify_thread.cpp
     |       +-- storage/
     |           +-- nvs.cpp
     |
@@ -451,22 +495,30 @@ ecotiter/
     |   +-- include/interface/
     |   |   +-- serial.hpp
     |   |   +-- rest_api.hpp
+    |   |   +-- webui.hpp          # WebUI static file provider
+    |   |   +-- broadcast.hpp      # JSON broadcast schema
     |   +-- src/
     |       +-- serial.cpp
     |       +-- rest_api.cpp
+    |       +-- webui.cpp
+    |       +-- broadcast.cpp
     |
     +-- diag/                      # Diagnostic subsystem
-        +-- include/diag/
-        |   +-- black_box.hpp      # Lock-free event ring
-        |   +-- stack_monitor.hpp
-        |   +-- heap_snapshot.hpp
-        |   +-- state_tracer.hpp
-        |   +-- tick_watchdog.hpp
-        |   +-- ffi_guard.hpp
-        +-- src/
-            +-- black_box.cpp
-            +-- crash_handler.cpp  # __wrap_esp_panic_handler in IRAM
-            +-- stack_monitor.cpp
+    |   +-- include/diag/
+    |   |   +-- black_box.hpp      # Lock-free event ring
+    |   |   +-- stack_monitor.hpp
+    |   |   +-- heap_snapshot.hpp
+    |   |   +-- state_tracer.hpp
+    |   |   +-- tick_watchdog.hpp
+    |   |   +-- rtc_watchdog.hpp   # RWDT RAII wrapper
+    |   |   +-- ffi_guard.hpp
+    |   +-- src/
+    |       +-- black_box.cpp
+    |       +-- crash_handler.cpp  # __wrap_esp_panic_handler in IRAM
+    |       +-- stack_monitor.cpp
+    |
+    +-- json/                      # nlohmann_json bundled component
+        +-- include/nlohmann/json.hpp
 ```
 
 **Dependency rule:** `domain/` must NEVER include `esp_*.h` headers. Only `infrastructure/` talks to hardware. `application/` coordinates using domain types and infrastructure traits.
@@ -479,6 +531,7 @@ All hot paths use fixed-size buffers defined in `domain/memory.hpp`:
 |--------|------|---------|
 | `CommandBuffer` | 256 bytes | Serial + BLE + HTTP command input |
 | `ResponseBuffer` | 512 bytes | JSON response serialization |
+| `DnsBuf` | 512 bytes | DNS response buffer (WiFi) |
 | `LogBuffer` | 100 entries | Ring-buffer log for HTTP access |
 | `AdcBuf` | 64 x uint16_t | ADC rolling average |
 
@@ -490,8 +543,4 @@ All hot paths use fixed-size buffers defined in `domain/memory.hpp`:
 |-----------|-----|-------------|
 | `wifi` | `ssid` | Saved WiFi SSID |
 | `wifi` | `password` | Saved WiFi password |
-| `cal` | `steps_per_ml` | Steps per millilitre |
-| `cal` | `nominal_vol` | Nominal burette volume (ml) |
-| `cal` | `speed_coeff` | Speed coefficient |
-| `cal` | `a_x1000` | ADC calibration slope x1000 |
-| `cal` | `b` | ADC calibration offset (mV) |
+| `stallguard` | `threshold` | StallGuard threshold value |

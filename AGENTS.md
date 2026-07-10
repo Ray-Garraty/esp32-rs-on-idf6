@@ -52,20 +52,24 @@ Failure (2026-07-03): Homing omitted stop flag. Motor ran through FULL limit swi
 Three-way DRAM conflict. Order MUST be: WiFi → HTTP → BLE.
 
 1. WiFi driver init (~3.5 KB DRAM)
-2. `wifi.wait_for_ip(5s)` — obtain IP before binding
-3. HTTP server bind to 0.0.0.0:80 (12 KB contiguous MALLOC_CAP_INTERNAL)
-4. BLE NimBLE init (12 KB contiguous MALLOC_CAP_INTERNAL)
+2. `wifi.startAP()` — AP mode on 192.168.4.1/24
+3. `wifi.tryStartSTA()` — async STA connect (non-blocking)
+4. HTTP server bind to 0.0.0.0:80 (12 KB contiguous MALLOC_CAP_INTERNAL)
+5. BLE NimBLE init (12 KB contiguous MALLOC_CAP_INTERNAL)
+6. `ensureGpioReady()` — wait for PHY calibration (LL-031)
 
 ```cpp
 auto result = wifi_.init();
 if (!result) return std::unexpected(result.error());
-result = wifi_.wait_for_ip(std::chrono::seconds(5));
-if (!result) return std::unexpected(result.error());
+wifi_.startAP();
+wifi_.tryStartSTA();          // non-blocking — async connect
 http_server_ = HttpServer::create();
 if (!http_server_) return std::unexpected(http_server_.error());
 result = ble_.init();
 if (!result) return std::unexpected(result.error());
 ```
+
+Note: After BLE init, `ensureGpioReady()` calls `esp_phy_deinit()` + `esp_phy_init()` to prevent PHY calibration spinlock deadlock (LL-031).
 
 Failures (2026-07-01): Each reordering (HTTP→BLE→WiFi, BLE→WiFi→HTTP,
 WiFi→BLE→HTTP) fixed one issue but broke another.
@@ -125,31 +129,6 @@ Rationale: Every past crash was detectible pre-mortem by a diagnostic event.
 
 ---
 
-### GR-11: MANDATORY ESP-IDF MASTER + LEGACY STUDY BEFORE CODEGEN
-
-Before ANY code generation touching WiFi, DNS, HTTP, BLE, RMT, or any
-ESP-IDF API call, study the local authoritative copies:
-
-**Primary — `/home/vlabe/Downloads/esp-idf-master`:**
-The authoritative header source for ESP-IDF v6 (dev branch). Verify function
-signatures, struct definitions, enum values, and header locations here.
-Online docs may be out of date or mismatch the local build.
-
-**Secondary — `/home/vlabe/Downloads/legacy/arduino`:**
-Legacy Arduino-based firmware — **SOURCE OF BUSINESS LOGIC ONLY** (dosing
-algorithms and math, calibration formulas). Study when porting algorithms
-or maintaining compatibility with existing protocol expectations. Do NOT copy
-Arduino syntax (digitalWrite, Serial.println, etc.) into ESP-IDF code.
-
-Required: grep/read the relevant headers in BOTH directories BEFORE writing
-any code that calls espressif APIs or replicates Arduino behaviour or business logic.
-
-Failure (2026-07-09): Agent wrote `ESP_NETIF_DOMAIN_NAME_SERVER` with wrong
-param type (`uint32_t*`). A 30-second grep of esp-idf-master headers would
-have shown the actual API expects `uint8_t`.
-
----
-
 ### GR-10: ONLY THE USER ASSESSES PHYSICAL STATE
 
 The AI agent MUST NEVER make claims about physical-world observations
@@ -175,6 +154,31 @@ wasn't fully applied.
 
 ---
 
+### GR-11: MANDATORY ESP-IDF MASTER + LEGACY STUDY BEFORE CODEGEN
+
+Before ANY code generation touching WiFi, DNS, HTTP, BLE, RMT, or any
+ESP-IDF API call, study the local authoritative copies:
+
+**Primary — `/home/vlabe/Downloads/esp-idf-master`:**
+The authoritative header source for ESP-IDF v6 (dev branch). Verify function
+signatures, struct definitions, enum values, and header locations here.
+Online docs may be out of date or mismatch the local build.
+
+**Secondary — `/home/vlabe/Downloads/legacy/arduino`:**
+Legacy Arduino-based firmware — **SOURCE OF BUSINESS LOGIC ONLY** (dosing
+algorithms and math, calibration formulas). Study when porting algorithms
+or maintaining compatibility with existing protocol expectations. Do NOT copy
+Arduino syntax (digitalWrite, Serial.println, etc.) into ESP-IDF code.
+
+Required: grep/read the relevant headers in BOTH directories BEFORE writing
+any code that calls espressif APIs or replicates Arduino behaviour or business logic.
+
+Failure (2026-07-09): Agent wrote `ESP_NETIF_DOMAIN_NAME_SERVER` with wrong
+param type (`uint32_t*`). A 30-second grep of esp-idf-master headers would
+have shown the actual API expects `uint8_t`.
+
+---
+
 ## 2. PRE-FLIGHT CHECKLIST (Copy Before Codegen)
 
 Before generating code touching: threads, network, RMT, FFI, mutexes, queues,
@@ -197,11 +201,13 @@ GPIO ISR, NVS, WiFi, BLE, or HTTP — copy and fill:
 ⚠️ **CRITICAL: PSRAM/Flash bus pins (26-37) are STRICTLY FORBIDDEN for gpio_set_direction/gpio_config.**
 See `docs/refs/unsafe_gpio_pins.md` for full list, explanations, and safe alternatives.
 
+Note: Status LED is GPIO48 (RGB WS2812 via RMT), not GPIO2. The `RgbLed` class drives it using WS2812 protocol through an RMT TX channel. Active HIGH `gpio_set_level` is NOT used.
+
 | GPIO | Function | Constraint |
 |------|----------|-----------|
 | 1 | U0TXD | Serial — DO NOT TOUCH |
 | 3 | U0RXD | Serial — DO NOT TOUCH |
-| 2 | Status LED | `gpio_set_level()` — Active HIGH |
+| 48 | Status LED (RGB WS2812) | RMT TX channel — WS2812 protocol |
 | 4 | ADC (pH electrode) | `adc_oneshot_read()` (ADC1_CH3) — 0-2900 mV |
 | 14 | Valve | `gpio_set_level()` — LOW=input, HIGH=output |
 | 21 | TMC2209 STEP | `rmt_new_tx_channel()` — pulse train |
@@ -209,7 +215,7 @@ See `docs/refs/unsafe_gpio_pins.md` for full list, explanations, and safe altern
 | 27 | TMC2209 EN | `gpio_set_level()` — Active LOW; **gpio_set_direction will hang** (PSRAM data bus) |
 | 7 | Endstop FULL | GPIO ISR pos-edge → `std::atomic<bool>` (NOT GPIO34 — PSRAM D5, LL-027) |
 | 6 | DS18B20 | OneWire bitbang — 4.7k pull-up (NOT GPIO33 — PSRAM D4, LL-027) |
-| 15 | Endstop EMPTY | GPIO ISR pos-edge → `std::atomic<bool>` (NOT GPIO35 — PSRAM D6, LL-027) |
+| 15 | Endstop HOME | GPIO ISR pos-edge → `std::atomic<bool>` (syringe top, homing reference; NOT GPIO35 — PSRAM D6, LL-027) |
 
 ### 3.2 RMT
 
@@ -262,7 +268,8 @@ After changing `sdkconfig.defaults`, also available:
 build).
 
 Key defaults: `CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768`,
-`CONFIG_BROWNOUT_DET=n`, `CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288`,
+`CONFIG_ESP_TASK_WDT_INIT=y`, `CONFIG_ESP_TASK_WDT_TIMEOUT_S=10`,
+`CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288`,
 `CONFIG_FREERTOS_HZ=1000`,
 `CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=6`.
 **Constraint:** `WIFI_DYNAMIC_RX_BUFFER_NUM` MUST be ≥ `WIFI_RX_BA_WIN`
@@ -299,7 +306,7 @@ t0 main watermark=0  t1 motor watermark=0 ...
 
 | Scenario | Command |
 |----------|---------|
-| Serial log exists | `./scripts/analyze_last_crash.sh` |
+| Serial log exists | `python3 scripts/crash_analyzer.py < crash.txt` |
 | Live capture | `timeout 60 python3 scripts/monitor.py` |
 | Raw crash text | `python3 scripts/crash_analyzer.py < crash.txt` |
 
@@ -312,6 +319,8 @@ t0 main watermark=0  t1 motor watermark=0 ...
 | wifi:fail to alloc timer, type=9 | WiFi timer after BLE+HTTP ate DRAM | Reduce WiFi buffer counts |
 | StoreProhibited EXCVADDR=0x28 | Dangling httpd_req_t (GR-5) | WebSocket API; no stored C pointers |
 | IllegalInstruction + heap 6 KB largest | DRAM fragment → HTTP alloc fail (LL-004) | Keep event loop handle alive |
+| GPIO init hangs on pins 26-37 | PSRAM/Flash bus conflict (LL-027) | Move GPIOs to safe pins (5,6,7,15) |
+| `esp_phy_load` spinlock at boot | PHY calibration deadlock (LL-031) | Call `phy_deinit()` before BLE init, reinit after |
 | `wifi_init.c:52` `#error "WIFI_RX_BA_WIN > WIFI_DYNAMIC_RX_BUFFER_NUM"` | Stale `sdkconfig` hid changed `sdkconfig.defaults` | `scripts/build.sh build` auto‑removes `sdkconfig`; also fix `WIFI_DYNAMIC_RX_BUFFER_NUM` in defaults |
 
 ---
@@ -369,7 +378,6 @@ Sub-agents are **forbidden** from creating `.md` or `.yaml` files inside
 - [ ] Init order follows GR-3 (WiFi → HTTP → BLE)
 - [ ] Pre-Flight Checklist filled before codegen
 - [ ] No raw ESP-IDF pointers cross thread boundaries (GR-5)
-- [ ] Frozen docs/API/SERIAL_API.md contract respected
 - [ ] 30 s serial smoke test: no Guru Meditation, no WDT, no panics
 - [ ] Code style follows `docs/refs/coding_style.md`
 - [ ] Hardware refs match `docs/refs/project.md`
@@ -392,9 +400,9 @@ Sub-agents are **forbidden** from creating `.md` or `.yaml` files inside
 | `mdns_init()` before IP assigned | Wait for `IP_EVENT_STA_GOT_IP` | docs/refs/project.md |
 | `python -c "..."` inline | Write temp file, then run | §6.2 |
 | RMT motion without stop flag | Stop flag before start | GR-2 |
-| `WRITE_PERI_REG` for brownout | `CONFIG_BROWNOUT_DET=n` | docs/refs/project.md |
+| `WRITE_PERI_REG` for brownout | `CONFIG_BROWNOUT_DET=n` (must be added to sdkconfig.defaults) | docs/refs/project.md |
 | HTTP bind without IP | `wait_for_ip()` first | GR-3 |
-| `esp_task_wdt_deinit()` direct | `esp_safe::disable_wdt()` | docs/refs/project.md |
+| `esp_task_wdt_deinit()` direct | Use `RtcWatchdog` RAII class — TWDT is NOT fully disabled | docs/refs/project.md |
 | Naked `rmt_channel_handle_t` | RAII wrapper class | coding_style.md §9.5 |
 | Naked `httpd_handle_t` / etc. | RAII wrapper class | coding_style.md §9.5 |
 | Functions returning -1 on error | `std::expected<T, Error>` | coding_style.md §2 |
