@@ -31,7 +31,8 @@ using WriteCalCb = std::expected<void, domain::ResourceError>(*)(const domain::C
     WriteCalCb writeCal);
 [[nodiscard]] std::expected<CommandResponse, domain::AppError> handleResetCalibration(
     WriteCalCb writeCal);
-[[nodiscard]] std::expected<CommandResponse, domain::AppError> handleRunCalibration();
+[[nodiscard]] std::expected<CommandResponse, domain::AppError> handleRunCalibration(
+    const float* freqs, size_t freqsCount, float speedMlMin);
 [[nodiscard]] std::expected<CommandResponse, domain::AppError> handleGetCalResult(
     ReadCalCb readCal);
 

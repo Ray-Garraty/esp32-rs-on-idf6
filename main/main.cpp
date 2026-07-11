@@ -374,7 +374,10 @@ extern "C" void app_main(void)
                 .mv = ecotiter::domain::gLastMv.load(std::memory_order_acquire),
                 .vlv = ecotiter::domain::gValvePosition.load(std::memory_order_acquire),
                 .brt = ecotiter::domain::gBuretteState.load(std::memory_order_acquire),
-                .volumeMl = ecotiter::domain::gVolumeMl.load(std::memory_order_acquire)};
+                .volumeMl = ecotiter::domain::gVolumeMl.load(std::memory_order_acquire),
+                .speedMlMin = 0.0f,
+                .limitFull = ecotiter::domain::gStopFull.load(std::memory_order_acquire),
+                .limitEmpty = ecotiter::domain::gStopEmpty.load(std::memory_order_acquire)};
 
             ecotiter::domain::memory::ResponseBuffer buf{};
             auto sv = ecotiter::interface::serializeBroadcast(evt, buf);

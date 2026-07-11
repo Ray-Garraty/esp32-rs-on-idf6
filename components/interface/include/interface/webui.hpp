@@ -96,13 +96,15 @@ textarea.form-control{resize:none;font-family:'SF Mono',SFMono-Regular,ui-monosp
 .cursor-pointer{cursor:pointer}
 )css"sv;
 
-static constexpr std::string_view INDEX_HTML = R"htmlraw(<!doctype html>
+static constexpr std::string_view INDEX_HTML = R"idxhtml(<!doctype html>
 <html lang="en" data-bs-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>EcoTiter Dashboard</title>
-<style>)" MINIMAL_CSS R"raw(
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<style>
 .theme-toggle-btn span{font-size:22px;line-height:1}
 </style>
 </head>
@@ -283,7 +285,7 @@ btn.addEventListener('click',function(){var t=document.querySelector(this.datase
 });
 </script>
 </body>
-</html>)htmlraw"sv;
+</html>)idxhtml"sv;
 
 static constexpr std::string_view CAPTIVE_HTML = R"htmlraw(<!DOCTYPE html>
 <html lang="en">
@@ -330,7 +332,7 @@ document.getElementById('wifi-form').addEventListener('submit',async function(e)
 </html>)htmlraw"sv;
 
 static constexpr std::string_view STATE_JS = R"js(
-var CONFIG={LOG_MAX_ENTRIES:100,WS_MAX_ENTRIES:5,WS_CHECK_INTERVAL_MS:500,WS_PING_INTERVAL_MS:2000,WS_TIMEOUT_MS:1500,STEPPER:{DEFAULT_FREQ:300,DEFAULT_STEPS:1000,MAX_FREQ:1000},BC:{MAX_SPEED_ROWS:10,FREQ_PERCENTAGES:[0.25,0.50,0.75]}};
+var CONFIG={LOG_MAX_ENTRIES:100,WS_MAX_ENTRIES:5,WS_CHECK_INTERVAL_MS:2000,WS_PING_INTERVAL_MS:2000,WS_TIMEOUT_MS:4000,STEPPER:{DEFAULT_FREQ:300,DEFAULT_STEPS:1000,MAX_FREQ:1000},BC:{MAX_SPEED_ROWS:10,FREQ_PERCENTAGES:[0.25,0.50,0.75]}};
 var APP_STATE={stepper:{direction:'LIQ_OUT',busy:false,enEnabled:false,mode:'continuous'},valve:{position:'input'},logs:{messages:[],wsEntries:[],wsAutoupdate:true,wsRawJson:false,baseDate:null,baseMillis:0},ui:{sgEditMode:false,motorStoppedAt:null,logLevelFilter:'ALL'},calibration:{speedRowCount:0,adcState:null,calibratingIndex:-1}};
 var setState=function(path,value,onUpdate){var keys=path.split('.');var target=APP_STATE;for(var i=0;i<keys.length-1;i++)target=target[keys[i]];target[keys[keys.length-1]]=value;if(onUpdate)onUpdate();};
 window.APP_STATE=APP_STATE;window.CONFIG=CONFIG;
@@ -434,7 +436,7 @@ function updateConnectionStatus(){
 
 function updateUI(data){
   if(APP_STATE.logs.baseDate===null&&data.ts){APP_STATE.logs.baseDate=new Date();APP_STATE.logs.baseMillis=data.ts;}
-  setText('hw-temperature',data.temp!==null&&data.temp!==undefined?data.temp.toFixed(1)+' C':'--');
+  setText('hw-temperature',data.temp!==null&&data.temp!==undefined?data.temp.toFixed(1)+' \u00b0C':'--');
   setText('hw-adc',data.mv!==undefined?data.mv+' mV':'--');
   setText('hw-electrode',data.mv!==undefined?data.mv+' mV':'--');
   if(data.usbSerialConnected!==undefined){__connUsb=data.usbSerialConnected;updateConnectionStatus();}
@@ -623,7 +625,7 @@ function updateBuretteCalUI(state){
   var spDateEl=document.getElementById("bc-sp-cal-date");spDateEl.textContent=(state.calibration_date>0)?new Date(state.calibration_date*1000).toLocaleString():"--";
 }
 
-function waitForBuretteIdle(){return new Promise(function(resolve){var poll=setInterval(function(){fetch("/api/status").then(function(r){return r.json();}).then(function(data){if(data&&data.brt&&data.brt.sts==="idle"){clearInterval(poll);resolve(true);}}).catch(function(){});},500);});}
+function waitForBuretteIdle(){return new Promise(function(resolve){var poll=setInterval(function(){fetch("/api/status").then(function(r){return r.json();}).then(function(data){if(data&&data.state==="idle"){clearInterval(poll);resolve(true);}}).catch(function(){});},500);});}
 
 function runVolumeCalibration(){
   var freq=parseInt(document.getElementById("bc-vol-freq")?document.getElementById("bc-vol-freq").value:0);if(!freq||freq<=0){alert("Enter frequency");return;}
@@ -812,8 +814,9 @@ struct FileEntry {
     std::string_view content;
 };
 
-static constexpr std::array<FileEntry, 9> FILES = {{
+static constexpr std::array<FileEntry, 10> FILES = {{
     {"/",            INDEX_HTML},
+    {"/style.css",   MINIMAL_CSS},
     {"/wifi",        CAPTIVE_HTML},
     {"/js/state.js", STATE_JS},
     {"/js/ws.js",    WS_JS},

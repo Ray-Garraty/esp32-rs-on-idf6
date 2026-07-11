@@ -20,7 +20,7 @@ CommandResponse makeCalResponse(const char* cmdName,
   rsp.kind = ResponseKind::Single;
   size_t off = static_cast<size_t>(
       std::snprintf(rsp.body.data(), rsp.body.size(),
-                    R"({"cmd":"%s")", cmdName));
+                    R"({"cmd":"%s","status":"ok")", cmdName));
   if (fmt) {
     va_list args;
     va_start(args, fmt);
@@ -60,9 +60,16 @@ std::expected<CommandResponse, domain::AppError> handleGetCalibration(
   if (cal) {
     off = static_cast<size_t>(
         std::snprintf(rsp.body.data(), rsp.body.size(),
-                      R"({"cmd":"cal.get","stepsPerMl":%.1f,"nominalVolume":%.1f})",
+                      R"({"cmd":"cal.get","status":"ok","steps_per_ml":%.1f,)"
+                      R"("nominal_vol":%.2f,"speed_coeff":%.5f,)"
+                      R"("min_freq":%u,"max_freq":%u,)"
+                      R"("calibration_date":%ld,"is_default":true})",
                       static_cast<double>(cal->stepsPerMl),
-                      static_cast<double>(cal->nominalVolumeMl)));
+                      static_cast<double>(cal->nominalVolumeMl),
+                      static_cast<double>(cal->speedCoeff),
+                      static_cast<unsigned>(cal->minFreqHz),
+                      static_cast<unsigned>(cal->maxFreqHz),
+                      static_cast<long>(0)));  // calibration_date not yet tracked
   } else {
     off = static_cast<size_t>(
         std::snprintf(rsp.body.data(), rsp.body.size(),
@@ -161,7 +168,25 @@ std::expected<CommandResponse, domain::AppError> handleResetCalibration(
                          static_cast<double>(defaults.nominalVolumeMl));
 }
 
-std::expected<CommandResponse, domain::AppError> handleRunCalibration() {
+std::expected<CommandResponse, domain::AppError> handleRunCalibration(
+    const float* freqs, size_t freqsCount, float speedMlMin) {
+  if (freqsCount < 2 || !freqs) {
+    return makeErrorResponse("cal.runSpeedSeq requires >= 2 frequencies");
+  }
+  size_t count = (freqsCount > 3) ? 3 : freqsCount;
+  infrastructure::MotorCommand cmd{};
+  cmd.type = infrastructure::MotorCommandType::StartCalSpeedSeq;
+  cmd.startCalSpeedSeq.fillSpeedMlMin = (speedMlMin > 0.0f) ? speedMlMin : 20.0f;
+  for (size_t i = 0; i < count; ++i) {
+    cmd.startCalSpeedSeq.freqs[i] = (freqs[i] > 0.0f)
+        ? static_cast<uint16_t>(freqs[i] + 0.5f) : 0;
+  }
+  if (infrastructure::gMotorCmdQueue == nullptr) {
+    return makeErrorResponse("motor task not ready");
+  }
+  if (xQueueSend(infrastructure::gMotorCmdQueue, &cmd, pdMS_TO_TICKS(10)) != pdTRUE) {
+    return makeErrorResponse("motor command queue full");
+  }
   return makeAckThenResponse();
 }
 

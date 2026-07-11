@@ -52,13 +52,17 @@ std::string_view serializeBroadcast(
 
     int n = std::snprintf(buf.data(), buf.size(),
         R"({"ts":%lu,"temp":%s,"mv":%u,"vlv":"%s",)"
-        R"("brt":{"sts":"%s","vl":%s}})",
+        R"("brt":{"sts":"%s","vl":%s,"spd":%.1f},)"
+        R"("full":%s,"empty":%s})",
         static_cast<unsigned long>(evt.tick),
         tempStr,
         static_cast<unsigned>(evt.mv),
         valveStr(evt.vlv),
         brtStsStr(evt.brt),
-        vlStr);
+        vlStr,
+        static_cast<double>(evt.speedMlMin),
+        evt.limitFull ? "true" : "false",
+        evt.limitEmpty ? "true" : "false");
 
     if (n < 0 || static_cast<size_t>(n) >= buf.size()) {
         // Truncation or error — return empty view

@@ -20,6 +20,9 @@ TEST_CASE("serializeBroadcast: builds valid JSON with all fields", "[broadcast]"
         .vlv = ValvePosition::Input,
         .brt = BuretteState::Idle,
         .volumeMl = 50.0f,
+        .speedMlMin = 0.0f,
+        .limitFull = false,
+        .limitEmpty = false,
     };
 
     memory::ResponseBuffer buf{};
@@ -33,6 +36,9 @@ TEST_CASE("serializeBroadcast: builds valid JSON with all fields", "[broadcast]"
     REQUIRE(j["vlv"] == "in");
     REQUIRE(j["brt"]["sts"] == "idle");
     REQUIRE(j["brt"]["vl"] == Catch::Approx(50.0));
+    REQUIRE(j["brt"]["spd"] == Catch::Approx(0.0));
+    REQUIRE(j["full"] == false);
+    REQUIRE(j["empty"] == false);
 }
 
 TEST_CASE("serializeBroadcast: output position, liq_out, dosing", "[broadcast]") {
@@ -43,6 +49,9 @@ TEST_CASE("serializeBroadcast: output position, liq_out, dosing", "[broadcast]")
         .vlv = ValvePosition::Output,
         .brt = BuretteState::Dosing,
         .volumeMl = 25.0f,
+        .speedMlMin = 0.0f,
+        .limitFull = false,
+        .limitEmpty = false,
     };
 
     memory::ResponseBuffer buf{};
@@ -63,6 +72,9 @@ TEST_CASE("serializeBroadcast: sensor not detected (tempCX100 = -99999)", "[broa
         .vlv = ValvePosition::Input,
         .brt = BuretteState::Idle,
         .volumeMl = 50.0f,
+        .speedMlMin = 0.0f,
+        .limitFull = false,
+        .limitEmpty = false,
     };
 
     memory::ResponseBuffer buf{};
@@ -82,6 +94,9 @@ TEST_CASE("serializeBroadcast: all burette states round-trip", "[broadcast]") {
             .vlv = ValvePosition::Input,
             .brt = state,
             .volumeMl = 50.0f,
+            .speedMlMin = 0.0f,
+            .limitFull = false,
+            .limitEmpty = false,
         };
         memory::ResponseBuffer buf{};
         auto sv = serializeBroadcast(evt, buf);
@@ -123,6 +138,9 @@ TEST_CASE("serializeBroadcast: reads from domain atoms produce valid JSON", "[br
         .vlv = gValvePosition.load(std::memory_order_acquire),
         .brt = gBuretteState.load(std::memory_order_acquire),
         .volumeMl = gVolumeMl.load(std::memory_order_acquire),
+        .speedMlMin = 0.0f,
+        .limitFull = false,
+        .limitEmpty = false,
     };
 
     memory::ResponseBuffer buf{};

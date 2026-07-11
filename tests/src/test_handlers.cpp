@@ -224,10 +224,12 @@ TEST_CASE("handler: cal.reset restores defaults", "[handlers][cal]") {
   REQUIRE(approx(gResetCal.nominalVolumeMl, 8.14f));
 }
 
-TEST_CASE("handler: cal.run returns AckThen", "[handlers][cal]") {
-  auto rsp = burette_cal::handleRunCalibration();
+TEST_CASE("handler: cal.run returns error (no motor queue)", "[handlers][cal]") {
+  float freqs[] = {250.0f, 500.0f, 750.0f};
+  auto rsp = burette_cal::handleRunCalibration(freqs, 3, 20.0f);
+  // Without motor queue, should return error not AckThen
   REQUIRE(rsp);
-  REQUIRE(rsp->kind == ResponseKind::AckThen);
+  REQUIRE(rsp->kind == ResponseKind::Error);
 }
 
 static auto stubCalRead = []() -> std::expected<CalibrationData, ResourceError> {
@@ -335,7 +337,7 @@ TEST_CASE("handler: adc.cal full flow", "[handlers][sensors][adc.cal]") {
 
   // Measure point 0
   s_mockSampleVal = 1500;
-  auto rsp0 = sensors::handleAdcCalMeasure(std::nullopt, mockSampleRead, mockAdcCalWrite);
+  auto rsp0 = sensors::handleAdcCalMeasure(0.0f, mockSampleRead, mockAdcCalWrite);
   REQUIRE(rsp0);
   REQUIRE(rsp0->kind == ResponseKind::Single);
   std::string_view sv0(rsp0->body.data(), rsp0->bodySize);
@@ -344,7 +346,7 @@ TEST_CASE("handler: adc.cal full flow", "[handlers][sensors][adc.cal]") {
 
   // Measure point 1
   s_mockSampleVal = 1800;
-  auto rsp1 = sensors::handleAdcCalMeasure(std::nullopt, mockSampleRead, mockAdcCalWrite);
+  auto rsp1 = sensors::handleAdcCalMeasure(-177.5f, mockSampleRead, mockAdcCalWrite);
   REQUIRE(rsp1);
   std::string_view sv1(rsp1->body.data(), rsp1->bodySize);
   REQUIRE(sv1.find("1800") != std::string_view::npos);
@@ -357,23 +359,23 @@ TEST_CASE("handler: adc.cal full flow", "[handlers][sensors][adc.cal]") {
 
   // Fill remaining 3 points
   s_mockSampleVal = 2000;
-  auto rsp2 = sensors::handleAdcCalMeasure(std::nullopt, mockSampleRead, mockAdcCalWrite);
+  auto rsp2 = sensors::handleAdcCalMeasure(177.5f, mockSampleRead, mockAdcCalWrite);
   REQUIRE(rsp2);
   REQUIRE(std::string_view(rsp2->body.data(), rsp2->bodySize).find("\"point\":2") != std::string_view::npos);
 
   s_mockSampleVal = 2200;
-  auto rsp3 = sensors::handleAdcCalMeasure(std::nullopt, mockSampleRead, mockAdcCalWrite);
+  auto rsp3 = sensors::handleAdcCalMeasure(350.0f, mockSampleRead, mockAdcCalWrite);
   REQUIRE(rsp3);
   REQUIRE(std::string_view(rsp3->body.data(), rsp3->bodySize).find("\"point\":3") != std::string_view::npos);
 
   s_mockSampleVal = 2500;
-  auto rsp4 = sensors::handleAdcCalMeasure(std::nullopt, mockSampleRead, mockAdcCalWrite);
+  auto rsp4 = sensors::handleAdcCalMeasure(-350.0f, mockSampleRead, mockAdcCalWrite);
   REQUIRE(rsp4);
   REQUIRE(std::string_view(rsp4->body.data(), rsp4->bodySize).find("\"point\":4") != std::string_view::npos);
 
   // 6th point should fail
   s_mockSampleVal = 3000;
-  auto rsp5 = sensors::handleAdcCalMeasure(std::nullopt, mockSampleRead, mockAdcCalWrite);
+  auto rsp5 = sensors::handleAdcCalMeasure(0.0f, mockSampleRead, mockAdcCalWrite);
   REQUIRE(rsp5);
   REQUIRE(rsp5->kind == ResponseKind::Error);
 
@@ -393,7 +395,7 @@ TEST_CASE("handler: adc.cal full flow", "[handlers][sensors][adc.cal]") {
 
   // After reset, measure should start at point 0
   s_mockSampleVal = 1600;
-  auto rspAfterReset = sensors::handleAdcCalMeasure(std::nullopt, mockSampleRead, mockAdcCalWrite);
+  auto rspAfterReset = sensors::handleAdcCalMeasure(0.0f, mockSampleRead, mockAdcCalWrite);
   REQUIRE(rspAfterReset);
   REQUIRE(std::string_view(rspAfterReset->body.data(), rspAfterReset->bodySize).find("\"point\":0") != std::string_view::npos);
 }
@@ -445,8 +447,9 @@ TEST_CASE("handler: adc.cal.get", "[handlers][sensors]") {
   REQUIRE(rsp);
   REQUIRE(rsp->kind == ResponseKind::Single);
   std::string_view sv(rsp->body.data(), rsp->bodySize);
-  REQUIRE(sv.find("1200") != std::string_view::npos);
-  REQUIRE(sv.find("5") != std::string_view::npos);
+  REQUIRE(sv.find("\"status\":\"ok\"") != std::string_view::npos);
+  REQUIRE(sv.find("\"a\":1.200000") != std::string_view::npos);
+  REQUIRE(sv.find("\"b\":5") != std::string_view::npos);
 }
 
 // --- valve ---

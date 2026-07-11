@@ -39,6 +39,8 @@ enum class CommandType : uint8_t {
   CalReset,
   CalRun,
   CalGetResult,
+  CalRunSpeedSeq,
+  MoveToStop,
   // Sensors
   TempRead,
   AdcCalGet,
@@ -95,6 +97,10 @@ struct Command {
     float speeds[MAX_MEASUREMENTS];
     size_t count;
   } measurements;
+
+  // For burette.cal.runSpeedSeq: flat freqs array
+  float freqsArray[MAX_MEASUREMENTS]{};
+  size_t freqsCount{0};
 };
 
 enum class ResponseKind : uint8_t {

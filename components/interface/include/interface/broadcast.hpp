@@ -15,6 +15,9 @@ struct BroadcastEvent {
     domain::ValvePosition vlv;
     domain::BuretteState brt;
     float volumeMl;
+    float speedMlMin;
+    bool limitFull;
+    bool limitEmpty;
 };
 
 // Serialize BroadcastEvent to a pre-allocated JSON buffer.

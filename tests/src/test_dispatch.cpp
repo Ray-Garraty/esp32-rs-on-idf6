@@ -165,11 +165,11 @@ TEST_CASE("dispatch: stallGuard.get returns JSON", "[dispatch]") {
   REQUIRE(rsp->kind == ResponseKind::Single);
 }
 
-TEST_CASE("dispatch: adc.cal.measure returns JSON", "[dispatch]") {
+TEST_CASE("dispatch: adc.cal.measure returns error without ref_mv", "[dispatch]") {
   Command cmd{CommandType::AdcCalMeasure};
   auto rsp = dispatch(cmd);
   REQUIRE(rsp);
-  REQUIRE(rsp->kind == ResponseKind::Single);
+  REQUIRE(rsp->kind == ResponseKind::Error);
 }
 
 TEST_CASE("dispatch: adc.cal.reset returns JSON", "[dispatch]") {

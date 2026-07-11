@@ -1,5 +1,6 @@
 #include "application/command.hpp"
 
+#include <cctype>
 #include <cstring>
 #include <system_error>
 
@@ -16,29 +17,31 @@ struct CmdName {
 };
 
 constexpr CmdName kCmdNames[] = {
-  {"fill",              CommandType::Fill},
-  {"empty",             CommandType::Empty},
-  {"doseVolume",        CommandType::DoseVolume},
-  {"rinse",             CommandType::Rinse},
-  {"stop",              CommandType::Stop},
-  {"emergencyStop",     CommandType::EmergencyStop},
-  {"getStatus",         CommandType::GetStatus},
-  {"status",            CommandType::GetStatus},
-  {"moveSteps",         CommandType::MoveSteps},
-  {"setDirection",      CommandType::SetDirection},
-  {"setSpeed",          CommandType::SetSpeed},
-  {"setAccel",          CommandType::SetAccel},
-  {"setVolume",         CommandType::SetVolume},
-  {"configMove",        CommandType::ConfigMove},
-  {"configHome",        CommandType::ConfigHome},
-  {"configSensor",      CommandType::ConfigSensor},
-  {"cal.get",           CommandType::CalGet},
-  {"cal.calcVolume",    CommandType::CalCalcVolume},
-  {"cal.calcSpeed",     CommandType::CalCalcSpeed},
-  {"cal.save",          CommandType::CalSave},
-  {"cal.reset",         CommandType::CalReset},
-  {"cal.run",           CommandType::CalRun},
-  {"cal.getResult",     CommandType::CalGetResult},
+  {"burette.fill",            CommandType::Fill},
+  {"burette.empty",           CommandType::Empty},
+  {"burette.doseVolume",      CommandType::DoseVolume},
+  {"burette.rinse",           CommandType::Rinse},
+  {"burette.stop",          CommandType::Stop},
+  {"burette.emergencyStop", CommandType::EmergencyStop},
+  {"burette.getStatus",     CommandType::GetStatus},
+  {"burette.status",        CommandType::GetStatus},
+  {"burette.moveSteps",     CommandType::MoveSteps},
+  {"burette.setDirection",  CommandType::SetDirection},
+  {"burette.setSpeed",      CommandType::SetSpeed},
+  {"burette.setAccel",      CommandType::SetAccel},
+  {"burette.setVolume",      CommandType::SetVolume},
+  {"burette.configMove",    CommandType::ConfigMove},
+  {"burette.configHome",    CommandType::ConfigHome},
+  {"burette.configSensor",  CommandType::ConfigSensor},
+  {"burette.cal.get",           CommandType::CalGet},
+  {"burette.cal.calcVolume",    CommandType::CalCalcVolume},
+  {"burette.cal.calcSpeed",     CommandType::CalCalcSpeed},
+  {"burette.cal.save",          CommandType::CalSave},
+  {"burette.cal.reset",         CommandType::CalReset},
+  {"burette.cal.run",           CommandType::CalRun},
+  {"burette.cal.getResult",     CommandType::CalGetResult},
+  {"burette.cal.runSpeedSeq",   CommandType::CalRunSpeedSeq},
+  {"burette.moveToStop",        CommandType::MoveToStop},
   {"temperature.read",    CommandType::TempRead},
   {"adc.cal.get",         CommandType::AdcCalGet},
   {"adc.cal.save",        CommandType::AdcCalSave},
@@ -70,8 +73,17 @@ constexpr CommandType lookupCmdType(std::string_view name) {
   auto it = j.find(key);
   if (it == j.end() || !it->is_string()) return std::nullopt;
   auto s = it->get<std::string>();
-  if (s == "liq_in") return domain::Direction::LiqIn;
-  if (s == "liq_out") return domain::Direction::LiqOut;
+  if (s.size() < 6) return std::nullopt;
+  char prefix[4]{};
+  std::copy_n(s.data(), 3, prefix);
+  for (auto& c : prefix) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  if (std::string_view(prefix, 3) == "liq") {
+    char suffix[4]{};
+    std::copy_n(s.data() + 4, 3, suffix);
+    for (auto& c : suffix) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (std::string_view(suffix, 2) == "in") return domain::Direction::LiqIn;
+    if (std::string_view(suffix, 3) == "out") return domain::Direction::LiqOut;
+  }
   return std::nullopt;
 }
 
@@ -199,6 +211,21 @@ std::expected<Command, domain::ProtocolError> parseCommand(
     }
   }
 
+  {
+    // For burette.cal.runSpeedSeq: flat freqs array
+    auto freqsIt = j.find("freqs");
+    if (freqsIt != j.end() && freqsIt->is_array()) {
+      size_t count = 0;
+      for (const auto& v : *freqsIt) {
+        if (count >= Command::MAX_MEASUREMENTS) break;
+        if (v.is_number()) {
+          cmd.freqsArray[count] = static_cast<float>(v.get<double>());
+          ++count;
+        }
+      }
+      cmd.freqsCount = count;
+    }
+  }
   {
     auto it = j.find("measurements");
     if (it != j.end() && it->is_array()) {

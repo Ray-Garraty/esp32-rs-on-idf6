@@ -44,6 +44,9 @@ std::expected<CommandResponse, domain::AppError> dispatch(
               static_cast<uint32_t>(cmd.volume->value)} : std::nullopt);
     case CommandType::Stop:
       return burette_ops::handleStop();
+    case CommandType::MoveToStop:
+      return burette_ops::handleCalRun(
+          std::optional<std::string_view>{"speed"}, std::nullopt, std::nullopt);
     case CommandType::EmergencyStop:
       return burette_ops::handleEmergencyStop();
     case CommandType::GetStatus:
@@ -94,6 +97,10 @@ std::expected<CommandResponse, domain::AppError> dispatch(
           cmd.speedMlMin);
     case CommandType::CalGetResult:
       return burette_cal::handleGetCalResult(readCal);
+    case CommandType::CalRunSpeedSeq:
+      return burette_cal::handleRunCalibration(
+          cmd.freqsArray, cmd.freqsCount,
+          cmd.speedMlMin.value_or(20.0f));
 
     // --- Sensors ---
     case CommandType::TempRead:

@@ -363,14 +363,28 @@ esp_err_t ws_handler(httpd_req_t* req) {
     }
 
     httpd_ws_frame_t frame{};
-    uint8_t buf[256]{};
+    uint8_t buf[1024]{};
     frame.payload = buf;
     frame.len = sizeof(buf);
     frame.type = HTTPD_WS_TYPE_TEXT;
 
     esp_err_t err = httpd_ws_recv_frame(req, &frame, frame.len);
     if (err != ESP_OK) {
+        int fd = httpd_req_to_sockfd(req);
+        if (fd >= 0 && req->user_ctx) {
+            auto* server = static_cast<HttpServer*>(req->user_ctx);
+            server->removeSession(fd);
+        }
         return err;
+    }
+
+    if (frame.type == HTTPD_WS_TYPE_CLOSE) {
+        int fd = httpd_req_to_sockfd(req);
+        if (fd >= 0 && req->user_ctx) {
+            auto* server = static_cast<HttpServer*>(req->user_ctx);
+            server->removeSession(fd);
+        }
+        return ESP_OK;
     }
 
     if (frame.len > 0) {
@@ -468,6 +482,7 @@ void HttpServer::registerRoutes() {
 
     // WebUI static files
     reg({ .uri = "/", .method = HTTP_GET, .handler = root_handler, .user_ctx = this });
+    reg({ .uri = "/style.css", .method = HTTP_GET, .handler = webui_file_handler });
     reg({ .uri = "/js/state.js", .method = HTTP_GET, .handler = webui_file_handler });
     reg({ .uri = "/js/ws.js", .method = HTTP_GET, .handler = webui_file_handler });
     reg({ .uri = "/js/ui-update.js", .method = HTTP_GET, .handler = webui_file_handler });
@@ -520,7 +535,10 @@ void HttpServer::broadcastWsEvent(const char* jsonData, size_t len) {
             handle_, session.fd, &frame);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "WS send err=%d fd=%d", static_cast<int>(err), session.fd);
-            session.fd = WS_FD_INVALID;
+            auto checkInfo = httpd_ws_get_fd_info(handle_, session.fd);
+            if (checkInfo != HTTPD_WS_CLIENT_WEBSOCKET) {
+                session.fd = WS_FD_INVALID;
+            }
         } else {
             ++sent;
         }

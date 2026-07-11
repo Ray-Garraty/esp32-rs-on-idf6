@@ -18,13 +18,13 @@ TEST_CASE("parseCommand: serial.ping", "[command]") {
 }
 
 TEST_CASE("parseCommand: fill", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"fill"})");
+  auto cmd = parseCommand(R"({"cmd":"burette.fill"})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::Fill);
 }
 
 TEST_CASE("parseCommand: doseVolume with volume", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"doseVolume","volume":10.5})");
+  auto cmd = parseCommand(R"({"cmd":"burette.doseVolume","volume":10.5})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::DoseVolume);
   REQUIRE(cmd->volume.has_value());
@@ -32,7 +32,7 @@ TEST_CASE("parseCommand: doseVolume with volume", "[command]") {
 }
 
 TEST_CASE("parseCommand: setDirection liq_in", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"setDirection","direction":"liq_in"})");
+  auto cmd = parseCommand(R"({"cmd":"burette.setDirection","direction":"liq_in"})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::SetDirection);
   REQUIRE(cmd->direction.has_value());
@@ -40,7 +40,7 @@ TEST_CASE("parseCommand: setDirection liq_in", "[command]") {
 }
 
 TEST_CASE("parseCommand: setDirection liq_out", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"setDirection","direction":"liq_out"})");
+  auto cmd = parseCommand(R"({"cmd":"burette.setDirection","direction":"liq_out"})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::SetDirection);
   REQUIRE(cmd->direction.has_value());
@@ -48,7 +48,7 @@ TEST_CASE("parseCommand: setDirection liq_out", "[command]") {
 }
 
 TEST_CASE("parseCommand: moveSteps", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"moveSteps","steps":500})");
+  auto cmd = parseCommand(R"({"cmd":"burette.moveSteps","steps":500})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::MoveSteps);
   REQUIRE(cmd->steps.has_value());
@@ -56,7 +56,7 @@ TEST_CASE("parseCommand: moveSteps", "[command]") {
 }
 
 TEST_CASE("parseCommand: setSpeed", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"setSpeed","speed":1500})");
+  auto cmd = parseCommand(R"({"cmd":"burette.setSpeed","speed":1500})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::SetSpeed);
   REQUIRE(cmd->speed.has_value());
@@ -64,7 +64,7 @@ TEST_CASE("parseCommand: setSpeed", "[command]") {
 }
 
 TEST_CASE("parseCommand: setAccel", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"setAccel","accel":200})");
+  auto cmd = parseCommand(R"({"cmd":"burette.setAccel","accel":200})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::SetAccel);
   REQUIRE(cmd->accel.has_value());
@@ -72,7 +72,7 @@ TEST_CASE("parseCommand: setAccel", "[command]") {
 }
 
 TEST_CASE("parseCommand: setVolume", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"setVolume","targetVolume":25.0})");
+  auto cmd = parseCommand(R"({"cmd":"burette.setVolume","targetVolume":25.0})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::SetVolume);
   REQUIRE(cmd->targetVolume.has_value());
@@ -160,13 +160,13 @@ TEST_CASE("parseCommand: stallGuard.setThreshold", "[command]") {
 }
 
 TEST_CASE("parseCommand: cal.get", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"cal.get"})");
+  auto cmd = parseCommand(R"({"cmd":"burette.cal.get"})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::CalGet);
 }
 
 TEST_CASE("parseCommand: cal.save", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"cal.save","stepsPerMl":1500.0,"nominalVolume":25.0})");
+  auto cmd = parseCommand(R"({"cmd":"burette.cal.save","stepsPerMl":1500.0,"nominalVolume":25.0})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::CalSave);
 }
@@ -190,7 +190,7 @@ TEST_CASE("parseCommand: system.getStatus", "[command]") {
 }
 
 TEST_CASE("parseCommand: configMove", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"configMove","moveSpeed":2000,"moveAccel":300})");
+  auto cmd = parseCommand(R"({"cmd":"burette.configMove","moveSpeed":2000,"moveAccel":300})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::ConfigMove);
   REQUIRE(cmd->configMoveSpeed.has_value());
@@ -200,7 +200,7 @@ TEST_CASE("parseCommand: configMove", "[command]") {
 }
 
 TEST_CASE("parseCommand: configHome", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"configHome","homeSpeed":500})");
+  auto cmd = parseCommand(R"({"cmd":"burette.configHome","homeSpeed":500})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::ConfigHome);
   REQUIRE(cmd->configHomeSpeed.has_value());
@@ -208,7 +208,7 @@ TEST_CASE("parseCommand: configHome", "[command]") {
 }
 
 TEST_CASE("parseCommand: configSensor", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"configSensor","sensorValue":42})");
+  auto cmd = parseCommand(R"({"cmd":"burette.configSensor","sensorValue":42})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::ConfigSensor);
   REQUIRE(cmd->configSensorValue.has_value());
@@ -216,43 +216,43 @@ TEST_CASE("parseCommand: configSensor", "[command]") {
 }
 
 TEST_CASE("parseCommand: cal.run", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"cal.run"})");
+  auto cmd = parseCommand(R"({"cmd":"burette.cal.run"})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::CalRun);
 }
 
 TEST_CASE("parseCommand: cal.getResult", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"cal.getResult"})");
+  auto cmd = parseCommand(R"({"cmd":"burette.cal.getResult"})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::CalGetResult);
 }
 
 TEST_CASE("parseCommand: rinse", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"rinse"})");
+  auto cmd = parseCommand(R"({"cmd":"burette.rinse"})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::Rinse);
 }
 
 TEST_CASE("parseCommand: stop", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"stop"})");
+  auto cmd = parseCommand(R"({"cmd":"burette.stop"})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::Stop);
 }
 
 TEST_CASE("parseCommand: emergencyStop", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"emergencyStop"})");
+  auto cmd = parseCommand(R"({"cmd":"burette.emergencyStop"})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::EmergencyStop);
 }
 
 TEST_CASE("parseCommand: empty", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"empty"})");
+  auto cmd = parseCommand(R"({"cmd":"burette.empty"})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::Empty);
 }
 
 TEST_CASE("parseCommand: getStatus", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"getStatus"})");
+  auto cmd = parseCommand(R"({"cmd":"burette.getStatus"})");
   REQUIRE(cmd);
   REQUIRE(cmd->type == CommandType::GetStatus);
 }

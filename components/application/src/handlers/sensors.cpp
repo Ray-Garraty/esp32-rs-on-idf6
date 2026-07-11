@@ -17,6 +17,7 @@ namespace {
 // Holds up to 5 measurement points and computed (but unsaved) coefficients.
 
 struct AdcCalPoint {
+  float ref_mv;
   uint16_t raw_mv;
   bool collected;
 };
@@ -25,6 +26,7 @@ constexpr size_t ADC_CAL_MAX_POINTS = 5;
 constexpr size_t ADC_CAL_STAB_SAMPLES = 32;
 constexpr uint16_t ADC_CAL_STAB_TOLERANCE = 5; // ±5 mV
 constexpr int ADC_CAL_STAB_MAX_ATTEMPTS = 10;
+constexpr float ADC_CAL_REFS[ADC_CAL_MAX_POINTS] = {0.0f, -177.5f, 177.5f, 350.0f, -350.0f};
 
 AdcCalPoint gPoints[ADC_CAL_MAX_POINTS]{};
 size_t gPointCount{0};
@@ -57,15 +59,21 @@ std::expected<CommandResponse, domain::AppError> handleReadTemperature(
 
 std::expected<CommandResponse, domain::AppError> handleAdcCalGet(
     AdcCalReadCb read) {
-  uint16_t a = 0;
+  uint16_t aX1000 = 0;
   int16_t b = 0;
-  read(a, b);
+  read(aX1000, b);
+  float aVal = (aX1000 > 0) ? static_cast<float>(aX1000) / 1000.0f : 1.0f;
+  bool isDefault = (aX1000 == 1000 && b == 0);
   CommandResponse rsp;
   rsp.kind = ResponseKind::Single;
-  rsp.bodySize = static_cast<size_t>(
+  size_t off = static_cast<size_t>(
       std::snprintf(rsp.body.data(), rsp.body.size(),
-                    R"({"cmd":"adc.cal.get","aX1000":%u,"b":%d})",
-                    static_cast<unsigned>(a), static_cast<int>(b)));
+                    R"({"cmd":"adc.cal.get","status":"ok","a":%.6f,"b":%d,)"
+                    R"("r_squared":0.0,"calibrated_at":null,"is_default":%s,)"
+                    R"("points":[],"raw_mv":0,"calibrated_mv":0})",
+                    static_cast<double>(aVal), static_cast<int>(b),
+                    isDefault ? "true" : "false"));
+  rsp.bodySize = off;
   return rsp;
 }
 
@@ -84,7 +92,7 @@ std::expected<CommandResponse, domain::AppError> handleAdcCalSave(
   rsp.kind = ResponseKind::Single;
   rsp.bodySize = static_cast<size_t>(
       std::snprintf(rsp.body.data(), rsp.body.size(),
-                    R"({"cmd":"adc.cal.save","aX1000":%u,"b":%d})",
+                    R"({"cmd":"adc.cal.save","status":"ok","aX1000":%u,"b":%d})",
                     static_cast<unsigned>(a), static_cast<int>(bVal)));
   return rsp;
 }
@@ -93,8 +101,10 @@ std::expected<CommandResponse, domain::AppError> handleAdcCalMeasure(
     std::optional<float> refMv,
     AdcSampleReadCb readSample,
     AdcCalWriteCb write) {
-  (void)refMv;
   (void)write;
+  if (!refMv) {
+    return makeErrorResponse("adc.cal.measure requires 'ref_mv' param");
+  }
 
   if (gPointCount >= ADC_CAL_MAX_POINTS) {
     return makeErrorResponse("all points collected — call adc.cal.compute or adc.cal.reset");
@@ -129,6 +139,7 @@ std::expected<CommandResponse, domain::AppError> handleAdcCalMeasure(
 
   // Store point
   size_t index = gPointCount;
+  gPoints[index].ref_mv = *refMv;
   gPoints[index].raw_mv = median;
   gPoints[index].collected = true;
   ++gPointCount;
@@ -151,8 +162,10 @@ std::expected<CommandResponse, domain::AppError> handleAdcCalCompute(
   }
 
   // Copy points under lock-free assumption (single-threaded handler context)
+  float ref[ADC_CAL_MAX_POINTS];
   uint16_t raw[ADC_CAL_MAX_POINTS];
   for (size_t i = 0; i < ADC_CAL_MAX_POINTS; ++i) {
+    ref[i] = gPoints[i].ref_mv;
     raw[i] = gPoints[i].raw_mv;
   }
 
@@ -160,17 +173,13 @@ std::expected<CommandResponse, domain::AppError> handleAdcCalCompute(
   // raw = a_raw * ref + b_raw
   // Then calibrated_mv = (1/a_raw) * raw + (-b_raw/a_raw)
   // We store a_x1000 = round(1/a_raw * 1000), b = round(-b_raw/a_raw)
-  //
-  // x = ref_mv: use 0-based index * 500 to simulate known reference spread
-  // (user provides actual ref voltages; index is placeholder for OLS math)
 
-  // Fallback: compute from raw values alone using point indices as x
   double sumX = 0.0, sumY = 0.0, sumXY = 0.0, sumX2 = 0.0, sumY2 = 0.0;
   int n = static_cast<int>(ADC_CAL_MAX_POINTS);
 
   for (int i = 0; i < n; ++i) {
-    double x = static_cast<double>(raw[i]);
-    double y = static_cast<double>(i); // expected reference index
+    double x = static_cast<double>(ref[i]);
+    double y = static_cast<double>(raw[i]);
     sumX  += x;
     sumY  += y;
     sumXY += x * y;
@@ -191,6 +200,12 @@ std::expected<CommandResponse, domain::AppError> handleAdcCalCompute(
   double coeffA = 1.0 / aRaw;
   double coeffB = -bRaw / aRaw;
 
+  // R-squared
+  double num = static_cast<double>(n) * sumXY - sumX * sumY;
+  double denomR = (static_cast<double>(n) * sumX2 - sumX * sumX) *
+                  (static_cast<double>(n) * sumY2 - sumY * sumY);
+  double rSquared = (denomR > 0.0) ? (num / std::sqrt(denomR)) * (num / std::sqrt(denomR)) : 0.0;
+
   // Store as integer: a_x1000 = a * 1000, b = b (rounded)
   uint16_t aX1000 = static_cast<uint16_t>(
       std::clamp(coeffA * 1000.0 + 0.5, 0.0, 65535.0));
@@ -206,8 +221,9 @@ std::expected<CommandResponse, domain::AppError> handleAdcCalCompute(
   rsp.kind = ResponseKind::Single;
   rsp.bodySize = static_cast<size_t>(
       std::snprintf(rsp.body.data(), rsp.body.size(),
-                    R"({"status":"ok","a":%u,"b":%d})",
-                    static_cast<unsigned>(aX1000), static_cast<int>(bVal)));
+                    R"({"status":"ok","data":{"a":%.6f,"b":%d,"r_squared":%.4f}})",
+                    static_cast<double>(coeffA), static_cast<int>(bVal),
+                    static_cast<double>(rSquared)));
   return rsp;
 }
 
