@@ -69,6 +69,7 @@ private:
 
     EventGroupHandle_t staEventGroup_{nullptr};
 
+    bool mdnsInitDone_{false};
     char apSsid_[32]{};
     char staSsid_[32]{};
 };

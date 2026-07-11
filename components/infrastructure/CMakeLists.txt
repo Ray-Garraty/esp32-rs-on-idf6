@@ -33,4 +33,5 @@ idf_component_register(
         lwip
         esp_event
         esp_netif
+        espressif__mdns
 )

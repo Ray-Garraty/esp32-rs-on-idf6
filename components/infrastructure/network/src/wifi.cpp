@@ -11,8 +11,7 @@
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
 #include "lwip/inet.h"
-// mdns not in IDF v6 built-in components; handled via idf_component.yml
-// #include "mdns.h"
+#include "mdns.h"
 
 #include "infrastructure/config.hpp"
 #include "infrastructure/storage/nvs.hpp"
@@ -444,10 +443,31 @@ void WifiManager::stopDnsServer() {
 }
 
 void WifiManager::startMdns() {
-    // mDNS requires esp_mdns from IDF Component Registry.
-    // Enable by: idf.py add-dependency "esp_mdns^1.0"
-    // Then uncomment mdns_init() call below.
-    ESP_LOGI(TAG, "mDNS skipped — add esp_mdns component dependency to enable");
+    if (mdnsInitDone_) return;
+    diag::FfiGuard guard(76);
+
+    esp_err_t err = mdns_init();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS init failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = mdns_hostname_set("ecotiter");
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS set_hostname failed: %s", esp_err_to_name(err));
+        mdns_free();
+        return;
+    }
+
+    err = mdns_service_add("EcoTiter Burette Controller", "_http", "_tcp", 80, nullptr, 0);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS add_service failed: %s", esp_err_to_name(err));
+        mdns_free();
+        return;
+    }
+
+    mdnsInitDone_ = true;
+    ESP_LOGI(TAG, "mDNS started: ecotiter.local (_http._tcp, port 80)");
 }
 
 void WifiManager::eventHandler(void* arg, esp_event_base_t base,

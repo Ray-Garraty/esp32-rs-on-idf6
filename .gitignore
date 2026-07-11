@@ -25,4 +25,6 @@ components_esp32.lock
 *.bin
 *.elf
 *.map
-idf_component.yml
+
+# Managed components (IDF Component Registry) — auto-downloaded, never edit
+/managed_components/
