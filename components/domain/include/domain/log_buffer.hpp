@@ -16,6 +16,7 @@ class LogBuffer {
 public:
     static constexpr size_t MAX_ENTRIES = 100;
     static constexpr size_t MAX_MSG_LEN = 128;
+    static constexpr size_t LOG_QUEUE_LENGTH = 16;
 
     using Callback = void(*)(const LogEntry& entry);
 
@@ -27,6 +28,9 @@ public:
 
     [[nodiscard]] size_t fetch(LogEntry* out, size_t maxCount,
                                 const char* levelFilter = nullptr) const;
+
+    // Async worker — created from main.cpp after setCallback()
+    static void workerTaskEntry(void* pvParameters);
 
 private:
     LogBuffer() = default;
@@ -41,6 +45,7 @@ private:
     std::atomic<size_t> head_{0};
     std::atomic<bool> pushing_{false};
     Callback callback_{nullptr};
+    void* queue_{nullptr};  // QueueHandle_t (FreeRTOS) — opaque
 };
 
 } // namespace ecotiter::domain

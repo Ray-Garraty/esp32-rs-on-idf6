@@ -24,6 +24,7 @@
 #include "infrastructure/temp_thread.hpp"
 #include "application/state_machine.hpp"
 #include "infrastructure/network/ble_notify_thread.hpp"
+#include "infrastructure/storage/nvs.hpp"
 #include "interface/broadcast.hpp"
 #include "interface/serial.hpp"
 #include "domain/log_buffer.hpp"
@@ -97,6 +98,10 @@ static int logVprintf(const char* fmt, va_list args) {
 
 // WebSocket log push callback — registered after HTTP server init
 static void wsLogCallback(const ecotiter::domain::LogEntry& entry) {
+    // LL-038: stack guard — skip if < 1024 bytes remain on calling task's stack
+    // (uxTaskGetStackHighWaterMark returns words; 1 word = 4 bytes on ESP32)
+    if (uxTaskGetStackHighWaterMark(nullptr) < 256)
+        return;
     auto* hs = gHttpServerForWs.load(std::memory_order_acquire);
     if (!hs) return;
 
@@ -146,7 +151,7 @@ extern "C" void netTaskEntry(void* pvParameters) {
         ESP_LOGI("net_owner", "STA connection attempt in progress");
     }
 
-    // GR-3: HTTP server init BEFORE BLE (DRAM is most abundant at this point)
+    // [INVESTIGATION] Exp 9 — FULL: routes + gHttpServerForWs + LogBuffer callback + worker
     HttpServer httpServer;
     httpServer.setWifiManager(&wifiManager);
     auto httpResult = httpServer.init();
@@ -154,6 +159,7 @@ extern "C" void netTaskEntry(void* pvParameters) {
         httpServer.registerRoutes();
         gHttpServerForWs.store(&httpServer, std::memory_order_release);
         ecotiter::domain::LogBuffer::instance().setCallback(wsLogCallback);
+
         ESP_LOGI("net_owner", "HTTP server ready on 192.168.4.1:80");
     } else {
         ESP_LOGW("net_owner", "HTTP server init failed");
@@ -175,6 +181,14 @@ extern "C" void netTaskEntry(void* pvParameters) {
     // Wait for it to release before any gpio_config/gpio_set_level operations.
     // GR-1: Blocking delay OK in worker thread (not main loop).
     ensureGpioReady();
+
+    // LL-038: async log worker — deferred to after all boot init is complete
+    // to avoid race with stale LogBuffer entries queued during early boot.
+    // LL-038: async log worker — 8KB stack (LWIP send() via httpd_ws_send_frame_async
+    // is MISLEADING — it's synchronous and uses ~2KB stack internally, LL-043).
+    xTaskCreate(ecotiter::domain::LogBuffer::workerTaskEntry,
+                "log_worker", 8192 / sizeof(configSTACK_DEPTH_TYPE),
+                nullptr, 0, nullptr);
 
     while (true) {
         wifiManager.process();
@@ -202,6 +216,10 @@ extern "C" void app_main(void)
     fflush(stdout);
     domain::gBootProgress.store(domain::BootProgress::Nvs, std::memory_order_release);
     nvs_flash_init();
+    infrastructure::storage::nvsInit();
+    domain::gStallGuardThreshold.store(
+        infrastructure::storage::stallguardReadThreshold(),
+        std::memory_order_release);
 
     // ====== Step 2: BlackBox ======
     puts("DBG: step 2 - blackbox");
@@ -370,16 +388,31 @@ extern "C" void app_main(void)
 
         if (scheduler.shouldBroadcast())
         {
+            auto brtState = ecotiter::domain::gBuretteState.load(std::memory_order_acquire);
+            bool motorMoving = brtState != ecotiter::domain::BuretteState::Idle;
+            ecotiter::domain::gMotorIsMoving.store(motorMoving, std::memory_order_release);
+
             ecotiter::interface::BroadcastEvent evt{
                 .tick = ecotiter::application::gTick.load(std::memory_order_acquire),
                 .tempCX100 = ecotiter::domain::gTempCX100.load(std::memory_order_acquire),
                 .mv = ecotiter::domain::gLastMv.load(std::memory_order_acquire),
+                .electrodeMv = ecotiter::domain::gLastMv.load(std::memory_order_acquire),
                 .vlv = ecotiter::domain::gValvePosition.load(std::memory_order_acquire),
-                .brt = ecotiter::domain::gBuretteState.load(std::memory_order_acquire),
+                .brt = brtState,
                 .volumeMl = ecotiter::domain::gVolumeMl.load(std::memory_order_acquire),
                 .speedMlMin = 0.0f,
                 .limitFull = ecotiter::domain::gStopFull.load(std::memory_order_acquire),
-                .limitEmpty = ecotiter::domain::gStopEmpty.load(std::memory_order_acquire)};
+                .limitEmpty = ecotiter::domain::gStopEmpty.load(std::memory_order_acquire),
+                .usbSerialConnected = ecotiter::domain::gUsbHandshakeReceived.load(std::memory_order_acquire),
+                .bleConnected = bleManager.isConnected(),
+                .stepperDrvConnected = true,
+                .stepperDrvOtpw = false,
+                .stepperDrvOt = false,
+                .stallGuardValue = 0,
+                .isStalled = false,
+                .stallGuardThreshold = ecotiter::domain::gStallGuardThreshold.load(std::memory_order_acquire),
+                .motorIsMoving = motorMoving,
+                .stepsTaken = ecotiter::domain::gDispensedSteps.load(std::memory_order_acquire)};
 
             ecotiter::domain::memory::ResponseBuffer buf{};
             auto sv = ecotiter::interface::serializeBroadcast(evt, buf);

@@ -87,6 +87,8 @@ inline std::atomic<bool> gStopEmpty{false};
 inline std::atomic<uint32_t> gDispensedSteps{0};
 inline std::atomic<bool>     gUsbHandshakeReceived{false};
 inline std::atomic<bool>     gBleError{false};
+inline std::atomic<uint8_t>  gStallGuardThreshold{0};
+inline std::atomic<bool>     gMotorIsMoving{false};
 
 // Boot progress tracking — diagnostic heartbeat for serial monitor
 // Set once at each init step. If the device hangs, the last value is visible

@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 namespace ecotiter::diag {
 
@@ -25,6 +27,7 @@ private:
     static constexpr size_t MAX_THREADS = 8;
     const char* names_[MAX_THREADS]{};
     size_t stackSizes_[MAX_THREADS]{};
+    TaskHandle_t handles_[MAX_THREADS]{};
     size_t count_{0};
 };
 

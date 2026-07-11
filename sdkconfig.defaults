@@ -1,5 +1,10 @@
 CONFIG_IDF_TARGET="esp32s3"
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768
+# LL-038: System event task handles WiFi/IP event callbacks through the LogBuffer
+# callback chain (ESP_LOGI → logVprintf → wsLogCallback → broadcastWsEvent → httpd).
+# Each ESP_LOGI in this task adds ~2000 B of stack via the callback. Default 2304 B
+# is insufficient — stack overflow when IP_EVENT_STA_GOT_IP fires during homing.
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=8192
 # IWDT (Interrupt Watchdog Timer) — catches spinlock deadlocks and
 # interrupts-disabled-too-long conditions. Uses MWDT in Timer Group 1.
 # When interrupts are disabled (portENTER_CRITICAL), the tick interrupt
@@ -47,6 +52,12 @@ CONFIG_ESP_WIFI_RX_BA_WIN=6
 CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=4
 CONFIG_HTTPD_WS_SUPPORT=y
 CONFIG_MDNS_MAX_SERVICES=1
+
+# LL-038: HTTP server internal task — default 4096 is too small for WS + JSON
+CONFIG_HTTPD_TASK_STACK_SIZE=12288
+
+# PThread default stack (used by BLE notify thread via std::thread)
+CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=8192
 
 # PSRAM — ESP32-S3 has 8 MB octal PSRAM (Espressif ESP32-S3-DevKitC-1)
 # Use PSRAM aggressively for heap allocations via caps, but keep DMA-critical

@@ -1,8 +1,19 @@
 #include "domain/log_buffer.hpp"
 
 #include <cstring>
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 
 namespace ecotiter::domain {
+
+namespace {
+    QueueHandle_t ensureQueue(void*& queueSlot) {
+        if (queueSlot == nullptr) {
+            queueSlot = xQueueCreate(LogBuffer::LOG_QUEUE_LENGTH, sizeof(size_t));
+        }
+        return static_cast<QueueHandle_t>(queueSlot);
+    }
+}
 
 LogBuffer& LogBuffer::instance() {
     static LogBuffer buf;
@@ -24,17 +35,41 @@ void LogBuffer::push(uint32_t timestampMs, const char* level, const char* messag
     slot.message[sizeof(slot.message) - 1] = '\0';
     slot.timestampMs.store(timestampMs, std::memory_order_release);
 
-    if (callback_) {
-        LogEntry entry;
-        entry.timestampMs = timestampMs;
-        std::strncpy(entry.level, slot.level, sizeof(entry.level) - 1);
-        entry.level[sizeof(entry.level) - 1] = '\0';
-        std::strncpy(entry.message, slot.message, sizeof(entry.message) - 1);
-        entry.message[sizeof(entry.message) - 1] = '\0';
-        callback_(entry);
+    // Async: queue slot index for worker task (non-blocking)
+    auto q = ensureQueue(queue_);
+    if (q) {
+        xQueueSend(q, &idx, 0);
     }
 
     pushing_.store(false, std::memory_order_relaxed);
+}
+
+void LogBuffer::workerTaskEntry(void* pvParameters) {
+    auto& self = instance();
+    auto q = static_cast<QueueHandle_t>(self.queue_);
+    if (q == nullptr) {
+        return;
+    }
+
+    LogEntry entry;
+    while (true) {
+        size_t idx;
+        if (xQueueReceive(q, &idx, portMAX_DELAY) == pdTRUE) {
+            auto& slot = self.slots_[idx];
+            uint32_t ts = slot.timestampMs.load(std::memory_order_acquire);
+            if (ts == 0) continue;
+
+            entry.timestampMs = ts;
+            std::strncpy(entry.level, slot.level, sizeof(entry.level) - 1);
+            entry.level[sizeof(entry.level) - 1] = '\0';
+            std::strncpy(entry.message, slot.message, sizeof(entry.message) - 1);
+            entry.message[sizeof(entry.message) - 1] = '\0';
+
+            if (self.callback_) {
+                self.callback_(entry);
+            }
+        }
+    }
 }
 
 void LogBuffer::clear() {
