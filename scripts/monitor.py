@@ -26,7 +26,7 @@ from datetime import datetime
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 from find_port import find_esp32_port
-from monitor_classifier import SerialClassifier, ResultCode
+from utils.monitor_classifier import SerialClassifier, ResultCode, DedupTracker
 
 BAUDRATE = 115200
 PROJECT_DIR = SCRIPT_DIR.parent
@@ -109,6 +109,14 @@ def monitor_port(port, timeout=30, log_dir=DEFAULT_LOG_DIR, no_reset=False,
 
         deadline = time.time() + timeout
         buf = ""
+        dedup = DedupTracker()
+
+        def emit(line: str, ts: str):
+            for out in dedup.add(line, ts):
+                writeline(out)
+        def flush():
+            for out in dedup.flush():
+                writeline(out)
 
         while time.time() < deadline:
             try:
@@ -129,16 +137,19 @@ def monitor_port(port, timeout=30, log_dir=DEFAULT_LOG_DIR, no_reset=False,
                             continue
 
                         classifier.add_line(line)
-                        writeline(f"[{timestamp()}] {line}")
+                        emit(line, timestamp())
                 else:
                     time.sleep(0.01)
             except serial.SerialException:
+                flush()
                 writeline("=== Connection lost ===", always_visible=True)
                 break
             except KeyboardInterrupt:
+                flush()
                 writeline("\n=== Exiting ===", always_visible=True)
                 break
 
+        flush()
         ser.close()
         writeline("=== Port closed ===", always_visible=True)
 

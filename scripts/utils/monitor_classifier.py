@@ -99,3 +99,48 @@ class SerialClassifier:
             "wrong port, ESP32 not powered, serial adapter disconnected, "
             "or severe early boot crash before ROM output"
         )
+
+
+class DedupTracker:
+    """Coalesces consecutive duplicate lines for compact serial output.
+
+    Usage:
+        tracker = DedupTracker()
+        out = tracker.add("line1", "ts1")  # → "line1"
+        out = tracker.add("line1", "ts2")  # → None  (deduped)
+        out = tracker.add("line2", "ts3")  # → "line1  x2"  +  "line2"
+        out = tracker.flush()              # → "line2"       (if count==1, no xN)
+    """
+
+    def __init__(self):
+        self._line: str | None = None
+        self._ts: str = ""
+        self._count: int = 0
+
+    def add(self, line: str, ts: str) -> list[str]:
+        """Feed a line. Returns list of lines to emit (0-2 entries)."""
+        result: list[str] = []
+        if line == self._line:
+            self._count += 1
+            return result
+        if self._line is not None:
+            result.append(self._format())
+        self._line = line
+        self._ts = ts
+        self._count = 1
+        return result
+
+    def flush(self) -> list[str]:
+        """Force-emit the last series. Returns [] if nothing pending."""
+        if self._line is None:
+            return []
+        result = [self._format()]
+        self._line = None
+        self._count = 0
+        return result
+
+    def _format(self) -> str:
+        text = f"[{self._ts}] {self._line}"
+        if self._count > 1:
+            text += f"  x{self._count}"
+        return text

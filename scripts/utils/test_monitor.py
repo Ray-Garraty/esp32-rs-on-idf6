@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Unit tests for SerialClassifier — pure logic, no I/O, zero external deps.
-Run:  python3 -m unittest scripts/test_monitor.py -v
+Run:  python3 -m unittest scripts/utils/test_monitor.py -v
 """
 
 import unittest
@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from monitor_classifier import SerialClassifier, ResultCode
+from monitor_classifier import SerialClassifier, ResultCode, DedupTracker
 
 
 class TestSerialClassifierBase(unittest.TestCase):
@@ -402,6 +402,85 @@ class TestRegression(TestSerialClassifierBase):
             '=== CRASH ===',
         ]
         self.assertResult(lines, ResultCode.CRASH)
+
+
+class TestDedupTracker(unittest.TestCase):
+    def test_unique_lines(self):
+        t = DedupTracker()
+        self.assertEqual(t.add("line A", "t1"), [])     # first, queued
+        self.assertEqual(t.add("line B", "t2"), ["[t1] line A"])  # previous emitted
+        self.assertEqual(t.add("line C", "t3"), ["[t2] line B"])
+        self.assertEqual(t.flush(), ["[t3] line C"])
+
+    def test_dedup_two(self):
+        t = DedupTracker()
+        self.assertEqual(t.add("hello", "t1"), [])     # first
+        self.assertEqual(t.add("hello", "t2"), [])     # deduped
+        self.assertEqual(t.flush(), ["[t1] hello  x2"])
+
+    def test_dedup_many(self):
+        t = DedupTracker()
+        t.add("beacon", "t1")
+        for _ in range(106):
+            t.add("beacon", "tX")
+        out = t.flush()
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0], "[t1] beacon  x107")
+
+    def test_dedup_then_new_line(self):
+        t = DedupTracker()
+        t.add("same", "t1")
+        t.add("same", "t2")
+        out = t.add("new", "t3")
+        self.assertEqual(out, ["[t1] same  x2"])       # previous series flushed
+        self.assertEqual(t.flush(), ["[t3] new"])
+
+    def test_single_line_flush(self):
+        t = DedupTracker()
+        t.add("only", "t1")
+        self.assertEqual(t.flush(), ["[t1] only"])
+
+    def test_empty_flush(self):
+        t = DedupTracker()
+        self.assertEqual(t.flush(), [])
+
+    def test_dedup_then_flush_then_new(self):
+        t = DedupTracker()
+        t.add("a", "t1")
+        t.add("a", "t2")
+        self.assertEqual(t.flush(), ["[t1] a  x2"])
+        self.assertEqual(t.add("b", "t3"), [])         # first after flush
+        self.assertEqual(t.flush(), ["[t3] b"])
+
+    def test_timestamp_preserves_first(self):
+        """The timestamp in xN output is always the FIRST occurrence."""
+        t = DedupTracker()
+        t.add("msg", "08:00:00.000")
+        t.add("msg", "08:00:01.000")
+        t.add("msg", "08:00:02.000")
+        self.assertEqual(t.flush(), ["[08:00:00.000] msg  x3"])
+
+    def test_no_dedup_across_different_lines(self):
+        t = DedupTracker()
+        t.add("a", "t1")
+        t.add("b", "t2")
+        t.add("a", "t3")
+        # "a" at t1 and "a" at t3 are NOT consecutive — no dedup
+        self.assertEqual(t.flush(), ["[t3] a"])
+
+    def test_interleaved_integration(self):
+        """Realistic scenario: beacon line repeated 107 times between unique lines."""
+        t = DedupTracker()
+        self.assertEqual(t.add("ESP-ROM:esp32s3", "t1"), [])
+        self.assertEqual(t.add("entry 0x403ce000", "t2"), ["[t1] ESP-ROM:esp32s3"])
+
+        self.assertEqual(t.add("I (1280) wifi:Init max length of beacon: 752/752", "t3"), ["[t2] entry 0x403ce000"])
+        for _ in range(106):
+            t.add("I (1280) wifi:Init max length of beacon: 752/752", "tX")
+        out = t.add("I (1290) wifi:mode : sta + softAP", "t4")
+
+        self.assertEqual(out, ["[t3] I (1280) wifi:Init max length of beacon: 752/752  x107"])
+        self.assertEqual(t.flush(), ["[t4] I (1290) wifi:mode : sta + softAP"])
 
 
 if __name__ == "__main__":
