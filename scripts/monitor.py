@@ -1,29 +1,32 @@
 #!/usr/bin/env python3
 """
 Serial monitor for ESP32-S3 firmware. Auto-detects port, resets chip via DTR,
-prints serial output with timestamps, saves to log file.
+saves serial output to log file.
+
+Default (quiet): only status messages to stdout, serial lines to log file only.
+Use --verbose to echo serial output to terminal.
 
 Usage:
-    python scripts/monitor.py                  # auto-detect port, 30s timeout
-    python scripts/monitor.py /dev/ttyACM0      # specify port manually
-    python scripts/monitor.py --timeout 60     # longer
-    python scripts/monitor.py --no-reset       # skip DTR reset
-    python scripts/monitor.py --no-log         # terminal only, no file
+    python scripts/monitor.py                        # quiet, 30s, auto-detect
+    python scripts/monitor.py --verbose              # echo serial to terminal
+    python scripts/monitor.py /dev/ttyACM0            # specify port
+    python scripts/monitor.py --timeout 60           # longer
+    python scripts/monitor.py --no-reset             # skip DTR reset
+    python scripts/monitor.py --no-log               # terminal only, no file
     python scripts/monitor.py --log-dir /tmp/logs
 """
 
 import serial
 import sys
-import os
 import time
 import argparse
-import threading
 from pathlib import Path
 from datetime import datetime
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 from find_port import find_esp32_port
+from monitor_classifier import SerialClassifier, ResultCode
 
 BAUDRATE = 115200
 PROJECT_DIR = SCRIPT_DIR.parent
@@ -39,11 +42,9 @@ def make_log_filename(log_dir: str) -> Path:
     return Path(log_dir) / f"serial_{ts}.log"
 
 
-def monitor_port(port, timeout=30, log_dir=DEFAULT_LOG_DIR, no_reset=False, no_log=False, log_path=None):
-    CRASH_STATE_IDLE = 0
-    CRASH_STATE_COLLECTING = 1
-    crash_state = CRASH_STATE_IDLE
-    crash_buffer: list[str] = []
+def monitor_port(port, timeout=30, log_dir=DEFAULT_LOG_DIR, no_reset=False,
+                 no_log=False, log_path=None, verbose=False):
+    classifier = SerialClassifier(max_last_lines=5)
     log_file = None
     if not no_log:
         log_dir = Path(log_dir)
@@ -71,12 +72,13 @@ def monitor_port(port, timeout=30, log_dir=DEFAULT_LOG_DIR, no_reset=False, no_l
         ser.dtr = False
         ser.rts = False
 
-        def writeline(line: str, end: str = "\n"):
-            try:
-                print(line, end=end, flush=True)
-            except UnicodeEncodeError:
-                safe = line.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
-                print(safe, end=end, flush=True)
+        def writeline(line: str, always_visible: bool = False, end: str = "\n"):
+            if always_visible or verbose:
+                try:
+                    print(line, end=end, flush=True)
+                except UnicodeEncodeError:
+                    safe = line.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+                    print(safe, end=end, flush=True)
             if log_file is not None:
                 try:
                     with open(log_file, "a", encoding="utf-8") as f:
@@ -84,10 +86,10 @@ def monitor_port(port, timeout=30, log_dir=DEFAULT_LOG_DIR, no_reset=False, no_l
                 except OSError:
                     pass
 
-        writeline(f"=== Connected to ESP32-S3 on {port} @ {BAUDRATE} baud ===")
+        writeline(f"=== Connected to ESP32-S3 on {port} @ {BAUDRATE} baud ===", always_visible=True)
 
         if not no_reset:
-            writeline("=== Resetting ESP32-S3 (DTR pulse) ===")
+            writeline("=== Resetting ESP32-S3 (DTR pulse) ===", always_visible=True)
             ser.dtr = False
             ser.rts = False
             time.sleep(0.1)
@@ -99,17 +101,12 @@ def monitor_port(port, timeout=30, log_dir=DEFAULT_LOG_DIR, no_reset=False, no_l
             time.sleep(1.0)
 
         # Flush ROM bootloader binary garbage before reading.
-        # BOOT_OK_MARKER arrives from app_main() hundreds of ms later.
         time.sleep(0.3)
         ser.reset_input_buffer()
 
         if log_file:
-            writeline(f"=== Logging to {log_file} ===")
+            writeline(f"=== Logging to {log_file} ===", always_visible=True)
 
-        found_crash = False
-        found_boot = False
-        found_rom_output = False
-        found_app_output = False
         deadline = time.time() + timeout
         buf = ""
 
@@ -125,50 +122,25 @@ def monitor_port(port, timeout=30, log_dir=DEFAULT_LOG_DIR, no_reset=False, no_l
                             continue
 
                         # Filter out binary garbage from ROM bootloader preamble.
-                        # Real lines start with I/W/E/D/{/= (log level, JSON,
-                        # crash marker). Digit-starting lines are corrupted
-                        # JSON fragments (e.g. "000,\"acc\":...").
-                        # Lines with <30% alpha are raw binary decode.
-                        if not line:
-                            continue
                         if line[0].isdigit():
                             continue
                         n_alpha = sum(c.isalpha() for c in line)
                         if n_alpha < len(line) * 0.3:
                             continue
 
-                        ts = timestamp()
-
-                        if not found_rom_output and "ESP-ROM" in line:
-                            found_rom_output = True
-                        if not found_app_output and ("entry" in line or "BOOT_" in line):
-                            found_app_output = True
-
-                        if "=== CRASH ===" in line:
-                            crash_state = CRASH_STATE_COLLECTING
-                            crash_buffer = [line]
-                            found_crash = True
-                            writeline(f"[{ts}] {line}")
-                        elif crash_state == CRASH_STATE_COLLECTING:
-                            crash_buffer.append(line)
-                            writeline(f"[{ts}] {line}")
-                            if "Rebooting..." in line or "!!! EXCEPTION END !!!" in line:
-                                crash_state = CRASH_STATE_IDLE
-                        else:
-                            if "BOOT_OK_MARKER" in line or line.startswith('{"t":'):
-                                found_boot = True
-                            writeline(f"[{ts}] {line}")
+                        classifier.add_line(line)
+                        writeline(f"[{timestamp()}] {line}")
                 else:
                     time.sleep(0.01)
             except serial.SerialException:
-                writeline("=== Connection lost ===")
+                writeline("=== Connection lost ===", always_visible=True)
                 break
             except KeyboardInterrupt:
-                writeline("\n=== Exiting ===")
+                writeline("\n=== Exiting ===", always_visible=True)
                 break
 
         ser.close()
-        writeline("=== Port closed ===")
+        writeline("=== Port closed ===", always_visible=True)
 
         if log_file and log_file.exists() and log_file.stat().st_size == 0:
             log_file.unlink()
@@ -182,29 +154,9 @@ def monitor_port(port, timeout=30, log_dir=DEFAULT_LOG_DIR, no_reset=False, no_l
 
     if log_path and log_path.exists() and log_path.stat().st_size > 0:
         print(f"Log: {log_path}", flush=True)
-    if found_crash:
-        print("RESULT: CRASH DETECTED", flush=True)
-        return 2
-    elif found_boot:
-        print("RESULT: BOOT OK", flush=True)
-        return 0
-    elif found_rom_output:
-        msg = "RESULT: ROM OUTPUT SEEN BUT NO BOOT MARKER — firmware likely hung"
-        if found_app_output:
-            msg += " (app code reached, hang after entry)"
-        else:
-            msg += " (hang before app_main, possibly DRAM or PHY init)"
-        print(msg, flush=True)
-        return 3
-    elif found_app_output:
-        print("RESULT: APP OUTPUT SEEN BUT NO BOOT/ROM — firmware likely hung", flush=True)
-        return 3
-    else:
-        msg = "RESULT: NO SERIAL OUTPUT AT ALL — possible causes:"
-        msg += " wrong port, ESP32 not powered, serial adapter disconnected,"
-        msg += " or severe early boot crash before ROM output"
-        print(msg, flush=True)
-        return 4
+
+    print(classifier.result_message(), flush=True)
+    return classifier.result()
 
 
 def main():
@@ -214,6 +166,7 @@ def main():
     parser.add_argument("--no-reset", action="store_true", help="Skip DTR reset on connect")
     parser.add_argument("--log-dir", default=DEFAULT_LOG_DIR, help="Directory for log files (default: project_root/logs/)")
     parser.add_argument("--no-log", action="store_true", help="Disable log file saving")
+    parser.add_argument("--verbose", action="store_true", help="Echo serial output to terminal (default: quiet, log only)")
     args = parser.parse_args()
 
     port = args.port or find_esp32_port()
@@ -222,7 +175,8 @@ def main():
         return 1
 
     return monitor_port(port=port, timeout=args.timeout, log_dir=args.log_dir,
-                        no_reset=args.no_reset, no_log=args.no_log)
+                        no_reset=args.no_reset, no_log=args.no_log,
+                        verbose=args.verbose)
 
 
 if __name__ == "__main__":

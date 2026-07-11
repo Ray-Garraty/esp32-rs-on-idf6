@@ -346,6 +346,45 @@ python3 -m serial.tools.miniterm /dev/ttyACM0 115200
 - ALWAYS write Python to a temp file first, then run it
 - Use `/tmp/opencode` for temp scripts
 
+### 6.3 Log File Handling — NEVER READ FULL LOGS
+
+Do NOT read full log files from `logs/` with the Read tool. A single 10 s
+monitor session produces 3000+ lines, consuming excessive context tokens
+and often overflowing the window.
+
+**Required instead:**
+- **Crash analysis:** `python3 scripts/crash_analyzer.py < logs/serial_*.log`
+- **Grep for specific patterns:** Use the Grep tool on `logs/` (e.g. `"Panic handler"`, `"exccause="`).
+- **Tail last N lines:** `bash tail -n 50 logs/serial_*.log`
+- **Search by keyword:** `bash rg "BOOT_OK\|CRASH\|exccause" logs/serial_*.log`
+
+**Forbidden:**
+- `Read` on any `logs/*.log` file without `limit=` and `offset=` to restrict
+  to a specific window.
+- Passing a full log file to the Read tool with no limit.
+
+### 6.4 Monitor Verbosity — DEFAULT IS QUIET
+
+`scripts/monitor.py` runs in **quiet mode by default**: serial lines go only to
+the log file, not stdout. Only status messages (connection, result) appear
+in the terminal.
+
+**AI agent MUST NOT use `--verbose`.** The log file is the source of truth.
+Analyse it via indirect tools (crash_analyzer, grep, rg, tail).
+
+```bash
+# CORRECT (agent)
+timeout 30 python3 scripts/monitor.py
+scripts/crash_analyzer.py < logs/serial_*.log
+rg "BOOT_OK\|CRASH" logs/
+
+# FORBIDDEN (agent)
+python3 scripts/monitor.py --verbose
+Read(logs/serial_*.log)       # no limit/offset
+```
+
+**Human debug session (separate terminal window):** `python3 scripts/monitor.py --verbose`
+
 ---
 
 ## 7. .opencode/ DIRECTORY RULES
@@ -398,6 +437,8 @@ Sub-agents are **forbidden** from creating `.md` or `.yaml` files inside
 | NimBLE init before service registration | Register all GATT services first | docs/refs/project.md §BLE Implementation |
 | `mdns_init()` before IP assigned | Wait for `IP_EVENT_STA_GOT_IP` | docs/refs/project.md |
 | `python -c "..."` inline | Write temp file, then run | §6.2 |
+| `python3 scripts/monitor.py --verbose` in agent | Default quiet; log file is source of truth | §6.4 |
+| `Read(logs/*.log)` without limit/offset | Use crash_analyzer, grep, rg, tail | §6.3 |
 | RMT motion without stop flag | Stop flag before start | GR-2 |
 | `WRITE_PERI_REG` for brownout | `CONFIG_BROWNOUT_DET=n` (must be added to sdkconfig.defaults) | docs/refs/project.md |
 | HTTP bind without IP | `wait_for_ip()` first | GR-3 |
