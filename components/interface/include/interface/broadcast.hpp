@@ -14,11 +14,7 @@ struct BroadcastEvent {
     uint16_t mv;
     domain::ValvePosition vlv;
     domain::BuretteState brt;
-    domain::Direction dir;
-    uint32_t speed;
-    uint32_t accel;
     float volumeMl;
-    uint32_t dispensedSteps;
 };
 
 // Serialize BroadcastEvent to a pre-allocated JSON buffer.

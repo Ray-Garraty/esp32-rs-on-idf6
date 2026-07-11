@@ -3,8 +3,6 @@
 #include <cstdio>
 #include <cstring>
 
-#include "domain/calibration.hpp"
-
 namespace ecotiter::interface {
 
 namespace {
@@ -24,10 +22,6 @@ const char* brtStsStr(domain::BuretteState s) {
         case domain::BuretteState::Stopping: return "working";
         default:                             return "idle";
     }
-}
-
-const char* dirStr(domain::Direction d) {
-    return (d == domain::Direction::LiqIn) ? "liq_in" : "liq_out";
 }
 
 } // anonymous namespace
@@ -56,25 +50,15 @@ std::string_view serializeBroadcast(
         vlStr = vlBuf;
     }
 
-    double spdMlMin = static_cast<double>(evt.speed)
-        * static_cast<double>(domain::CalibrationData::kDefaultSpeedCoeff);
-
     int n = std::snprintf(buf.data(), buf.size(),
-        R"({"t":%lu,"temp":%s,"mv":%u,"vlv":"%s",)"
-        R"("brt":{"sts":"%s","vl":%s,"spd":%.1f},)"
-        R"("dir":"%s","spd":%lu,"acc":%lu,"vol":%.1f,"steps":%lu})",
+        R"({"ts":%lu,"temp":%s,"mv":%u,"vlv":"%s",)"
+        R"("brt":{"sts":"%s","vl":%s}})",
         static_cast<unsigned long>(evt.tick),
         tempStr,
         static_cast<unsigned>(evt.mv),
         valveStr(evt.vlv),
         brtStsStr(evt.brt),
-        vlStr,
-        spdMlMin,
-        dirStr(evt.dir),
-        static_cast<unsigned long>(evt.speed),
-        static_cast<unsigned long>(evt.accel),
-        static_cast<double>(evt.volumeMl),
-        static_cast<unsigned long>(evt.dispensedSteps));
+        vlStr);
 
     if (n < 0 || static_cast<size_t>(n) >= buf.size()) {
         // Truncation or error — return empty view

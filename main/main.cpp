@@ -374,12 +374,7 @@ extern "C" void app_main(void)
                 .mv = ecotiter::domain::gLastMv.load(std::memory_order_acquire),
                 .vlv = ecotiter::domain::gValvePosition.load(std::memory_order_acquire),
                 .brt = ecotiter::domain::gBuretteState.load(std::memory_order_acquire),
-                .dir = ecotiter::domain::gDirection.load(std::memory_order_acquire),
-                .speed = ecotiter::domain::gSpeed.load(std::memory_order_acquire),
-                .accel = ecotiter::domain::gAccel.load(std::memory_order_acquire),
-                .volumeMl = ecotiter::domain::gVolumeMl.load(std::memory_order_acquire),
-                .dispensedSteps =
-                    ecotiter::domain::gDispensedSteps.load(std::memory_order_acquire)};
+                .volumeMl = ecotiter::domain::gVolumeMl.load(std::memory_order_acquire)};
 
             ecotiter::domain::memory::ResponseBuffer buf{};
             auto sv = ecotiter::interface::serializeBroadcast(evt, buf);
@@ -396,11 +391,7 @@ extern "C" void app_main(void)
                 {
                     auto* hs = gHttpServerForWs.load(std::memory_order_acquire);
                     if (hs) {
-                        ecotiter::domain::memory::ResponseBuffer wsBuf{};
-                        auto wsSv = ecotiter::interface::serializeBroadcast(evt, wsBuf);
-                        if (!wsSv.empty()) {
-                            hs->broadcastWsEvent(wsSv.data(), wsSv.size());
-                        }
+                        hs->broadcastWsEvent(sv.data(), sv.size());
                     }
                 }
             }

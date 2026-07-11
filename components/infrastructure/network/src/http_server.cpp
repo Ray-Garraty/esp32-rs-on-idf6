@@ -286,18 +286,56 @@ esp_err_t api_logs_handler(httpd_req_t* req) {
     return ESP_OK;
 }
 
+esp_err_t api_nvs_status_handler(httpd_req_t* req) {
+    diag::FfiGuard guard(82);
+
+    bool buretteCalExists = false;
+    bool adcCalExists = false;
+
+    {
+        auto nvs = storage::NvsHandle(config::NVS_NS_BURETTE_CAL, false);
+        if (nvs.isValid()) {
+            auto r = nvs.getF32(config::NVS_KEY_CAL_SPM);
+            buretteCalExists = (r && r->has_value());
+        }
+    }
+    {
+        auto nvs = storage::NvsHandle(config::NVS_NS_ADC_CAL, false);
+        if (nvs.isValid()) {
+            uint16_t aX1000{};
+            int16_t b{};
+            storage::adcCalibrationRead(aX1000, b);
+            adcCalExists = (aX1000 != 0 || b != 0);
+        }
+    }
+
+    domain::memory::ResponseBuffer rsp{};
+    int n = std::snprintf(rsp.data(), rsp.size(),
+        R"({"burette_cal":%s,"adc_cal":%s})",
+        buretteCalExists ? "true" : "false",
+        adcCalExists ? "true" : "false");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, rsp.data(), static_cast<ssize_t>(n));
+    return ESP_OK;
+}
+
 esp_err_t api_logs_download_handler(httpd_req_t* req) {
     diag::FfiGuard guard(82);
 
-    domain::LogEntry entries[100];
-    size_t count = domain::LogBuffer::instance().fetch(entries, 100);
+    domain::LogEntry entries[20];
+    size_t count = domain::LogBuffer::instance().fetch(entries, 20);
 
     domain::memory::ResponseBuffer rsp{};
     size_t pos = 0;
     for (size_t i = 0; i < count; ++i) {
-        int n = std::snprintf(rsp.data() + pos, rsp.size() - pos,
+        size_t remaining = rsp.size() - pos;
+        if (remaining < 4) break;
+        int n = std::snprintf(rsp.data() + pos, remaining,
             "[%s] %s\n", entries[i].level, entries[i].message);
-        if (n > 0) pos += static_cast<size_t>(n);
+        if (n > 0) {
+            size_t written = std::min(static_cast<size_t>(n), remaining - 1);
+            pos += written;
+        }
         if (pos >= rsp.size()) break;
     }
     if (pos == 0) {
@@ -416,6 +454,9 @@ void HttpServer::registerRoutes() {
     reg({ .uri = "/api/logs", .method = HTTP_GET, .handler = api_logs_handler });
     reg({ .uri = "/api/logs/download", .method = HTTP_GET, .handler = api_logs_download_handler });
 
+    // NVS status
+    reg({ .uri = "/api/nvs/status", .method = HTTP_GET, .handler = api_nvs_status_handler });
+
     // WebSocket — pass `this` as user_ctx so ws_handler can track sessions
     reg({
         .uri = "/ws/stream",
@@ -427,7 +468,6 @@ void HttpServer::registerRoutes() {
 
     // WebUI static files
     reg({ .uri = "/", .method = HTTP_GET, .handler = root_handler, .user_ctx = this });
-    reg({ .uri = "/style.css", .method = HTTP_GET, .handler = webui_file_handler });
     reg({ .uri = "/js/state.js", .method = HTTP_GET, .handler = webui_file_handler });
     reg({ .uri = "/js/ws.js", .method = HTTP_GET, .handler = webui_file_handler });
     reg({ .uri = "/js/ui-update.js", .method = HTTP_GET, .handler = webui_file_handler });
@@ -455,7 +495,7 @@ void HttpServer::registerRoutes() {
 }
 
 void HttpServer::broadcastWsEvent(const char* jsonData, size_t len) {
-    if (!handle_) return;
+    if (!handle_ || !jsonData || len == 0) return;
 
     httpd_ws_frame_t frame{};
     frame.type = HTTPD_WS_TYPE_TEXT;
@@ -463,11 +503,15 @@ void HttpServer::broadcastWsEvent(const char* jsonData, size_t len) {
     frame.len = len;
 
     int sent = 0;
+    int total = 0;
     for (auto& session : sessions_) {
         if (session.fd < 0) continue;
+        ++total;
 
         auto fdInfo = httpd_ws_get_fd_info(handle_, session.fd);
         if (fdInfo != HTTPD_WS_CLIENT_WEBSOCKET) {
+            ESP_LOGW(TAG, "WS session fd=%d not WS (info=%d), removing",
+                     session.fd, static_cast<int>(fdInfo));
             session.fd = WS_FD_INVALID;
             continue;
         }
@@ -475,19 +519,11 @@ void HttpServer::broadcastWsEvent(const char* jsonData, size_t len) {
         esp_err_t err = httpd_ws_send_frame_async(
             handle_, session.fd, &frame);
         if (err != ESP_OK) {
-            char dbg[64];
-            int nn = std::snprintf(dbg, sizeof(dbg), "WS send err=%d fd=%d\n",
-                                   static_cast<int>(err), session.fd);
-            write(STDOUT_FILENO, dbg, static_cast<size_t>(nn));
+            ESP_LOGW(TAG, "WS send err=%d fd=%d", static_cast<int>(err), session.fd);
             session.fd = WS_FD_INVALID;
         } else {
             ++sent;
         }
-    }
-    if (sent > 0) {
-        write(STDOUT_FILENO, "DBG: WS broadcast OK\n", 22);
-    } else {
-        write(STDOUT_FILENO, "DBG: WS broadcast no sessions\n", 31);
     }
 }
 

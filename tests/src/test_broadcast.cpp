@@ -19,11 +19,7 @@ TEST_CASE("serializeBroadcast: builds valid JSON with all fields", "[broadcast]"
         .mv = 1500,
         .vlv = ValvePosition::Input,
         .brt = BuretteState::Idle,
-        .dir = Direction::LiqIn,
-        .speed = 1000,
-        .accel = 500,
         .volumeMl = 50.0f,
-        .dispensedSteps = 12345
     };
 
     memory::ResponseBuffer buf{};
@@ -31,18 +27,12 @@ TEST_CASE("serializeBroadcast: builds valid JSON with all fields", "[broadcast]"
     REQUIRE_FALSE(sv.empty());
 
     auto j = json::parse(sv);
-    REQUIRE(j["t"] == 42);
+    REQUIRE(j["ts"] == 42);
     REQUIRE(j["temp"] == Catch::Approx(23.4));
     REQUIRE(j["mv"] == 1500);
     REQUIRE(j["vlv"] == "in");
     REQUIRE(j["brt"]["sts"] == "idle");
     REQUIRE(j["brt"]["vl"] == Catch::Approx(50.0));
-    REQUIRE(j["brt"]["spd"] == Catch::Approx(30.5));
-    REQUIRE(j["dir"] == "liq_in");
-    REQUIRE(j["spd"] == 1000);
-    REQUIRE(j["acc"] == 500);
-    REQUIRE(j["vol"] == 50.0f);
-    REQUIRE(j["steps"] == 12345);
 }
 
 TEST_CASE("serializeBroadcast: output position, liq_out, dosing", "[broadcast]") {
@@ -52,11 +42,7 @@ TEST_CASE("serializeBroadcast: output position, liq_out, dosing", "[broadcast]")
         .mv = 0,
         .vlv = ValvePosition::Output,
         .brt = BuretteState::Dosing,
-        .dir = Direction::LiqOut,
-        .speed = 2000,
-        .accel = 300,
         .volumeMl = 25.0f,
-        .dispensedSteps = 0
     };
 
     memory::ResponseBuffer buf{};
@@ -67,11 +53,6 @@ TEST_CASE("serializeBroadcast: output position, liq_out, dosing", "[broadcast]")
     REQUIRE(j["vlv"] == "out");
     REQUIRE(j["brt"]["sts"] == "working");
     REQUIRE(j["brt"]["vl"] == Catch::Approx(25.0));
-    REQUIRE(j["dir"] == "liq_out");
-    REQUIRE(j["spd"] == 2000);
-    REQUIRE(j["acc"] == 300);
-    REQUIRE(j["vol"] == 25.0f);
-    REQUIRE(j["steps"] == 0);
 }
 
 TEST_CASE("serializeBroadcast: sensor not detected (tempCX100 = -99999)", "[broadcast]") {
@@ -81,11 +62,7 @@ TEST_CASE("serializeBroadcast: sensor not detected (tempCX100 = -99999)", "[broa
         .mv = 0,
         .vlv = ValvePosition::Input,
         .brt = BuretteState::Idle,
-        .dir = Direction::LiqIn,
-        .speed = 1000,
-        .accel = 500,
         .volumeMl = 50.0f,
-        .dispensedSteps = 0
     };
 
     memory::ResponseBuffer buf{};
@@ -104,11 +81,7 @@ TEST_CASE("serializeBroadcast: all burette states round-trip", "[broadcast]") {
             .mv = 0,
             .vlv = ValvePosition::Input,
             .brt = state,
-            .dir = Direction::LiqIn,
-            .speed = 1000,
-            .accel = 500,
             .volumeMl = 50.0f,
-            .dispensedSteps = 0
         };
         memory::ResponseBuffer buf{};
         auto sv = serializeBroadcast(evt, buf);
@@ -149,11 +122,7 @@ TEST_CASE("serializeBroadcast: reads from domain atoms produce valid JSON", "[br
         .mv = gLastMv.load(std::memory_order_acquire),
         .vlv = gValvePosition.load(std::memory_order_acquire),
         .brt = gBuretteState.load(std::memory_order_acquire),
-        .dir = gDirection.load(std::memory_order_acquire),
-        .speed = gSpeed.load(std::memory_order_acquire),
-        .accel = gAccel.load(std::memory_order_acquire),
         .volumeMl = gVolumeMl.load(std::memory_order_acquire),
-        .dispensedSteps = gDispensedSteps.load(std::memory_order_acquire)
     };
 
     memory::ResponseBuffer buf{};
