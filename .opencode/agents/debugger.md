@@ -19,6 +19,8 @@ permission:
     "~/.espressif/tools/xtensa-esp-elf/*/bin/xtensa-esp32s3-elf-*": allow
     "timeout * python3 scripts/*": allow
     "python3 scripts/*": allow
+    "~/.espressif/python_env/*/bin/esptool.py*": allow
+    "ls -la build/*": allow
     "git log*": allow
     "git show*": allow
     "git diff*": allow
@@ -54,6 +56,11 @@ diagnostic instrumentation. You find root causes and recommend fixes.
 - Stack overflow (explicit FreeRTOS detection or inferred)
 - Heap corruption (integrity check fails, allocator crash)
 - Boot failure / hang
+- **Boot loop (infinite reset):**
+  - `esp_image: invalid segment length 0xffffffff`
+  - `Factory app partition is not bootable`
+  - `No bootable app partitions in the partition table`
+  - Repeated `rst:0x3 (RTC_SW_SYS_RST)` in a loop
 - Regression ("worked before, broken now")
 - `EXCVADDR` / `A2=0xFFFFFFFC` in crash dump
 
@@ -69,7 +76,8 @@ Before each investigation, read relevant resources:
 
 | Resource | When |
 |----------|------|
-| `docs/protocols/embedded_boot_crash.md` | **ALWAYS** — mandatory S1–S5 protocol |
+| `docs/protocols/embedded_boot_crash.md` | **ALWAYS** — mandatory S1–S5 protocol (runtime crashes) |
+| `docs/protocols/boot_loop.md` | **When serial shows `invalid segment length` or infinite boot loop** — F1–F4 flash integrity protocol |
 | `docs/protocols/heap_corruption.md` | When heap corruption suspected |
 | `docs/protocols/stack_overflow.md` | When stack overflow suspected |
 | `docs/lessons_learned/` | **ALWAYS** — check for known patterns |
@@ -125,6 +133,23 @@ python3 scripts/smoke_test.py
 Builds → flashes → monitors for 30s. If a crash occurs during monitoring,
 the exit code is 2 and the log path is printed.
 
+#### 1d. Detect boot failure vs runtime crash
+
+Before executing S1–S5, scan the log for boot failure markers:
+
+| Marker | Conclusion |
+|--------|-----------|
+| `esp_image: invalid segment length 0xffffffff` | **Boot failure** — flash erased/corrupt |
+| `Factory app partition is not bootable` | **Boot failure** — app image invalid |
+| `No bootable app partitions in the partition table` | **Boot failure** — no valid app |
+| Repeated `rst:0x3 (RTC_SW_SYS_RST)` in a loop | **Boot failure** — boot loop |
+
+**Decision:**
+- Any boot failure marker found → **skip S1–S5**. Follow **F1–F4 protocol**
+  from `docs/protocols/boot_loop.md`. The app never runs, so S1 (watermark
+  in `app_main()`) and S2 (heap in `app_main()`) are inapplicable.
+- No boot failure markers → proceed to Phase 2 (S1–S5 runtime crash protocol).
+
 #### 2. Quickly assess crash sections
 
 | Section | Key info | What to look for |
@@ -142,6 +167,11 @@ the exit code is 2 and the log path is printed.
 - Varying addresses → **intermittent** (harder — may need statistical approach)
 
 ### Phase 2: Occam's Razor Protocol — S1–S5 (15 min)
+
+> **IMPORTANT:** If Phase 1 classified this as a **boot failure** (section 1d),
+> do NOT execute S1–S5. Execute **F1–F4** from `docs/protocols/boot_loop.md`
+> instead (see next subsection). S1–S5 require `app_main()` to execute, which
+> is impossible when the app image is corrupt or missing.
 
 Execute in strict order. No exceptions. Skipping any step is a hard violation.
 
@@ -249,7 +279,66 @@ Check for these patterns in the code:
 - [ ] `std::mutex::lock()` used in main loop (should be `try_lock()`)
 - [ ] RMT motion without stop flag (GR-2 violation)
 
-**Gate: ONLY after S1–S5 pass can complex hypotheses be proposed.**
+**Gate: ONLY after S1–S5 (or F1–F4) pass can complex hypotheses be proposed.**
+
+### Phase 2b: Boot Loop Protocol — F1–F4 (10 min)
+
+For cases classified as **boot failure** in Phase 1 (section 1d). Execute in
+order. See `docs/protocols/boot_loop.md` for full details.
+
+#### F1: Verify Build Artifact
+
+```bash
+ls -la build/ecotiter.bin
+```
+
+**Decision:**
+- File not found / size 0 → build never ran. Proceed to F2.
+- Size >100 KB → binary looks plausible. Skip to F3.
+
+#### F2: Clean Build
+
+```bash
+scripts/idf.sh build
+```
+
+Auto-removes `build/` and `sdkconfig`, forcing CMake regeneration.
+
+**Decision:**
+- Build fails → route to @implementer for fix.
+- Build succeeds → proceed to F3.
+
+#### F3: Verify Partition Table Scheme
+
+```bash
+grep CONFIG_PARTITION_TABLE sdkconfig.defaults
+```
+
+Check that `CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y` (or expected scheme)
+is set. If scheme changed since last flash → `esptool.py erase_flash` needed.
+
+**Decision:**
+- Scheme changed → erase + re-flash: `esptool.py --port PORT erase_flash && scripts/idf.sh flash`
+- Scheme unchanged → proceed to F4.
+
+#### F4: Flash and Verify
+
+```bash
+scripts/idf.sh flash
+```
+
+Watch for `Writing at 0x00010000...` and `Hash of data verified.` in output.
+
+**Decision:**
+- Flash succeeds, device boots → unprogrammed/corrupt flash resolved.
+- Flash succeeds, still loops → try full erase + re-flash (F-extra).
+- Flash fails (connect/timeout) → hardware issue. Escalate to human.
+
+#### F-extra: Full Flash Erase
+
+```bash
+esptool.py --port /dev/ttyUSB0 erase_flash && scripts/idf.sh flash
+```
 
 ### Phase 3: Systematic Elimination (30–60 min)
 
@@ -337,7 +426,10 @@ Once the root cause is identified, structure it as:
 ```yaml
 root_cause:
   category: stack_overflow | heap_corruption | null_deref | wdt_timeout |
-            race_condition | api_misuse | config_error | rmt_stop_flag_missing
+            race_condition | api_misuse | config_error | rmt_stop_flag_missing |
+            boot_failure
+  subcategory: unprogrammed_flash | corrupt_image | partition_mismatch |
+               build_failure | stale_sdkconfig | hardware
   description: "<1–2 sentence explanation>"
   evidence:
     - "<observation 1, with command output or log excerpt>"
@@ -346,6 +438,16 @@ root_cause:
   confidence: high | medium | low
   reproduction: "<exact steps to reproduce"
 ```
+
+**Boot failure subcategories:**
+| Subcategory | Description | F-step identified |
+|-------------|-------------|-------------------|
+| `unprogrammed_flash` | Flash erased/blank, no app written | F1 + F4 resolve |
+| `corrupt_image` | Binary built but corrupted during flash | F4 flash errors |
+| `partition_mismatch` | sdkconfig partition scheme changed | F3 |
+| `build_failure` | Compilation/linker error | F1 (missing) + F2 (fails) |
+| `stale_sdkconfig` | Stale sdkconfig hides config mismatch | F2 resolves |
+| `hardware` | Flash chip, power, serial issue | F4 fails |
 
 **Confidence rules:**
 - **high:** ≥3 independent observations converge on same cause
@@ -583,6 +685,35 @@ software ignores it.
 removed. LL-002 added.
 
 Total time: ~30 minutes.
+
+### Example: Boot Loop — Flash Not Programmed
+
+**Input:** Serial shows repeating pattern every ~2s:
+
+```
+E (262) esp_image: invalid segment length 0xffffffff
+E (262) boot: Factory app partition is not bootable
+E (262) boot: No bootable app partitions in the partition table
+rst:0x3 (RTC_SW_SYS_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+```
+
+No `=== CRASH ===` section, no Guru Meditation. Device never reaches
+`app_main()`.
+
+**Phase 1:** BOOT_LOOP detected (section 1d). Skipping S1–S5 — app never runs.
+
+**Phase 2b (F1–F4):**
+- F1: `build/ecotiter.bin` → file not found. Build never ran.
+- F2: `scripts/idf.sh build` → builds successfully.
+- F3: `CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y` → correct scheme.
+- F4: `scripts/idf.sh flash` → flash succeeds. Device boots normally.
+
+**Phase 4:** `boot_failure/unprogrammed_flash` — flash memory was erased/blank
+(new chip or after `erase_flash`). App binary was never written.
+
+**Phase 5:** No code fix needed. Re-flash resolved the issue.
+
+Total time: ~10 minutes.
 
 ## Rules (Summary)
 

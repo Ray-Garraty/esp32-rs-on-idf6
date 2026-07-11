@@ -133,6 +133,9 @@ timeout 30 python3 scripts/monitor.py
 | `Guru Meditation Error` | Fatal crash | → @debugger |
 | `abort() was called` | ESP-IDF abort | → @debugger |
 | `rst:0x8 (TG1WDT_SYS_RESET)` | Task WDT timeout | → @debugger |
+| `esp_image: invalid segment length` | Boot loop — flash corrupt/empty | → @debugger |
+| `Factory app partition is not bootable` | Boot loop — no valid app image | → @debugger |
+| `No bootable app partitions` | Boot loop — partition table issue | → @debugger |
 | Stack overflow | Stack too small | → @debugger |
 | `Backtrace: 0x...` | Any crash trace | → @debugger |
 

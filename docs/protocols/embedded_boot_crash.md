@@ -11,11 +11,16 @@ timestamp: 2026-07-03
 
 # Protocol: Embedded Boot Crash
 
+> **Scope:** This protocol applies when the bootloader has transferred control
+> to `app_main()` — i.e., the app image exists and is validated. If the device
+> never boots due to a missing/corrupt app image (boot loop), use
+> `boot_loop.md` (F1–F4 protocol) instead.
+
 ## Trigger
 - Guru Meditation at boot (any category)
 - WDT reset (`rst:0x8`, `TG1WDT_SYS_RESET`)
 - Boot hang (no serial output after startup log)
-- `invalid segment length 0xffffffff` (incomplete flash)
+- `invalid segment length 0xffffffff` (incomplete flash — see `boot_loop.md`)
 
 ## Mandatory Steps (S1–S5 Occam's Razor Protocol)
 
@@ -120,4 +125,5 @@ If no root cause after 75 minutes → escalate to human with:
 - `AGENTS.md` — golden rule, build commands, crash investigation
 - `docs/protocols/heap_corruption.md` — heap-specific triage
 - `docs/protocols/stack_overflow.md` — stack-specific triage
+- `docs/protocols/boot_loop.md` — boot loop / flash integrity (F1–F4)
 - `scripts/crash_analyzer.py` — Guru Meditation parser
