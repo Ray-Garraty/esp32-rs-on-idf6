@@ -28,3 +28,4 @@ components_esp32.lock
 
 # Managed components (IDF Component Registry) — auto-downloaded, never edit
 /managed_components/
+/dependencies.lock
