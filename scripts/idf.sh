@@ -53,6 +53,7 @@ resolve_port() {
 # Clean build with metadata injection
 do_build() {
     rm -rf "$PROJECT_DIR/build"
+    rm -f "$PROJECT_DIR/sdkconfig" "$PROJECT_DIR/sdkconfig.old"
     BUILD_DATE=$(date '+%Y-%m-%d %H:%M:%S')
     GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
     export BUILD_DATE GIT_HASH
@@ -63,6 +64,48 @@ do_build() {
         echo "BUILD_DATE=\"$BUILD_DATE\""
         echo "GIT_HASH=$GIT_HASH"
     } > "$PROJECT_DIR/build/.build_meta"
+}
+
+# Erase entire flash chip
+do_erase_flash() {
+    local port
+    port=$(resolve_port "${1:-}")
+    echo "⚠️  This will ERASE THE ENTIRE FLASH CHIP on $port."
+    echo "    All data will be lost (bootloader, app, NVS calibration, WiFi credentials)."
+    echo -n "    Type 'yes' to continue: "
+    read -r confirm
+    if [ "$confirm" != "yes" ]; then
+        echo "❌ Aborted."
+        exit 1
+    fi
+    echo "Erasing entire flash on $port..."
+    idf.py -p "$port" erase-flash
+    echo "✅ Flash erased. Run './scripts/idf.sh flash' to re-program."
+}
+
+# Erase NVS partition only (parttool.py, fallback esptool)
+do_erase_nvs() {
+    local port
+    port=$(resolve_port "${1:-}")
+    echo "⚠️  This will ERASE THE NVS PARTITION on $port."
+    echo "    Calibration data, WiFi credentials, and NVS settings will be lost."
+    echo "    The app firmware will remain intact."
+    echo -n "    Type 'yes' to continue: "
+    read -r confirm
+    if [ "$confirm" != "yes" ]; then
+        echo "❌ Aborted."
+        exit 1
+    fi
+    local parttool="$IDF_PATH/components/partition_table/parttool.py"
+    if [ -f "$parttool" ]; then
+        echo "Erasing NVS partition via parttool.py..."
+        python3 "$parttool" --port "$port" erase_partition --partition-name=nvs
+    else
+        echo "⚠️  parttool.py not found, falling back to esptool with known offsets."
+        echo "    Erasing region 0x9000 +0x6000 (NVS for SINGLE_APP_LARGE)..."
+        esptool.py --port "$port" erase-region 0x9000 0x6000
+    fi
+    echo "✅ NVS partition erased."
 }
 
 CMD="${1:-build}"
@@ -157,6 +200,18 @@ case "$CMD" in
         rm -rf build build-tests
         ;;
 
+    erase-flash)
+        PORT=$(resolve_port "${2:-}")
+        echo "Port: $PORT"
+        do_erase_flash "$PORT"
+        ;;
+
+    erase-nvs)
+        PORT=$(resolve_port "${2:-}")
+        echo "Port: $PORT"
+        do_erase_nvs "$PORT"
+        ;;
+
     help|--help|-h)
         echo "ecotiter C++23 firmware toolchain — single entry point"
         echo ""
@@ -178,14 +233,18 @@ case "$CMD" in
         echo "  uart [port]           UART integration test"
         echo "  reconfigure           Remove sdkconfig + idf.py reconfigure"
         echo "  clean                 Remove build/ and build-tests/"
+        echo "  erase-flash [port]    Erase ENTIRE flash chip (all data lost)"
+        echo "  erase-nvs [port]      Erase NVS partition only (calibration, WiFi creds)"
         echo ""
         echo "EXAMPLES"
-        echo "  ./scripts/idf.sh build                 # clean build"
-        echo "  ./scripts/idf.sh flash                 # flash (auto-detect port)"
-        echo "  ./scripts/idf.sh flash /dev/ttyUSB0    # flash (specific port)"
-        echo "  ./scripts/idf.sh smoke                 # full pipeline test"
-        echo "  ./scripts/idf.sh test -- \"dose*\"       # run dose-related tests"
-        echo "  ./scripts/idf.sh clean                 # remove artifacts"
+        echo "  ./scripts/idf.sh build                          # clean build"
+        echo "  ./scripts/idf.sh flash                          # flash (auto-detect port)"
+        echo "  ./scripts/idf.sh flash /dev/ttyUSB0             # flash (specific port)"
+        echo "  ./scripts/idf.sh smoke                          # full pipeline test"
+        echo "  ./scripts/idf.sh test -- \"dose*\"                # run dose-related tests"
+        echo "  ./scripts/idf.sh clean                          # remove artifacts"
+        echo "  ./scripts/idf.sh erase-flash                    # erase entire chip"
+        echo "  ./scripts/idf.sh erase-nvs                      # erase NVS only"
         echo ""
         echo "SDK CONFIG POLICY"
         echo "  Edit only sdkconfig.defaults — never sdkconfig (auto-generated)"
@@ -205,7 +264,7 @@ case "$CMD" in
         ;;
 
     *)
-        echo "Usage: $0 {build|flash|monitor|smoke|test|tidy|uart|reconfigure|clean|help}"
+        echo "Usage: $0 {build|flash|monitor|smoke|test|tidy|uart|reconfigure|clean|erase-flash|erase-nvs|help}"
         exit 1
         ;;
 esac

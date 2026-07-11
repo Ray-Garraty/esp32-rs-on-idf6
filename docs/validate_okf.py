@@ -32,6 +32,7 @@ ALLOWED_TYPES = {
 }
 
 SKIP_DIRS = frozenset({"esp_idf_v6"})
+SKIP_FILES = frozenset({"refs/esp32-s3_datasheet_en.md"})
 
 REQUIRED_FIELDS = {"type", "title", "description", "tags", "timestamp"}
 ISO8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -56,7 +57,11 @@ def find_md_files(root: Path):
             # skip reserved filenames
             if f in ("index.md", "log.md"):
                 continue
-            yield Path(dirpath) / f
+            filepath = Path(dirpath) / f
+            rel = filepath.relative_to(root)
+            if str(rel) in SKIP_FILES:
+                continue
+            yield filepath
 
 
 def parse_frontmatter(content: str):
