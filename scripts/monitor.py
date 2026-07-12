@@ -27,10 +27,16 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 from find_port import find_esp32_port
 from utils.monitor_classifier import SerialClassifier, ResultCode, DedupTracker
+from utils.boot_detect import BootDetector
 
 BAUDRATE = 115200
 PROJECT_DIR = SCRIPT_DIR.parent
 DEFAULT_LOG_DIR = str(PROJECT_DIR / "logs")
+
+
+def _clean(line: str) -> str:
+    """Remove non-printable characters except common whitespace."""
+    return ''.join(c for c in line if c.isprintable() or c in '\n\r\t')
 
 
 def timestamp():
@@ -45,6 +51,7 @@ def make_log_filename(log_dir: str) -> Path:
 def monitor_port(port, timeout=30, log_dir=DEFAULT_LOG_DIR, no_reset=False,
                  no_log=False, log_path=None, verbose=False):
     classifier = SerialClassifier(max_last_lines=5)
+    boot_detector = BootDetector()
     log_file = None
     if not no_log:
         log_dir = Path(log_dir)
@@ -73,6 +80,7 @@ def monitor_port(port, timeout=30, log_dir=DEFAULT_LOG_DIR, no_reset=False,
         ser.rts = False
 
         def writeline(line: str, always_visible: bool = False, end: str = "\n"):
+            line = _clean(line)
             if always_visible or verbose:
                 try:
                     print(line, end=end, flush=True)
@@ -137,6 +145,7 @@ def monitor_port(port, timeout=30, log_dir=DEFAULT_LOG_DIR, no_reset=False,
                             continue
 
                         classifier.add_line(line)
+                        boot_detector.add_line(line)
                         emit(line, timestamp())
                 else:
                     time.sleep(0.01)
@@ -150,6 +159,13 @@ def monitor_port(port, timeout=30, log_dir=DEFAULT_LOG_DIR, no_reset=False,
                 break
 
         flush()
+
+        if boot_detector.reboot_detected:
+            writeline(
+                f"WARNING: ESP32-S3 reboot detected (BOOT OK: seen {boot_detector.count} times)",
+                always_visible=True
+            )
+
         ser.close()
         writeline("=== Port closed ===", always_visible=True)
 
@@ -163,11 +179,17 @@ def monitor_port(port, timeout=30, log_dir=DEFAULT_LOG_DIR, no_reset=False,
         sys.stdout.buffer.flush()
         return 1
 
-    if log_path and log_path.exists() and log_path.stat().st_size > 0:
-        print(f"Log: {log_path}", flush=True)
-
-    print(classifier.result_message(), flush=True)
-    return classifier.result()
+    if boot_detector.reboot_detected:
+        msg = f"WARNING: ESP32-S3 reboot detected (BOOT OK: seen {boot_detector.count} times)"
+        if log_path:
+            msg += f" — run: crash_analyzer.py < {log_path}"
+        print(msg, flush=True)
+        return 2
+    else:
+        if log_path and log_path.exists() and log_path.stat().st_size > 0:
+            print(f"Log: {log_path}", flush=True)
+        print(classifier.result_message(), flush=True)
+        return classifier.result()
 
 
 def main():

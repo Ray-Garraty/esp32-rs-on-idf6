@@ -354,6 +354,11 @@ Do NOT read full log files from `logs/` with the Read tool. A single 10 s
 monitor session produces 3000+ lines, consuming excessive context tokens
 and often overflowing the window.
 
+**Additionally, `logs/serial_*.log` files contain binary null bytes (`\0`) from
+the ESP32 ROM bootloader output. The Read tool rejects these as binary files.**
+Always use `bash` with `tail`, `rg -a`, `strings`, or `crash_analyzer.py`
+to inspect serial logs — never `Read`.
+
 **Required instead:**
 - **Crash analysis:** `python3 scripts/crash_analyzer.py < logs/serial_*.log`
 - **Grep for specific patterns:** Use the Grep tool on `logs/` (e.g. `"Panic handler"`, `"exccause="`).
@@ -364,6 +369,7 @@ and often overflowing the window.
 - `Read` on any `logs/*.log` file without `limit=` and `offset=` to restrict
   to a specific window.
 - Passing a full log file to the Read tool with no limit.
+- `Read` on `logs/serial_*.log` at all (binary null bytes → Read rejects).
 
 ### 6.4 Monitor Verbosity — DEFAULT IS QUIET
 
