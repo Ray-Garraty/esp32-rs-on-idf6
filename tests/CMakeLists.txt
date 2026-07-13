@@ -91,6 +91,7 @@ add_executable(unit_tests
     src/test_json_utils.cpp
     src/test_mdns.cpp
     src/test_cal_math.cpp
+    src/test_wifi_sta.cpp
 )
 
 target_include_directories(unit_tests PRIVATE

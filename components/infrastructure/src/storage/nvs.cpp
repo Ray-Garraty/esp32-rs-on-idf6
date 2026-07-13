@@ -182,6 +182,16 @@ void nvsInit() {
             }
         }
     }
+    {
+        auto nvs = NvsHandle(config::NVS_NS_STALLGUARD, true);
+        if (nvs.isValid()) {
+            auto r = nvs.getU32(config::NVS_KEY_SG_THRESHOLD);
+            if (r && !r->has_value()) {
+                std::ignore = nvs.setU32(config::NVS_KEY_SG_THRESHOLD, 0);
+                ESP_LOGI(TAG, "Initialized %s namespace with defaults", config::NVS_NS_STALLGUARD);
+            }
+        }
+    }
 }
 
 uint8_t stallguardReadThreshold() {
@@ -208,6 +218,20 @@ domain::Result<void, domain::ResourceError> wifiErase(const char* key) {
     auto nvs = NvsHandle("wifi", true);
     if (!nvs.isValid()) return std::unexpected(domain::ResourceError::NvsOpenFailed);
     return nvs.eraseKey(key);
+}
+
+domain::Result<uint8_t, domain::ResourceError> wifiReadCount() {
+    auto nvs = NvsHandle("wifi", false);
+    if (!nvs.isValid()) return std::unexpected(domain::ResourceError::NvsOpenFailed);
+    auto r = nvs.getU8(config::NVS_KEY_WIFI_COUNT);
+    if (!r) return std::unexpected(r.error());
+    return r->value_or(0);
+}
+
+domain::Result<void, domain::ResourceError> wifiWriteCount(uint8_t count) {
+    auto nvs = NvsHandle("wifi", true);
+    if (!nvs.isValid()) return std::unexpected(domain::ResourceError::NvsOpenFailed);
+    return nvs.setU8(config::NVS_KEY_WIFI_COUNT, count);
 }
 
 domain::Result<domain::CalibrationData, domain::ResourceError> calibrationRead() {

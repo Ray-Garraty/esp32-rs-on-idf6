@@ -27,6 +27,8 @@ public:
     [[nodiscard]] std::expected<void, domain::AppError> init();
     void startAP();
     [[nodiscard]] bool tryStartSTA();
+    [[nodiscard]] bool waitForSTA(uint32_t timeoutMs = 10000);
+    void saveCredentials(const char* ssid, const char* password);
 
     // Connect to STA with explicit credentials (blocking, up to timeoutMs).
     // Returns true if connected, false on timeout/failure.

@@ -42,4 +42,16 @@ domain::Result<void, domain::ResourceError> stallguardWriteThreshold(uint8_t) {
     return {};
 }
 
+domain::Result<uint8_t, domain::ResourceError> wifiReadCount() {
+    return static_cast<uint8_t>(0);
+}
+
+domain::Result<void, domain::ResourceError> wifiWriteStr(const char*, const char*) {
+    return {};
+}
+
+domain::Result<void, domain::ResourceError> wifiWriteCount(uint8_t) {
+    return {};
+}
+
 } // namespace ecotiter::infrastructure::storage

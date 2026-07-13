@@ -208,15 +208,10 @@ extern "C" void netTaskEntry(void* pvParameters) {
         return;
     }
 
-    // GR-3: start AP immediately after WiFi init. IP logged within seconds.
-    // Homing runs concurrently on motor task (GR-12 dual-core: WiFi ISR on CPU0,
-    // RMT on CPU1 — no interrupt storm).
-    wifiManager.startAP();
-
-    // Attempt STA connection from NVS credentials (non-blocking, async)
-    bool staStarted = wifiManager.tryStartSTA();
-    if (staStarted) {
-        ESP_LOGI("net_owner", "STA connection attempt in progress");
+    // Try STA first — iterates through saved NVS networks, blocks per slot
+    bool staConnected = wifiManager.tryStartSTA();
+    if (!staConnected) {
+        wifiManager.startAP();
     }
 
     // GR-3: HTTP server immediately after WiFi. All tasks independent.
@@ -228,7 +223,11 @@ extern "C" void netTaskEntry(void* pvParameters) {
         gHttpServerForWs.store(&httpServer, std::memory_order_release);
         ecotiter::domain::LogBuffer::instance().setCallback(wsLogCallback);
 
-        ESP_LOGI("net_owner", "HTTP server ready on 192.168.4.1:80");
+        if (staConnected) {
+            ESP_LOGI("net_owner", "HTTP server ready (STA mode)");
+        } else {
+            ESP_LOGI("net_owner", "HTTP server ready on 192.168.4.1:80 (AP mode)");
+        }
     } else {
         ESP_LOGW("net_owner", "HTTP server init failed");
     }

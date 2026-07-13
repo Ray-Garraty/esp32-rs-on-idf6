@@ -58,12 +58,14 @@ void adcCalibrationRead(uint16_t& aX1000, int16_t& b);
 template <size_t N>
 [[nodiscard]] domain::Result<std::optional<std::string_view>, domain::ResourceError> wifiReadStr(
     const char* key, char (&buf)[N]) {
-    auto nvs = NvsHandle("wifi", true);
+    auto nvs = NvsHandle("wifi", false);
     if (!nvs.isValid()) return std::unexpected(domain::ResourceError::NvsOpenFailed);
     return nvs.getStr(key, buf, N);
 }
 
 [[nodiscard]] domain::Result<void, domain::ResourceError> wifiWriteStr(const char* key, const char* value);
 [[nodiscard]] domain::Result<void, domain::ResourceError> wifiErase(const char* key);
+[[nodiscard]] domain::Result<uint8_t, domain::ResourceError> wifiReadCount();
+[[nodiscard]] domain::Result<void, domain::ResourceError> wifiWriteCount(uint8_t count);
 
 } // namespace ecotiter::infrastructure::storage

@@ -156,7 +156,15 @@ void WifiManager::startAP() {
                  config::AP_PASSWORD, sizeof(apConfig.ap.password) - 1);
     apConfig.ap.password[sizeof(apConfig.ap.password) - 1] = '\0';
 
-    esp_err_t err = esp_wifi_set_config(WIFI_IF_AP, &apConfig);
+    // Ensure APSTA mode (belt-and-suspenders — init() normally sets it,
+    // but tryStartSTA() may have changed it to WIFI_MODE_STA).
+    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "set APSTA mode: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = esp_wifi_set_config(WIFI_IF_AP, &apConfig);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "set AP config: %s", esp_err_to_name(err));
         return;
@@ -234,9 +242,9 @@ bool WifiManager::connectSTA(const char* ssid, const char* password,
              bits == 0);
 
     if (bits & STA_CONNECTED_BIT) {
-        // Save credentials on success
         std::strncpy(staSsid_, ssid, sizeof(staSsid_) - 1);
         staSsid_[sizeof(staSsid_) - 1] = '\0';
+        saveCredentials(ssid, password);
         ESP_LOGI(TAG, "STA connected via connectSTA: %s", ssid);
         return true;
     }
@@ -250,56 +258,209 @@ bool WifiManager::connectSTA(const char* ssid, const char* password,
 bool WifiManager::tryStartSTA() {
     if (!initialized_ || staConnecting_) return false;
 
-    char ssidBuf[64]{};
-    char passBuf[64]{};
-
-    {
-        auto ssidResult = storage::wifiReadStr(config::NVS_KEY_WIFI_SSID, ssidBuf);
-        if (!ssidResult || !ssidResult->has_value()) {
-            ESP_LOGI(TAG, "No saved WiFi credentials");
-            return false;
+    // Read number of saved networks and log them
+    auto countResult = storage::wifiReadCount();
+    uint8_t count = countResult ? *countResult : 0;
+    if (count == 0) {
+        ESP_LOGI(TAG, "NVS: no saved WiFi networks");
+        return false;
+    }
+    ESP_LOGI(TAG, "NVS: %u saved WiFi network(s)", count);
+    for (uint8_t s = 0; s < count && s < config::WIFI_MAX_NETWORKS; s++) {
+        char keyBuf[16];
+        char ssidBuf[64]{};
+        std::snprintf(keyBuf, sizeof(keyBuf), "ssid_%u", s);
+        auto r = storage::wifiReadStr(keyBuf, ssidBuf);
+        if (r && r->has_value()) {
+            ESP_LOGI(TAG, "NVS slot %u: SSID=%s", s, ssidBuf);
         }
-        auto passResult = storage::wifiReadStr(config::NVS_KEY_WIFI_PASS, passBuf);
-        if (!passResult || !passResult->has_value()) {
-            ESP_LOGI(TAG, "No saved WiFi password");
-            return false;
-        }
-
-        auto ssidSv = ssidResult->value();
-        size_t ssidLen = std::min(ssidSv.size(), sizeof(staSsid_) - 1);
-        std::memcpy(staSsid_, ssidSv.data(), ssidLen);
-        staSsid_[ssidLen] = '\0';
     }
 
     diag::FfiGuard guard(72);
+
+    // Ensure event group exists
+    if (staEventGroup_ == nullptr) {
+        staEventGroup_ = xEventGroupCreate();
+        if (staEventGroup_ == nullptr) return false;
+    }
+
+    // Start WiFi in STA mode if not already running.
+    // init() sets WIFI_MODE_APSTA but does NOT call esp_wifi_start().
+    // Handle both WIFI_MODE_NULL (uninitialized) and WIFI_MODE_APSTA
+    // (init called but not started) by switching to STA and starting.
+    bool startedHere = false;
+    wifi_mode_t currentMode;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_get_mode(&currentMode));
+    if (currentMode == WIFI_MODE_NULL || currentMode == WIFI_MODE_APSTA) {
+        // Either init() hasn't been called (NULL) or it set APSTA without
+        // starting (init() line 75). Switch to STA-only and start.
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
+        esp_err_t err = esp_wifi_start();
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "wifi start failed: %s", esp_err_to_name(err));
+            return false;
+        }
+        startedHere = true;
+    }
+    // If currentMode == WIFI_MODE_STA or WIFI_MODE_AP, WiFi is already
+    // running — proceed with connection attempt.
 
     if (staNetif_ == nullptr) {
         ESP_LOGE(TAG, "STA netif not created (init() must be called first)");
         return false;
     }
 
-    wifi_config_t staConfig{};
-    std::strncpy(reinterpret_cast<char*>(staConfig.sta.ssid),
-                 ssidBuf, sizeof(staConfig.sta.ssid) - 1);
-    std::strncpy(reinterpret_cast<char*>(staConfig.sta.password),
-                 passBuf, sizeof(staConfig.sta.password) - 1);
-    staConfig.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    // Try each saved network in order
+    for (uint8_t slot = 0; slot < count; slot++) {
+        char keyBuf[16];
+        char ssidBuf[64]{};
+        char passBuf[64]{};
 
-    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &staConfig);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "set STA config: %s", esp_err_to_name(err));
-        return false;
+        std::snprintf(keyBuf, sizeof(keyBuf), "ssid_%u", slot);
+        auto ssidResult = storage::wifiReadStr(keyBuf, ssidBuf);
+        if (!ssidResult || !ssidResult->has_value()) continue;
+
+        std::snprintf(keyBuf, sizeof(keyBuf), "password_%u", slot);
+        auto passResult = storage::wifiReadStr(keyBuf, passBuf);
+        if (!passResult || !passResult->has_value()) continue;
+
+        ESP_LOGI(TAG, "Trying STA slot %u: %s", slot, ssidBuf);
+
+        xEventGroupClearBits(staEventGroup_, STA_CONNECTED_BIT | STA_DISCONNECTED_BIT);
+
+        wifi_config_t staConfig{};
+        std::strncpy(reinterpret_cast<char*>(staConfig.sta.ssid),
+                     ssidBuf, sizeof(staConfig.sta.ssid) - 1);
+        std::strncpy(reinterpret_cast<char*>(staConfig.sta.password),
+                     passBuf, sizeof(staConfig.sta.password) - 1);
+        staConfig.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+
+        esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &staConfig);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "STA slot %u set_config failed: %s", slot, esp_err_to_name(err));
+            continue;
+        }
+
+        staConnecting_ = true;
+        err = esp_wifi_connect();
+        if (err != ESP_OK) {
+            staConnecting_ = false;
+            ESP_LOGE(TAG, "STA slot %u connect failed: %s", slot, esp_err_to_name(err));
+            continue;
+        }
+
+        // Blocking wait per slot (6s per network, covers auth + DHCP)
+        EventBits_t bits = xEventGroupWaitBits(
+            staEventGroup_,
+            STA_CONNECTED_BIT | STA_DISCONNECTED_BIT,
+            pdTRUE, pdFALSE,
+            pdMS_TO_TICKS(6000));
+
+        if (bits & STA_CONNECTED_BIT) {
+            auto sv = ssidResult->value();
+            size_t len = std::min(sv.size(), sizeof(staSsid_) - 1);
+            std::memcpy(staSsid_, sv.data(), len);
+            staSsid_[len] = '\0';
+            ESP_LOGI(TAG, "Connected to STA: %s", staSsid_);
+            return true;
+        }
+
+        staConnecting_ = false;
+        esp_wifi_disconnect();
+        ESP_LOGW(TAG, "STA slot %u failed (%s)", slot, ssidBuf);
     }
 
-    err = esp_wifi_connect();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "wifi connect: %s", esp_err_to_name(err));
-        return false;
+    // If we started WiFi but all slots failed, stop and restore APSTA
+    // mode so that startAP() (called by netTaskEntry on failure) can
+    // start cleanly.
+    if (startedHere) {
+        esp_err_t stop_err = esp_wifi_stop();
+        if (stop_err != ESP_OK) {
+            ESP_LOGW(TAG, "wifi stop after STA failure: %s", esp_err_to_name(stop_err));
+        }
+        // Restore APSTA mode expected by startAP() fallback
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    }
+    ESP_LOGW(TAG, "All %u saved networks failed", count);
+    return false;
+}
+
+void WifiManager::saveCredentials(const char* ssid, const char* password) {
+    char keyBuf[16];
+    uint8_t count = 0;
+    auto countResult = storage::wifiReadCount();
+    if (countResult) count = *countResult;
+
+    // Check if SSID already exists — update in place
+    for (uint8_t i = 0; i < count; i++) {
+        std::snprintf(keyBuf, sizeof(keyBuf), "ssid_%u", i);
+        char existing[64]{};
+        auto r = storage::wifiReadStr(keyBuf, existing);
+        if (r && r->has_value() && r->value() == ssid) {
+            std::snprintf(keyBuf, sizeof(keyBuf), "password_%u", i);
+            std::ignore = storage::wifiWriteStr(keyBuf, password);
+            ESP_LOGI(TAG, "Updated password for existing network: %s", ssid);
+            return;
+        }
     }
 
-    staConnecting_ = true;
-    ESP_LOGI(TAG, "Connecting to STA: %s", staSsid_);
-    return true;
+    if (count < config::WIFI_MAX_NETWORKS) {
+        // Append new slot
+        std::snprintf(keyBuf, sizeof(keyBuf), "ssid_%u", count);
+        std::ignore = storage::wifiWriteStr(keyBuf, ssid);
+        std::snprintf(keyBuf, sizeof(keyBuf), "password_%u", count);
+        std::ignore = storage::wifiWriteStr(keyBuf, password);
+        std::ignore = storage::wifiWriteCount(count + 1);
+        ESP_LOGI(TAG, "Saved new network %s (slot %u, total %u)", ssid, count, count + 1);
+    } else {
+        // FIFO eviction: shift slot 1..MAX-1 to 0..MAX-2
+        for (uint8_t i = 1; i < config::WIFI_MAX_NETWORKS; i++) {
+            char srcKey[16], dstKey[16];
+            std::snprintf(srcKey, sizeof(srcKey), "ssid_%u", i);
+            std::snprintf(dstKey, sizeof(dstKey), "ssid_%u", i - 1);
+            char buf[64]{};
+            auto r = storage::wifiReadStr(srcKey, buf);
+            if (r && r->has_value()) {
+                std::ignore = storage::wifiWriteStr(dstKey, buf);
+            }
+            std::snprintf(srcKey, sizeof(srcKey), "password_%u", i);
+            std::snprintf(dstKey, sizeof(dstKey), "password_%u", i - 1);
+            buf[0] = '\0';
+            r = storage::wifiReadStr(srcKey, buf);
+            if (r && r->has_value()) {
+                std::ignore = storage::wifiWriteStr(dstKey, buf);
+            }
+        }
+        // Write new network to last slot
+        uint8_t last = config::WIFI_MAX_NETWORKS - 1;
+        std::snprintf(keyBuf, sizeof(keyBuf), "ssid_%u", last);
+        std::ignore = storage::wifiWriteStr(keyBuf, ssid);
+        std::snprintf(keyBuf, sizeof(keyBuf), "password_%u", last);
+        std::ignore = storage::wifiWriteStr(keyBuf, password);
+        ESP_LOGI(TAG, "Saved new network %s (FIFO eviction, slot %u)", ssid, last);
+    }
+}
+
+bool WifiManager::waitForSTA(uint32_t timeoutMs) {
+    if (!initialized_ || !staConnecting_) return staConnected_.load(std::memory_order_acquire);
+
+    xEventGroupClearBits(staEventGroup_, STA_CONNECTED_BIT | STA_DISCONNECTED_BIT);
+
+    EventBits_t bits = xEventGroupWaitBits(
+        staEventGroup_,
+        STA_CONNECTED_BIT | STA_DISCONNECTED_BIT,
+        pdTRUE, pdFALSE,
+        pdMS_TO_TICKS(timeoutMs));
+
+    if (bits & STA_CONNECTED_BIT) {
+        ESP_LOGI(TAG, "waitForSTA: connected (bit=0x%x)", bits);
+        return true;
+    }
+
+    ESP_LOGW(TAG, "waitForSTA: timeout/failure after %lu ms", (unsigned long)timeoutMs);
+    staConnecting_ = false;
+    esp_wifi_disconnect();
+    return false;
 }
 
 void WifiManager::stop() {

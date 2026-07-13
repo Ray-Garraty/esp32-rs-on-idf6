@@ -151,10 +151,6 @@ esp_err_t captive_wifi_connect_handler(httpd_req_t* req) {
     bool connected = wifi->connectSTA(ssid, password, 15000);
 
     if (connected) {
-        // Save credentials to NVS
-        std::ignore = storage::wifiWriteStr(config::NVS_KEY_WIFI_SSID, ssid);
-        std::ignore = storage::wifiWriteStr(config::NVS_KEY_WIFI_PASS, password);
-
         httpd_resp_set_type(req, "application/json");
         httpd_resp_send(req,
             R"({"success":true,"message":"Connected. Restarting..."})",
