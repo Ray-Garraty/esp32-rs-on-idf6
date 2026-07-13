@@ -7,6 +7,11 @@ description: >
   Covers the DRAM Triangle interaction, DMA constraints, and cache eviction risks.
 tags: [memory, psram, dram, esp32-s3, allocation, heap-caps, pmr]
 timestamp: 2026-07-13
+revision: 1 (post-implementation sync)
+changelog:
+  - 2026-07-13: Synced code listings to actual implementation.
+    Key changes: throw→abort (no exceptions), computeRamp defaults,
+    LogBuffer init() pattern, added ALLOW_BSS_SEG=n, moved monitoring to diag/.
 ---
 
 # Memory Management Specification
@@ -122,6 +127,7 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024    # Project policy (IDF default is 163
 # === PSRAM Safety ===
 CONFIG_SPIRAM_BOOT_INIT=y                   # Init PSRAM at boot
 CONFIG_SPIRAM_IGNORE_NOTFOUND=n             # Panic if PSRAM missing (hardware fault)
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=n  # BSS stays in DRAM — ISR globals (gStopFull, etc.) must not land in PSRAM
 # CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=4096  # Reserve 4 KB pool for MALLOC_CAP_INTERNAL-only allocations
 ```
 
@@ -133,6 +139,7 @@ After `scripts/idf.sh build`, the generated `sdkconfig` must contain:
 CONFIG_SPIRAM_USE_CAPS_ALLOC=y
 # CONFIG_SPIRAM_USE_MALLOC is not set
 # CONFIG_SPIRAM_USE_MEMMAP is not set
+# CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY is not set  (=n — BSS in DRAM)
 CONFIG_FREERTOS_UNICORE=n
 ```
 
@@ -162,12 +169,15 @@ namespace ecotiter::memory {
 /// Usage:
 ///   std::pmr::vector<uint32_t> ramp{&psram_resource()};
 ///   std::pmr::string json_out{&psram_resource()};
+///
+/// Note: ESP-IDF disables C++ exceptions by default, so allocation failure
+/// calls std::abort() instead of throwing std::bad_alloc.
 class PsramResource : public std::pmr::memory_resource {
 protected:
     void* do_allocate(std::size_t bytes, std::size_t alignment) override {
         void* ptr = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!ptr) {
-            throw std::bad_alloc();
+            std::abort();  // ESP-IDF: exceptions disabled
         }
         return ptr;
     }
@@ -244,7 +254,7 @@ public:
         data_ = static_cast<uint8_t*>(
             heap_caps_malloc(N, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
         if (!data_) {
-            throw std::bad_alloc();
+            std::abort();  // ESP-IDF: exceptions disabled
         }
     }
 
@@ -289,23 +299,26 @@ Motion profiles generate large vectors of step intervals — ideal PSRAM candida
 
 #include <cstdint>
 #include <memory_resource>
+#include <vector>
 
 namespace ecotiter::domain {
 
 struct RampConfig {
-    uint32_t accel_steps;
-    uint32_t decel_steps;
-    uint32_t min_interval_us;  // Full speed
-    uint32_t max_interval_us;  // Start/stop
+    uint32_t accelSteps;
+    uint32_t decelSteps;
+    uint32_t minIntervalUs;  // Full speed (shortest interval)
+    uint32_t maxIntervalUs;  // Start/stop (longest interval)
 };
 
 /// Compute trapezoidal motion profile.
 /// Returns vector of per-step intervals in microseconds.
-/// Uses PSRAM by default via PMR allocator.
+/// Accepts a PMR resource for PSRAM-backed allocation.
+/// Default resource is get_default_resource() — callers in infrastructure/
+/// pass &ecotiter::memory::psram_resource() explicitly to use PSRAM.
 [[nodiscard]] std::pmr::vector<uint32_t> computeRamp(
-    uint32_t total_steps,
+    uint32_t totalSteps,
     const RampConfig& config,
-    std::pmr::memory_resource* res = &ecotiter::memory::psram_resource()
+    std::pmr::memory_resource* res = std::pmr::get_default_resource()
 );
 
 } // namespace ecotiter::domain
@@ -333,26 +346,87 @@ void motor_task_dispatch_move(uint32_t steps, const RampConfig& cfg) {
 
 ### 4.5 LogBuffer in PSRAM
 
-Current ring buffer (100 entries) can scale to 1000+ with PSRAM backing.
+Ring buffer with 1000+ entries in PSRAM. Uses a static `init()` method
+for dependency injection — `domain/` layer cannot depend on `infrastructure/` headers.
+
+**File:** `components/domain/include/domain/log_buffer.hpp`
 
 ```cpp
-class LogBuffer {
-    std::pmr::vector<LogEntry> entries_;
-    size_t write_idx_ = 0;
-    std::atomic<size_t> count_{0};
+#pragma once
 
-public:
-    explicit LogBuffer(size_t capacity = 1000)
-        : entries_(capacity, &ecotiter::memory::psram_resource()) {}
+#include <cstdint>
+#include <cstring>
+#include <atomic>
+#include <memory_resource>
+#include <vector>
 
-    void push(const LogEntry& entry) {
-        entries_[write_idx_] = entry;
-        write_idx_ = (write_idx_ + 1) % entries_.size();
-        if (count_.load(std::memory_order_acquire) < entries_.size()) {
-            count_.fetch_add(1, std::memory_order_release);
-        }
-    }
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+
+namespace ecotiter::domain {
+
+struct LogEntry {
+    uint32_t timestampMs;
+    char level[8];
+    char message[128];
 };
+
+class LogBuffer {
+public:
+    static constexpr size_t MAX_MSG_LEN = 128;
+    static constexpr size_t LOG_QUEUE_LENGTH = 16;
+
+    using Callback = void(*)(const LogEntry& entry);
+
+    /// Initialize the singleton with PSRAM backing.
+    /// Must be called before first push() — fail to init = push() is no-op.
+    static void init(size_t capacity, std::pmr::memory_resource* res);
+
+    static LogBuffer& instance();
+
+    void push(uint32_t timestampMs, const char* level, const char* message);
+    void clear();
+    void setCallback(Callback cb);
+
+    [[nodiscard]] size_t fetch(LogEntry* out, size_t maxCount,
+                                const char* levelFilter = nullptr) const;
+
+    static void workerTaskEntry(void* pvParameters);
+
+private:
+    LogBuffer() = default;
+
+    struct Slot {
+        std::atomic<uint32_t> timestampMs{0};
+        char level[8]{};
+        char message[MAX_MSG_LEN]{};
+    };
+
+    std::pmr::vector<Slot> slots_;       // PSRAM-backed (after init)
+    size_t capacity_ = 0;
+    std::atomic<size_t> head_{0};
+    std::atomic<bool> pushing_{false};
+    Callback callback_{nullptr};
+    QueueHandle_t queue_{nullptr};
+    bool initialized_ = false;
+};
+
+} // namespace ecotiter::domain
+```
+
+**Initialization in** `main.cpp` (before log hook):
+
+```cpp
+#include "infrastructure/memory/psram_resource.hpp"
+
+void app_main() {
+    // ...
+    ecotiter::domain::LogBuffer::init(
+        1000, &ecotiter::memory::psram_resource());
+
+    esp_log_set_vprintf(logVprintf);  // install log hook (uses PSRAM-backed buffer)
+    // ...
+}
 ```
 
 ---
@@ -503,19 +577,45 @@ If PSRAM init fails, the chip should panic (hardware fault, `CONFIG_SPIRAM_IGNOR
 
 ### 7.2 Post-Init Heap State
 
-After full init (WiFi + HTTP + BLE), query heap state:
+After full init (WiFi + HTTP + BLE), query heap state via `diag::print_heap_stats()`:
+
+**File:** `components/diag/include/diag/heap_monitor.hpp`
 
 ```cpp
-#include <esp_heap_caps.h>
+#pragma once
 
-void print_heap_stats() {
-    ESP_LOGI("heap", "PSRAM free: %u bytes, largest: %u bytes",
-             heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-             heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
-    ESP_LOGI("heap", "DRAM free: %u bytes, largest: %u bytes",
-             heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-             heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+#include <cstdio>
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+
+namespace ecotiter::diag {
+
+inline void print_heap_stats() {
+    auto psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    auto psram_largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+    auto dram_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    auto dram_largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+
+    ESP_LOGI("heap", "PSRAM free=%lu largest=%lu | DRAM free=%lu largest=%lu",
+             (unsigned long)psram_free, (unsigned long)psram_largest,
+             (unsigned long)dram_free, (unsigned long)dram_largest);
+
+    // Warning thresholds per §7.2
+    if (psram_free < 4 * 1024 * 1024) {
+        ESP_LOGW("heap", "CRITICAL: PSRAM free < 4 MB (%lu)", (unsigned long)psram_free);
+    }
+    if (psram_largest < 256 * 1024) {
+        ESP_LOGW("heap", "CRITICAL: PSRAM largest block < 256 KB (%lu)", (unsigned long)psram_largest);
+    }
+    if (dram_free < 20 * 1024) {
+        ESP_LOGW("heap", "CRITICAL: DRAM free < 20 KB (%lu)", (unsigned long)dram_free);
+    }
+    if (dram_largest < 4 * 1024) {
+        ESP_LOGW("heap", "CRITICAL: DRAM largest block < 4 KB (%lu)", (unsigned long)dram_largest);
+    }
 }
+
+} // namespace ecotiter::diag
 ```
 
 Expected values after full init:
@@ -529,18 +629,26 @@ Expected values after full init:
 
 ### 7.3 Continuous Monitoring
 
-Add periodic heap logging to `main.cpp` (every 60 s):
+Periodic heap logging in `main.cpp` (every 60 s). Uses `diag::print_heap_stats()`
+declared in `components/diag/include/diag/heap_monitor.hpp`:
 
 ```cpp
+#include "diag/heap_monitor.hpp"
+
 void app_main() {
     // ... init ...
-    TickType_t last_heap_log = 0;
+
+    // Boot-time check after full init
+    ecotiter::diag::print_heap_stats();
+
+    TickType_t last_heap_log = xTaskGetTickCount();
     while (true) {
         TickType_t now = xTaskGetTickCount();
         if (now - last_heap_log > pdMS_TO_TICKS(60000)) {
-            print_heap_stats();
+            ecotiter::diag::print_heap_stats();
             last_heap_log = now;
         }
+
         // ... main loop work ...
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(10));
     }

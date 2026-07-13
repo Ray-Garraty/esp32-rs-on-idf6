@@ -14,10 +14,12 @@
 #include "application/scheduler.hpp"
 #include "diag/black_box.hpp"
 #include "diag/ffi_guard.hpp"
+#include "diag/heap_monitor.hpp"
 #include "diag/rtc_watchdog.hpp"
 #include "diag/stack_monitor.hpp"
 #include "diag/tick_watchdog.hpp"
 #include "infrastructure/config.hpp"
+#include "infrastructure/memory/psram_resource.hpp"
 #include "infrastructure/drivers/adc.hpp"
 #include "infrastructure/drivers/rgb_led.hpp"
 #include "infrastructure/motor_task.hpp"
@@ -286,6 +288,11 @@ extern "C" void app_main(void)
     // Warmup: flush any stale serial data, ensure stdout works
     fflush(stdout);
 
+    // Initialize LogBuffer with PSRAM backing (before log hook!)
+    ecotiter::domain::LogBuffer::init(
+        ecotiter::domain::memory::LOG_BUF_ENTRIES,
+        &ecotiter::memory::psram_resource());
+
     // Install ESP_LOG capture → LogBuffer (captures all subsequent ESP_LOGI/LOGW/LOGE calls)
     esp_log_set_vprintf(logVprintf);
 
@@ -415,6 +422,8 @@ extern "C" void app_main(void)
     puts("DBG: step 9 - RUNNING");
     fflush(stdout);
 
+    ecotiter::diag::print_heap_stats();
+
     diag::FfiGuard guard(50);
     infrastructure::drivers::AdcDriver adc(ADC_UNIT_1, ADC_CHANNEL_3);
     gAdcDriver = &adc;
@@ -457,6 +466,13 @@ extern "C" void app_main(void)
         esp_task_wdt_reset();
 
         scheduler.tick();
+
+        static TickType_t last_heap_log = 0;
+        TickType_t now_ticks = xTaskGetTickCount();
+        if (now_ticks - last_heap_log > pdMS_TO_TICKS(60000)) {
+            ecotiter::diag::print_heap_stats();
+            last_heap_log = now_ticks;
+        }
 
         if (scheduler.shouldCheckWatermarks()) {
             stackmon.logAllWatermarks();

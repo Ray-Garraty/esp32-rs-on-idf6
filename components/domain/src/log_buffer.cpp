@@ -7,12 +7,25 @@
 namespace ecotiter::domain {
 
 namespace {
-    QueueHandle_t ensureQueue(void*& queueSlot) {
+    QueueHandle_t ensureQueue(QueueHandle_t& queueSlot) {
         if (queueSlot == nullptr) {
             queueSlot = xQueueCreate(LogBuffer::LOG_QUEUE_LENGTH, sizeof(size_t));
         }
-        return static_cast<QueueHandle_t>(queueSlot);
+        return queueSlot;
     }
+}
+
+void LogBuffer::init(size_t capacity, std::pmr::memory_resource* res) {
+    auto& self = instance();
+    if (self.initialized_.load(std::memory_order_acquire)) return;
+
+    // Replace default-allocated vector with PSRAM-allocated one
+    self.slots_.~vector();
+    ::new (&self.slots_) std::pmr::vector<Slot>(res);
+    self.slots_.resize(capacity);
+    self.capacity_ = capacity;
+    self.queue_ = nullptr;
+    self.initialized_.store(true, std::memory_order_release);
 }
 
 LogBuffer& LogBuffer::instance() {
@@ -21,10 +34,11 @@ LogBuffer& LogBuffer::instance() {
 }
 
 void LogBuffer::push(uint32_t timestampMs, const char* level, const char* message) {
+    if (!initialized_.load(std::memory_order_acquire)) return;
     if (pushing_.load(std::memory_order_relaxed)) return;
     pushing_.store(true, std::memory_order_relaxed);
 
-    size_t idx = head_.fetch_add(1, std::memory_order_acq_rel) % MAX_ENTRIES;
+    size_t idx = head_.fetch_add(1, std::memory_order_acq_rel) % capacity_;
     auto& slot = slots_[idx];
 
     slot.level[0] = '\0';
@@ -35,7 +49,6 @@ void LogBuffer::push(uint32_t timestampMs, const char* level, const char* messag
     slot.message[sizeof(slot.message) - 1] = '\0';
     slot.timestampMs.store(timestampMs, std::memory_order_release);
 
-    // Async: queue slot index for worker task (non-blocking)
     auto q = ensureQueue(queue_);
     if (q) {
         xQueueSend(q, &idx, 0);
@@ -46,7 +59,7 @@ void LogBuffer::push(uint32_t timestampMs, const char* level, const char* messag
 
 void LogBuffer::workerTaskEntry(void* pvParameters) {
     auto& self = instance();
-    auto q = static_cast<QueueHandle_t>(self.queue_);
+    auto q = self.queue_;
     if (q == nullptr) {
         return;
     }
@@ -73,6 +86,7 @@ void LogBuffer::workerTaskEntry(void* pvParameters) {
 }
 
 void LogBuffer::clear() {
+    if (!initialized_.load(std::memory_order_acquire)) return;
     for (auto& slot : slots_) {
         slot.timestampMs.store(0, std::memory_order_release);
         slot.level[0] = '\0';
@@ -87,13 +101,14 @@ void LogBuffer::setCallback(Callback cb) {
 
 size_t LogBuffer::fetch(LogEntry* out, size_t maxCount,
                          const char* levelFilter) const {
+    if (!initialized_.load(std::memory_order_acquire)) return 0;
     size_t currentHead = head_.load(std::memory_order_acquire);
     size_t written = 0;
 
-    for (size_t offset = 1; offset <= MAX_ENTRIES && written < maxCount; ++offset) {
+    for (size_t offset = 1; offset <= capacity_ && written < maxCount; ++offset) {
         size_t idx = (currentHead >= offset)
-            ? (currentHead - offset) % MAX_ENTRIES
-            : (MAX_ENTRIES + currentHead - offset) % MAX_ENTRIES;
+            ? (currentHead - offset) % capacity_
+            : (capacity_ + currentHead - offset) % capacity_;
 
         uint32_t ts = slots_[idx].timestampMs.load(std::memory_order_acquire);
         if (ts == 0) continue;
