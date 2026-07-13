@@ -79,7 +79,7 @@ Output findings as `## Platform Facts` in every debugger response.
 
 1. **Reset reason:** `docs/protocols/embedded_boot_crash.md` — S1–S5 protocol
 2. **Thread architecture & spinlock rules:** `docs/refs/project.md §Thread Architecture`
-3. **Known patterns:** `docs/lessons_learned/` — grep the crash symptom
+3. **Known patterns:** `docs/protocols/crash_triage.md` (signature table) + `docs/lessons_learned/` — grep the crash symptom
 4. **Config constraints:** `sdkconfig.defaults` and `components/*/sdkconfig` for
    `UNICORE`, `SPIRAM_FETCH_INSTRUCTIONS`, `TASK_WDT`, `INT_WDT`
 5. **ESP-IDF FreeRTOS docs:** grep `CONFIG_FREERTOS_UNICORE` help text in
@@ -93,6 +93,7 @@ Output findings as `## Platform Facts` in every debugger response.
 | `docs/protocols/boot_loop.md` | **Serial shows `invalid segment length` / infinite boot loop** — F1–F4 |
 | `docs/protocols/heap_corruption.md` | Heap corruption suspected |
 | `docs/protocols/stack_overflow.md` | Stack overflow suspected |
+| `docs/protocols/crash_triage.md` | **ALWAYS** — exception causes, known signatures, triage pipeline |
 | `docs/refs/coding_style.md` | **ALWAYS** — C++23 conventions, RAII, error hierarchy |
 | `AGENTS.md` | Build commands, golden rules, ESP32-S3 specifics |
 | `scripts/crash_analyzer.py` | **ALWAYS on crash dump** — decode backtrace + pattern check |

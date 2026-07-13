@@ -246,4 +246,4 @@ Re-evaluate if field data shows unrecoverable low-voltage lockups.
 | LL-047: RWDT not fed | [../lessons_learned/LL-047.yaml](../lessons_learned/LL-047.yaml) |
 | LL-045: UNICORE spinlock deadlock | [../lessons_learned/LL-045.yaml](../lessons_learned/LL-045.yaml) |
 | LL-031/032: PHY calibration GPIO spinlock | [../lessons_learned/LL-031.yaml](../lessons_learned/LL-031.yaml) |
-| Unsafe GPIO pins | [unsafe_gpio_pins.md](unsafe_gpio_pins.md) |
+| Unsafe GPIO pins | [gpio_pins_spec.md](gpio_pins_spec.md) |

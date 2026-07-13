@@ -442,7 +442,7 @@ ecotiter/
 +-- docs/
 |   +-- refs/project.md            # This file
 |   +-- refs/coding_style.md       # Coding conventions
-|   +-- refs/unsafe_gpio_pins.md   # GPIO safety for Octal PSRAM
+|   +-- refs/gpio_pins_spec.md   # GPIO safety for Octal PSRAM
 |   +-- guides/testing.md          # 3-tier testing strategy
 |   +-- lessons_learned/           # Crash patterns (LL-001 through LL-042)
 |   +-- protocols/                 # Debug protocols

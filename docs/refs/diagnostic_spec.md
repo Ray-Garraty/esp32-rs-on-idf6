@@ -3,7 +3,7 @@ type: Architecture Reference
 title: Diagnostic Subsystem Specification
 description: Crash capture, panic handler, BlackBox, stack monitoring, core dump pipeline — architecture and known gaps
 tags: [diagnostic, crash, panic, watchdog, black-box, stack-monitor, core-dump]
-timestamp: 2026-07-14
+timestamp: 2026-07-13
 ---
 
 # Diagnostic Subsystem Specification
@@ -110,6 +110,44 @@ All 12 diagnostic gaps are implemented. The system now produces:
 | Core dump buffer (monitor.py) | Host RAM | ~256 KB peak |
 
 No component uses PSRAM — all diagnostic data must survive crashes where PSRAM is in an unknown state.
+
+---
+
+## Mandatory Instrumentation Requirements (GR-7)
+
+Every new function MUST have the appropriate instrumentation. Code without these points is INCOMPLETE.
+
+| What | Instrumentation | Applies When |
+|------|----------------|--------------|
+| **FFI boundary** | `FfiGuard guard(boundary_id)` — RAII wrapper | Every Rust/C++ FFI call |
+| **RMT motion** | `assert_rmt_preconditions()` before `move_steps_intervals()` | Every RMT motion start |
+| **New thread** | `StackMonitor::registerThread(name, stack_size)` | Every `xTaskCreate` call |
+| **State transition** | `StateTracer::logBuretteTransition(old, new)` + `BlackBox::record()` | Every burette state change |
+| **Large alloc (>4 KB)** | `HeapSnapshot::assertCanAllocate(size)` before allocation | Every `malloc`/`new`/`heap_caps_malloc` > 4 KB |
+| **Main loop iteration** | `TickWatchdog watchdog` — RAII at top of main loop | Every `app_main` iteration |
+
+### Instrumentation Points Map
+
+```
+Location                          Instrumentation
+────────────────────────────────────────────────────────────────
+app_main loop body                TickWatchdog watchdog;
+FFI call                          auto guard = FfiGuard(boundary_id);
+motor_task RMT start              assert_rmt_preconditions();
+state machine transition          StateTracer::logBuretteTransition(from, to);
+task creation                     StackMonitor::registerThread(name, stack);
+allocation > 4 KB                 HeapSnapshot::assertCanAllocate(size);
+```
+
+### Enforcement
+
+- Code reviews MUST check for missing instrumentation
+- Each component's tests should verify instrumentation is present (e.g., BlackBox event count increases)
+- Sub-agents: mark missing instrumentation as a review finding
+
+### Rationale
+
+Every past crash in this project was detectible pre-mortem by a diagnostic event. The 2026-07-13 crash series proved that without BlackBox events from StateTracer and TickWatchdog, root cause analysis takes 3× longer and often misdiagnoses heap corruption for stack overflow (LL-001).
 
 ---
 
@@ -541,7 +579,7 @@ ls -la dumps/
 
 | Document | Link |
 |----------|------|
-| Coding style — GR-7 diagnostic requirements | [coding_style.md](coding_style.md) |
+| GR-7 mandatory instrumentation requirements | (this document — §Mandatory Instrumentation Requirements) |
 | Watchdog specification — RWDT 6s/10s config | [watchdog_spec.md](watchdog_spec.md) |
 | WiFi specification — init order, IP visibility | [wifi_spec.md](wifi_spec.md) |
 | LL-001: Stack overflow → check watermark | [../lessons_learned/LL-001.yaml](../lessons_learned/LL-001.yaml) |
