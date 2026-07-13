@@ -128,10 +128,13 @@ struct SystemChannels {
     QueueHandle_t cmd_queue;       // FreeRTOS queue for BuretteCommand
     QueueHandle_t status_queue;    // FreeRTOS queue for StatusUpdate
     QueueHandle_t log_queue;       // FreeRTOS queue for LogEntry
+    QueueHandle_t ws_send_queue;   // FreeRTOS queue for WsSendEntry (log_worker → net_owner)
 };
 ```
 
-Motor thread reads `cmd_queue`, writes atomics. Main loop polls atomics, publishes status. BLE notify thread reads `status_queue`, calls NimBLE `ble_gatts_notify()`.
+Motor thread reads `cmd_queue`, writes atomics. Main loop polls atomics, publishes status.
+BLE notify thread reads `status_queue`, calls NimBLE `ble_gatts_notify()`.
+`ws_send_queue` carries JSON log messages from log_worker to net_owner for WebSocket broadcast.
 
 ### Thread Architecture
 
@@ -171,9 +174,41 @@ BLE NOTIFY THREAD (spawned by net_owner, 8 KB):
   std::thread, detached.
   loop { xQueueReceive -> ble_gatts_notify }
 
+LOG WORKER TASK (prio 0, 8 KB):
+  FreeRTOS task (xTaskCreate), created by net_owner after HTTP init.
+  Drains log_queue from LogBuffer::push() calls (any task).
+  Formats each entry as JSON string on stack (char buf[384]), pushes
+  WsSendEntry to ws_send_queue for net_owner to broadcast.
+  Must NEVER call network functions (broadcastWsEvent,
+  httpd_ws_send_frame_async, or any socket I/O). This task is
+  lightweight by design — 8 KB stack is sufficient.
+
 HTTP SERVER (FreeRTOS internal, 12 KB):
   Created by httpd_start(). Calls registered handler callbacks. Not user-managed.
 ```
+
+## Task Independence Principle (CRITICAL)
+
+Every FreeRTOS task is an independent execution context. Tasks communicate
+exclusively via queues (`xQueueSend`/`xQueueReceive`) or `std::atomic`.
+
+**Forbidden cross-task coupling:**
+- Blocking on another task's operation (`xTaskNotifyWait(portMAX_DELAY)`,
+  `while(!flag)`, `xSemaphoreTake(portMAX_DELAY)` between different task types)
+- Calling I/O functions that belong to another task's domain (e.g., log_worker
+  calling `broadcastWsEvent` or `httpd_ws_send_frame_async` — LL-048)
+- Assuming init ordering across different tasks (all tasks start independently
+  in `app_main()`; sequencing like WiFi→HTTP→BLE is within `net_owner` only)
+
+**ws_send_queue pattern:** Network-bound data produced by any task MUST be
+pushed to a queue and drained by `net_owner`, which owns the network stack.
+The producing task never touches HTTP, WebSocket, or BLE send functions.
+This applies to log messages (log_worker → ws_send_queue → net_owner),
+status updates, and any other data requiring network I/O.
+
+**Violations** create subtle race conditions, stack overflows (LL-048), and
+priority inversions that are nearly impossible to debug on embedded hardware.
+This principle is non-negotiable for all code changes.
 
 **Golden Rule:** The main loop must NEVER execute a blocking operation (`rmt_tx_wait_all_done`, `lock()`, `xQueueReceive`). All blocking calls live in dedicated threads.
 

@@ -1,8 +1,8 @@
 # AGENTS.md — AI Agent Rules (ESP32-S3 + C++23 + ESP-IDF v6)
 
 Agent-critical rules for this firmware. Reference details in `docs/refs/project.md`
-(hardware, threads, network) and `docs/refs/coding_style.md` (C++23 conventions,
-RAII, error handling). Violations of CRITICAL rules invalidate all changes.
+(hardware, threads, network, task independence) and `docs/refs/coding_style.md` (C++23
+conventions, RAII, error handling). Violations of CRITICAL rules invalidate all changes.
 
 - **Path accuracy**: File paths in sub-agent prompts must be relative to the repo root (e.g. `legacy/arduino/src/`, not `arduino/src/` or `src/`). The sub-agent's working directory is the workspace root — relative paths in prompts are resolved from there.
 
@@ -260,6 +260,50 @@ Failure (2026-07-12): Sub-agent ses_0a9c received a well-scoped task but
 ran 13 full builds, 100+ tool calls, and 0 useful output. Session log:
 .opencode/tmp/session-ses_0a9c.md (5596 lines). See LL-046 for full analysis.
 
+### GR-14: FREE RTOS TASK INDEPENDENCE — TASKS ARE SOVEREIGN
+
+This is the most important architectural rule. FreeRTOS is NOT Arduino.
+Each task is its own independent program. Tasks NEVER wait for each other,
+NEVER call each other's functions, and NEVER share stack contexts.
+
+**Simple rules for simple agents:**
+
+1. **Each task has one job.** Motor drives stepper. Net_owner runs WiFi.
+   Log_worker drains logs. Temp reads sensor. That's it. No overlap.
+
+2. **Communication is via queues only** (xQueueSend/xQueueReceive).
+   Task A puts data in a queue. Task B picks it up later. Nobody blocks
+   on anybody. No semaphores, no task notifications, no `while(!flag)`.
+
+3. **log_worker is lightweight.** It must NEVER call any network function:
+   - ❌ `httpd_ws_send_frame_async` (forbidden)
+   - ❌ `broadcastWsEvent` (forbidden)
+   - ❌ Any `send()`, any socket call (forbidden)
+   - ✅ Format JSON, push to `ws_send_queue`, return
+   Stack is 8192 bytes and MUST stay 8192 bytes.
+
+4. **If you need to send data over the network** from any task:
+   - Push to a queue (ws_send_queue for logs, cmd_queue for motor commands)
+   - Let `net_owner` pick it up and send it
+   - That's its job. Not yours.
+
+5. **Init order** (WiFi→HTTP→BLE) happens INSIDE `net_owner` only.
+   Other tasks start independently and don't wait for WiFi or anything else.
+
+6. **No cross-task blocking EVER:**
+   - `xTaskNotifyWait(portMAX_DELAY)` — forbidden between tasks
+   - `xSemaphoreTake(portMAX_DELAY)` — forbidden between tasks
+   - `while(!someOtherTaskFlag)` — forbidden
+   - `vTaskDelay(100)` in main loop — max 10 ms (GR-1)
+
+**The pattern in one sentence:** Task A produces data → queue → Task B
+consumes data. Task A never touches Task B's hardware or network stack.
+
+Failure (2026-07-13, LL-048): log_worker called broadcastWsEvent which
+called httpd_ws_send_frame_async. The 8192-byte stack overflowed. Instead
+of increasing the stack (wrong fix), log_worker should push to ws_send_queue
+and let net_owner send. See `docs/refs/project.md` §Task Independence Principle.
+
 ---
 
 ## 2. PRE-FLIGHT CHECKLIST (Copy Before Codegen)
@@ -267,13 +311,14 @@ ran 13 full builds, 100+ tool calls, and 0 useful output. Session log:
 Before generating code touching: threads, network, RMT, FFI, mutexes, queues,
 GPIO ISR, NVS, WiFi, BLE, or HTTP — copy and fill:
 
-1. **Thread:** \_\_\_\_\_\_\_\_ (Main/Motor/Temp/BLE/HTTP/net_owner)
+1. **Thread:** \_\_\_\_\_\_\_\_ (Main/Motor/Temp/BLE/HTTP/net_owner/log_worker)
 2. **Blocking >10 ms?** \_\_\_\_\_\_\_\_ (Yes → move to worker: \_\_\_\_\_\_\_\_)
 3. **Stack impact:** format/string/arrays/recursion? \_\_\_\_ Budget: \_\_\_\_ KB
 4. **Init order dep:** WiFi IP / HTTP / BLE / none? \_\_\_\_
 5. **FFI boundary:** Stores C pointers? \_\_\_\_ Copies before return? \_\_\_\_
 6. **Stop flag:** RMT/motion? \_\_\_\_ (if yes: GR-2 REQUIRED)
 7. **DRAM:** MALLOC_CAP_INTERNAL? \_\_\_\_ Position in init order? \_\_\_\_
+8. **Task independence:** Does this code call functions from another task's domain? \_\_\_\_ (if yes: push to queue instead — see GR-14)
 
 ---
 
@@ -521,6 +566,7 @@ Sub-agents are **forbidden** from creating `.md` or `.yaml` files inside
 - [ ] `CONFIG_FREERTOS_UNICORE=n` (GR-12 — dual-core mandatory)
 - [ ] Pre-Flight Checklist filled before codegen
 - [ ] No raw ESP-IDF pointers cross thread boundaries (GR-5)
+- [ ] No cross-task function calls — GR-14 (log_worker never calls network functions)
 - [ ] 30 s serial smoke test: no Guru Meditation, no WDT, no panics
 - [ ] Code style follows `docs/refs/coding_style.md`
 - [ ] Hardware refs match `docs/refs/project.md`

@@ -6,6 +6,7 @@
 #include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "nvs_flash.h"
 
 #include "application/command.hpp"
@@ -71,6 +72,13 @@ struct NetTaskParams {
 // Must be atomic for cross-task visibility (GR-1: no blocking, no mutex)
 namespace { std::atomic<ecotiter::infrastructure::network::HttpServer*> gHttpServerForWs{nullptr}; }
 
+// ws_send_queue: log_worker pushes JSON, net_owner drains and broadcasts via WebSocket
+struct WsSendEntry {
+    char data[384];
+    size_t len;
+};
+static QueueHandle_t gWsSendQueue = nullptr;
+
 // ADC driver pointer for dispatch.cpp sample read callback
 namespace { ecotiter::infrastructure::drivers::AdcDriver* gAdcDriver{nullptr}; }
 
@@ -105,15 +113,9 @@ static int logVprintf(const char* fmt, va_list args) {
     return n;
 }
 
-// WebSocket log push callback — registered after HTTP server init
+// WebSocket log push callback — formats JSON and pushes to ws_send_queue
+// net_owner drains the queue and calls broadcastWsEvent (GR-14)
 static void wsLogCallback(const ecotiter::domain::LogEntry& entry) {
-    // LL-038: stack guard — skip if < 1024 bytes remain on calling task's stack
-    // (uxTaskGetStackHighWaterMark returns words; 1 word = 4 bytes on ESP32)
-    if (uxTaskGetStackHighWaterMark(nullptr) < 256)
-        return;
-    auto* hs = gHttpServerForWs.load(std::memory_order_acquire);
-    if (!hs) return;
-
     char buf[384];
     int n = std::snprintf(buf, sizeof(buf),
         R"({"event":"log","data":{"level":"%s","msg":")", entry.level);
@@ -134,8 +136,17 @@ static void wsLogCallback(const ecotiter::domain::LogEntry& entry) {
         R"("}})");
     if (n < 0) return;
     n = static_cast<int>(std::strlen(buf));
-    if (n > 0) {
-        hs->broadcastWsEvent(buf, static_cast<size_t>(n));
+    if (n <= 0) return;
+
+    WsSendEntry wsEntry;
+    size_t copyLen = static_cast<size_t>(n) > sizeof(wsEntry.data) - 1
+                     ? sizeof(wsEntry.data) - 1
+                     : static_cast<size_t>(n);
+    std::memcpy(wsEntry.data, buf, copyLen);
+    wsEntry.data[copyLen] = '\0';
+    wsEntry.len = copyLen;
+    if (gWsSendQueue) {
+        xQueueSend(gWsSendQueue, &wsEntry, 0);
     }
 }
 
@@ -233,6 +244,12 @@ extern "C" void netTaskEntry(void* pvParameters) {
         }
     }
 
+    // Create ws_send_queue for log_worker → net_owner log forwarding (GR-14)
+    gWsSendQueue = xQueueCreate(16, sizeof(WsSendEntry));
+    if (gWsSendQueue == nullptr) {
+        ESP_LOGE("net_owner", "Failed to create ws_send_queue");
+    }
+
     // LL-038: async log worker
     TaskHandle_t logWorkerHandle = nullptr;
     xTaskCreate(ecotiter::domain::LogBuffer::workerTaskEntry,
@@ -245,6 +262,16 @@ extern "C" void netTaskEntry(void* pvParameters) {
 
     while (true) {
         esp_task_wdt_reset();
+
+        // Drain ws_send_queue: broadcast log messages via WebSocket (GR-14)
+        auto* hs = gHttpServerForWs.load(std::memory_order_acquire);
+        if (hs) {
+            WsSendEntry wsEntry;
+            while (gWsSendQueue && xQueueReceive(gWsSendQueue, &wsEntry, 0) == pdTRUE) {
+                hs->broadcastWsEvent(wsEntry.data, wsEntry.len);
+            }
+        }
+
         wifiManager.process();
         vTaskDelay(pdMS_TO_TICKS(100));
     }
