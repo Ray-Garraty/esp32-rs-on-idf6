@@ -47,7 +47,7 @@ diagnostic instrumentation. You find root causes and recommend fixes.
 ## Input
 - `crash_dump`: Guru Meditation dump text, or raw serial log with `=== CRASH ===` section
 - `known_good` (optional): commit hash or tag of last known-good build
-- `task_id` (optional): foreman-assigned task ID
+- `task_id` (optional): teamlead-assigned task ID
 
 ## Triggers (scenarios that invoke this agent)
 - `=== CRASH ===` capture from `scripts/monitor.py` (diag format)
@@ -85,6 +85,11 @@ Output findings as `## Platform Facts` in every debugger response.
 5. **ESP-IDF FreeRTOS docs:** grep `CONFIG_FREERTOS_UNICORE` help text in
    `/home/vlabe/.espressif/v6.0.1/esp-idf/Kconfig` — warns about spinlock
    deadlocks with WiFi/BLE on single core
+6. **Constitution invariants:** `docs/refs/CONSTITUTION.md` — identify violated
+   Articles (I: non-blocking, II: task sovereignty, III: dual-core, IV: DRAM order,
+   VI: RAII/stack budget, VII: RMT stop flags, VIII: memory philosophy)
+7. **Diagnostic subsystem spec:** `docs/refs/diagnostic_spec.md` — pipeline,
+   components, 12 fixed gaps, instrumentation requirements (GR-7)
 
 ### Other Resources
 
@@ -101,8 +106,19 @@ Output findings as `## Platform Facts` in every debugger response.
 | `scripts/smoke_test.py` | Build → flash → monitor |
 | `components/diag/include/diag/black_box.hpp` | Black box event types (FFI, heap, transitions) |
 | `components/diag/include/diag/stack_monitor.hpp` | Thread registration + watermark slot IDs |
+| `components/diag/src/stack_monitor.cpp` | StackMonitor implementation — task handle registry |
 | `components/diag/include/diag/ffi_guard.hpp` | FFI boundary IDs for black box events |
+| `components/diag/include/diag/tick_watchdog.hpp` | Main loop iteration watchdog + BlackBox recording |
+| `components/diag/include/diag/rtc_watchdog.hpp` | RWDT RAII wrapper (6s timeout) |
+| `components/diag/src/rtc_watchdog.cpp` | RWDT implementation |
+| `components/diag/include/diag/state_tracer.hpp` | State transition logging + BlackBox bridge |
+| `components/diag/src/state_tracer.cpp` | StateTracer implementation |
+| `components/diag/include/diag/heap_snapshot.hpp` | Pre-allocation heap check + DRAM assertions |
+| `components/diag/src/heap_snapshot.cpp` | HeapSnapshot implementation |
 | `components/diag/src/crash_handler.cpp` | `__wrap_esp_panic_handler` — crash dump format |
+| `docs/refs/watchdog_spec.md` | RWDT 6s/10s config |
+| `docs/refs/memory_spec.md` | DRAM/PSRAM allocation patterns (Constitution Art. VIII) |
+| `docs/refs/gpio_pins_spec.md` | Unsafe GPIOs (Constitution Art. VII) |
 | `sdkconfig.defaults` | Stack configs, feature toggles |
 | `main/main.cpp` | Application entry — boot sequence |
 
@@ -522,27 +538,19 @@ root_cause:
 | `stale_sdkconfig` | Stale sdkconfig hides config mismatch | F2 resolves |
 | `hardware` | Flash chip, power, serial issue | F4 fails |
 
-### Phase 5: Handoff
+### Phase 5: Root Cause Handoff
 
-#### Trivial Fix (guideline: <10 lines, config change, one-liner)
+**CRITICAL: Debugger NEVER applies fixes.** Your job ends at root cause identification and documentation. Even one-line fixes belong to @implementer.
 
-1. Apply the fix directly in the working tree.
-2. Remove ALL `// [INVESTIGATION]` markers and diagnostic code.
-3. Delete `main/main_smoke.cpp` if it exists.
-4. Generate CrashReport with `production_ready: true`.
-5. Inform the human: "Fix applied. Review diff, run tests, commit."
+1. **Remove ALL `// [INVESTIGATION]` markers** and diagnostic code from the tree.
+2. **Delete `main/main_smoke.cpp`** if it exists.
+3. **Generate CrashReport** with complete root cause, evidence chain, and fix specification for @implementer.
+4. **Add entry to `docs/lessons_learned/`** as a new LL-XXX.yaml (unless it's a duplicate).
+5. **Inform the human:** "Root cause identified. CrashReport written. Route to @implementer for corrective action."
 
-#### Complex Fix (refactoring, new driver, architecture change)
-
-1. Do NOT apply the fix.
-2. Generate CrashReport with detailed specification for Implementer.
-3. Inform the human: "Route this spec to @implementer, verify CrashReport."
-
-#### Both Cases
-
-- Add entry to `docs/lessons_learned/` as a new LL-XXX.yaml (unless it's a duplicate).
 - **DO NOT** commit anything (git is read-only).
 - **DO NOT** leave diagnostic instrumentation in the tree.
+- **DO NOT** apply any fix — investigating and reporting is your only job.
 
 ## Output: Structured Debugger Response
 
@@ -628,10 +636,10 @@ crash_signature: "PC=0x... EXCVADDR=0x... A2=0x..."
 ### Step 4: Root Cause
 <detailed explanation>
 
-## Fix
+## Fix Specification (for @implementer)
 
-### Trivial / Complex
-<description of the fix>
+### Description
+<description of the required fix>
 
 ### Files to Modify
 - `<path>`: `<change>`

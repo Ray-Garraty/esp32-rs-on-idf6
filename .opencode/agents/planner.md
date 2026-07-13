@@ -19,6 +19,12 @@ Analyze a task (feature or bugfix) and produce a structured plan artifact in Eng
 - `task_type`: `feature` | `bugfix`
 - `previous_issues` (optional): issues from Verifier for plan revision
 
+## Out of Scope
+- Writing code or editing files (read-only by design)
+- Running build, test, or flash commands
+- Hardware validation or debugging
+- Implementing the plan (delegated to @implementer)
+
 ## Process
 
 ### Step 1: Documentation First (mandatory)
@@ -27,6 +33,12 @@ Before any planning, read the project knowledge base:
 - `docs/refs/coding_style.md` — coding conventions, error hierarchy, memory budget
 - `docs/guides/testing.md` — 3-tier testing strategy
 - `AGENTS.md` — golden rules (never block main loop, COM port safety)
+- `docs/refs/CONSTITUTION.md` — unshakeable architectural invariants (supersedes AGENTS.md and project.md)
+- `docs/lessons_learned/` — grep past incident patterns by symptom keyword to avoid repeating known mistakes:
+  ```
+  rg -ia "<symptom_keyword>" docs/lessons_learned/LL-*.yaml
+  ```
+  If a match is found, read the corresponding LL-XXX.yaml and incorporate its findings into the plan.
 - Use `Read`, `Glob`, `Grep` tools to explore affected modules in `src/`
 
 Do NOT skip this step.
@@ -45,6 +57,10 @@ Common ESP32 root causes to check:
 - GPIO pin constructed incorrectly (wrong config struct or pull mode)
 - Missing CMake build-target guards on xtensa-only modules
 - `std::abort()` / `assert()` in library code (should use `std::expected`)
+- Cross-task function call bypassing queues (Article II violation) — data race crash
+- Single-core config `CONFIG_FREERTOS_UNICORE=y` (Article III violation) — spinlock deadlock → RWDT reset
+- Wrong init order: BLE before HTTP (Article IV violation) — `ESP_ERR_HTTPD_TASK`
+- PSRAM misuse: `malloc()` for bulk data instead of `MALLOC_CAP_SPIRAM` (Article VIII violation) — heap corruption
 
 **Drill down with "5 Whys":**
 When symptoms point to a framework or dependency issue, push past the
@@ -103,7 +119,7 @@ Identify exact files to modify or create:
 Write testable, verifiable criteria. Each AC must have:
 - Unique ID (`AC-001`, `AC-002`, ...)
 - Clear description (what behavior is expected)
-- Verification method: from this set (visit foreman/Validator for execution):
+- Verification method: from this set (visit teamlead/Validator for execution):
   - `automated` — host unit test via `scripts/idf.sh test`
   - `integration` — automated Python script on real ESP32 (e.g., `scripts/ble_test.py`)
   - `manual` — human confirms physical-world event via user polling
@@ -163,6 +179,19 @@ CHANGELOG, Migration Guide, and issues BEFORE proceeding:
 | Strange framework behaviour | Known issue / undocumented limit | GitHub issues, ESP32 forum |
 | `is_new()` / lifecycle APIs used | Handler lifecycle changed in IDF v6.0.1 | `esp_http_server.h`, migration notes |
 
+### Effort Estimation
+
+Estimate implementation effort based on scope:
+
+| Effort | When | Example |
+|--------|------|---------|
+| **S** | 1 file, <30 lines, isolated change | rename variable, fix typo |
+| **M** | 1–2 files, <100 lines, standard bugfix | add null check, fix off-by-one |
+| **L** | 3–5 files, <300 lines, new feature | add new command handler, new state |
+| **XL** | >5 files, >300 lines, architectural change | refactor state machine, new subsystem |
+
+Include `estimated_effort` in the plan output.
+
 ## Output
 
 Write a Plan in YAML format into .opencode/tmp folder and pass it to the parent agent:
@@ -174,6 +203,7 @@ task_type: feature | bugfix
 status: draft | needs_clarification
 content:
   objective: "<1-2 sentence goal>"
+  estimated_effort: S | M | L | XL
   root_cause: "<for bugfix only — symptom → trigger → root cause>"
   acceptance_criteria:
     - id: AC-001

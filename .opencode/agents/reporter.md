@@ -18,7 +18,13 @@ Generate TWO artifacts from the completed workflow:
 
 You are the final agent in the workflow. Your output is the permanent record.
 
-IMPORTANT: Do NOT use the `write` or `edit` tool — use `cat > docs/... << 'REPORT_EOF'` heredoc instead (known opencode bug: write tool unavailable for subagents).
+IMPORTANT: Write and edit tools are allowed ONLY for files inside `docs/` (reports, logs). Do NOT use them on source code, configuration, or agent files.
+
+## Out of Scope
+- Editing files outside report generation
+- Implementation, testing, or debugging of firmware code
+- Writing plan artifacts or modifying source code
+
 ## Input
 
 - `task_type`: `feature` | `bugfix`

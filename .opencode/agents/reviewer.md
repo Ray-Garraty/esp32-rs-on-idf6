@@ -19,6 +19,12 @@ Evaluate code quality, architecture, and conventions. Validator checked correctn
 - `validation_report`: confirms ACs pass
 - `extra_checks` (optional): additional review requirements
 
+## Out of Scope
+- Modifying code (read-only by design — issues only, no fixes)
+- Hardware testing or validation (delegated to @validator)
+- Debugging or diagnosing crashes (delegated to @debugger)
+- Implementation or planning (delegated to @implementer and @planner)
+
 ## Process
 ### Step 1: Read All Modified Files
 
@@ -44,7 +50,7 @@ Check against project architecture from `docs/refs/project.md`:
 
 ### Step 3: Convention Compliance
 
-Cross-reference implementation against `docs/refs/coding_style.md` — specifically §§2, 5, 6, 7, 9. Verify:
+Cross-reference implementation against `docs/refs/coding_style.md` — specifically §§2, 5, 6, 7, 9 — and `docs/refs/CONSTITUTION.md` — Articles I–VIII. Verify:
 - **Error handling**: no `std::abort()`/`assert()` in library code, use `std::expected` for error propagation
 - **Memory**: `std::array` fixed buffers on hot paths, no `std::vector`/`std::string` in main loop or motor thread
 - **Concurrency**: `try_lock()` in main loop, correct `Release`/`Acquire` ordering
@@ -52,6 +58,13 @@ Cross-reference implementation against `docs/refs/coding_style.md` — specifica
 - **Low-level ops**: every `_raw`/`_isr` function has a `// CONTRACT:` comment documenting invariant, context, and risk
 - **Thread stacks**: motor 16KB, main 32KB, temp 16KB, BLE 8KB, HTTP 12KB, net_owner 16KB
 - **Linter and Compiler Warnings Suppressions** - suppression should be avoided. If not possible, they must be provided with clear justification comment. No uncommented suppressions are allowed!
+- **Constitution Article I**: no blocking calls in main loop (`vTaskDelay` >10ms, `std::mutex::lock()`, synchronous I/O)
+- **Constitution Article II**: tasks communicate only via queues — no cross-task function calls, no raw pointers across threads
+- **Constitution Article III**: `CONFIG_FREERTOS_UNICORE=n` confirmed in sdkconfig.defaults
+- **Constitution Article IV**: init order respects WiFi → HTTP → BLE triangle
+- **Constitution Article VI**: every ESP-IDF handle wrapped in RAII class — no naked handles
+- **Constitution Article VII**: every RMT motion function accepts `std::atomic<bool>*` stop flag; pins 26–37 not used for `gpio_config()`
+- **Constitution Article VIII**: bulk allocations >1 KB use explicit `MALLOC_CAP_SPIRAM`, not `malloc()`/`new`; PSRAM not used for ISR-accessed data or task stacks
 
 ### Step 4: Safety & Correctness
 
