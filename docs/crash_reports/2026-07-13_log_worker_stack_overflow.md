@@ -2,7 +2,10 @@
 type: CrashReport
 version: "1.0"
 task_id: "manual-2026-07-13"
-timestamp: "2026-07-13T06:20:00Z"
+title: "log_worker task stack overflow — InstrFetchProhibited pc=0"
+description: "log_worker task (8192B) stack overflowed via callback chain workerTaskEntry → wsLogCallback → broadcastWsEvent → httpd_ws_send_frame_async, causing InstrFetchProhibited (exccause=20) with corrupted backtrace and 0xa5a5a5a5 canary"
+tags: [log_worker, stack_overflow, LL-048, GR-14]
+timestamp: "2026-07-13"
 crash_signature: "exccause=20 InstrFetchProhibited pc=0x00000000 backtrace: 0xfffffffd > broadcastWsEvent > wsLogCallback > workerTaskEntry"
 ---
 

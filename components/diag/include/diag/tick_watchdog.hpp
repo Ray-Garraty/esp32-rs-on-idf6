@@ -16,8 +16,8 @@ public:
 
     inline ~TickWatchdog() noexcept {
         auto elapsed = static_cast<uint64_t>(esp_timer_get_time()) - startUs_;
-        if (elapsed > 15000) {
-            ESP_LOGW(TICK_TAG, "main loop took %llu us (>15ms threshold)",
+        if (elapsed > 10000) {
+            ESP_LOGW(TICK_TAG, "main loop took %llu us (>10ms threshold)",
                      static_cast<unsigned long long>(elapsed));
         }
         // Periodically record to BlackBox (every 100th tick)
