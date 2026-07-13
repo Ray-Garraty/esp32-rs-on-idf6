@@ -42,6 +42,7 @@ permission:
     "curl*": allow
     "ping*": allow
     "ss*": allow
+    "scripts/usage/*": allow
   task:
     implementer: ask
     reviewer: ask
@@ -289,7 +290,22 @@ Invoke `reporter` with ALL accumulated artifacts:
 Task(@reporter, "Generate completion report and commit message.\nTask type: <task_type>\nArtifacts:\nPlan: <Plan>\nVerified Plan: <PlanVerified>\nImplementation Reports: <all iterations>\nValidation Reports: <all iterations>\nReview Report: <ReviewReport>")
 ```
 
-### Step 7: Present to User
+### Step 7: Review Metrics & Present to User
+
+Before presenting the commit message, review the `## Metrics` section
+from the Completion Report for red flags:
+
+| What to look for | Why |
+|------------------|-----|
+| **Token anomalies** | One agent using >2× tokens than others suggests inefficiency |
+| **Suspicious commands** | `git stash`, `git checkout`, `sudo`, `rm -rf` in unexpected agents |
+| **Tool imbalance** | Agent calling build 10× in a session → sdkconfig not cached? |
+| **Missing hardware actions** | Validator never ran `scripts/idf.sh flash` → ACs likely deferred |
+| **Operation timing** | build avg >60s or flash avg >30s — possible issue |
+| **Excessive tokens** | Total >500K tokens for a simple task → plan/scope issue |
+
+If any red flags are found, present them to the user alongside the commit
+message and suggest workflow or agent instruction improvements.
 
 **If task_type: feature** — commit type: `feat`
 **If task_type: bugfix** — commit type: `fix`

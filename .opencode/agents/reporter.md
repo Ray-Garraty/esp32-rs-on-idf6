@@ -108,7 +108,35 @@ Report: docs/plans/completed/<filename>.md
 
 Multi-scope: `feat(drivers,stepper):`
 
-### Step 5: Validate & Save
+### Step 5: Collect Usage Metrics
+
+Run all usage scripts against the opencode DB and embed output into the
+Completion Report under `## Metrics`:
+
+```bash
+ROOT_ID=$(sqlite3 "$HOME/.local/share/opencode/opencode.db" \
+  "SELECT id FROM session WHERE parent_id IS NULL
+   ORDER BY time_created DESC LIMIT 1;")
+
+echo '### Cost Breakdown'
+bash scripts/usage/current_task.sh "$ROOT_ID"
+
+echo '### Suspicious Commands (last 24h)'
+bash scripts/usage/suspicious.sh 24
+
+echo '### Today'\''s Sessions'
+bash scripts/usage/today.sh
+
+echo '### Tool Usage (last 24h)'
+bash scripts/usage/tool_stats.sh 24
+
+echo '### Operation Timing (last 24h)'
+bash scripts/usage/ops_timing.sh 24
+```
+
+If any script fails (non-zero exit), include its stderr as a code block under the relevant heading. An error is still valid evidence.
+
+### Step 6: Validate & Save
 1. Save completion report using bash heredoc:
    ```bash
    cat > "docs/plans/completed/<filename>.md" << 'REPORT_EOF'
