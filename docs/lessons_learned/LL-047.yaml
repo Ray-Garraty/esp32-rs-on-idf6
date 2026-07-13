@@ -1,0 +1,75 @@
+id: LL-047
+date: 2026-07-13
+crash_signature: >
+  rst:0x10 (RTCWDT_RTC_RST) every ~8-9 seconds after BOOT OK.
+  No Guru Meditation, no panic handler.
+  Logs show "DBG: gRtcWdt IS NULL!" repeated every 100-300ms.
+  "DBG: step 5 - RWDT DISABLED" printed at boot.
+  Stack watermarks healthy.
+  Deterministic: every boot.
+category: rtc_wdt_not_fed
+trigger_patterns:
+  - "rst:0x10.*RTCWDT_RTC_RST"
+  - "gRtcWdt IS NULL"
+  - "step 5 - RWDT DISABLED"
+lesson: >
+  RTC Watchdog Timer (RWDT) hardware reset caused by the RtcWatchdog RAII
+  wrapper being commented out in app_main(), while CONFIG_BOOTLOADER_WDT_DISABLE_IN_USER_CODE=y
+  remains set in sdkconfig.defaults.
+
+  MECHANISM:
+  1. CONFIG_BOOTLOADER_WDT_DISABLE_IN_USER_CODE=y (sdkconfig.defaults line 26)
+     tells the ESP-IDF bootloader: "Keep the RTC WDT enabled — the app will
+     manage it." The bootloader configures RWDT with a 9-second timeout
+     (CONFIG_BOOTLOADER_WDT_TIME_MS=9000 default).
+
+  2. ESP-IDF's startup code (startup_funcs.c:132-141) checks:
+       #if SOC_RTC_WDT_SUPPORTED && !defined(CONFIG_BOOTLOADER_WDT_DISABLE_IN_USER_CODE)
+     Since the flag IS defined (=y), the init_disable_rtc_wdt() function is
+     NOT compiled in. RWDT stays active with bootloader's timeout.
+
+  3. In app_main() (main.cpp:310-311), the RtcWatchdog RAII wrapper was
+     commented out (// diag::RtcWatchdog rtcWdt;) and gRtcWdt explicitly set
+     to nullptr. RWDT never fed.
+
+  4. Meanwhile, motor_task.cpp correctly guarded gRtcWdt usage with
+     "if (diag::gRtcWdt) diag::gRtcWdt->feed();" — detecting it was NULL
+     and logging "DBG: gRtcWdt IS NULL!" but doing nothing about it.
+
+  5. After ~8-9 seconds, RWDT timeout expires → rst:0x10 (RTCWDT_RTC_RST).
+
+  Distinguishing from LL-045 (UNICORE RWDT deadlock):
+  - LL-045 requires CONFIG_FREERTOS_UNICORE=y and WiFi active
+  - LL-047 occurs with CONFIG_FREERTOS_UNICORE=n (dual-core)
+  - LL-045 shows frozen tick counter; LL-047 shows active log output
+  - LL-045 Saved PC is _xt_lowint1; LL-047 has no Saved PC (hardware reset)
+diagnostic: |
+  1. Check boot log for "gRtcWdt IS NULL!" — confirms global pointer is null
+  2. Check main.cpp for "// diag::RtcWatchdog rtcWdt;" (commented-out RAII wrapper)
+  3. Check sdkconfig.defaults for CONFIG_BOOTLOADER_WDT_DISABLE_IN_USER_CODE=y
+  4. Check startup_funcs.c: init_disable_rtc_wdt() is gated by
+     !defined(CONFIG_BOOTLOADER_WDT_DISABLE_IN_USER_CODE)
+  5. Timing: reset occurs ~8-9s after BOOT OK (matches CONFIG_BOOTLOADER_WDT_TIME_MS=9000)
+fix: |
+  1. main/main.cpp: Uncomment the RtcWatchdog RAII instance and set global pointer:
+       diag::RtcWatchdog rtcWdt;
+       diag::gRtcWdt = &rtcWdt;
+
+  2. main/main.cpp: Uncomment the main loop feed:
+       rtcWdt.feed();
+
+  3. components/diag/src/rtc_watchdog.cpp: Ensure constructor sets gRtcWdt = this
+     and destructor clears gRtcWdt = nullptr (belt-and-suspenders RAII).
+
+  OR (alternative — if RWDT is not needed):
+  - Set CONFIG_BOOTLOADER_WDT_DISABLE_IN_USER_CODE=n in sdkconfig.defaults
+    to let ESP-IDF auto-disable the RWDT at startup.
+
+  The RAII approach is preferred (keeps RWDT active as ultimate crash protection).
+refs:
+  - /home/vlabe/Documents/esp32-rs-on-idf6/main/main.cpp (lines 307-311, 425-428)
+  - /home/vlabe/Documents/esp32-rs-on-idf6/components/diag/src/rtc_watchdog.cpp (lines 60-61, 74-75)
+  - /home/vlabe/Documents/esp32-rs-on-idf6/components/diag/include/diag/rtc_watchdog.hpp
+  - /home/vlabe/Downloads/esp-idf-master/components/esp_system/startup_funcs.c (lines 132-141)
+  - /home/vlabe/Downloads/esp-idf-master/components/bootloader/Kconfig.projbuild (lines 281-364)
+  - /home/vlabe/Documents/esp32-rs-on-idf6/docs/lessons_learned/LL-045.yaml (distinguishing UNICORE RWDT deadlock)
