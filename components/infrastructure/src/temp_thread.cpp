@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <limits>
 #include "esp_log.h"
+#include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -19,11 +20,13 @@ namespace {
 void run_temp_loop() {
     ecotiter::diag::StackMonitor::instance().registerThread(
         "temp", ecotiter::domain::TEMP_THREAD_STACK);
+    esp_task_wdt_add(NULL);
 
     ecotiter::infrastructure::drivers::OneWireBus bus(
         ecotiter::config::PIN_DS18B20);
 
     while (true) {
+        esp_task_wdt_reset();
         {
             ecotiter::diag::FfiGuard guard(40);
             auto tempOpt = ecotiter::infrastructure::drivers::readSensor(bus);

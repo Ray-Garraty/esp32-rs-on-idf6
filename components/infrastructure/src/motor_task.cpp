@@ -4,6 +4,7 @@
 #include <cstdio>
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_task_wdt.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -154,6 +155,7 @@ void run_rinse_sm(StepperMotor& stepper,
 
     while (!s_rinseSm.isComplete()) {
         if (diag::gRtcWdt) diag::gRtcWdt->feed();
+        esp_task_wdt_reset();
         auto action = s_rinseSm.onMotorComplete(
             domain::gVolumeMl.load(std::memory_order_acquire),
             nominalVolumeMl);
@@ -304,6 +306,7 @@ void run_cal_speed_seq_sm(StepperMotor& stepper,
 
     while (!s_calSpeedSeqSm.isComplete()) {
         if (diag::gRtcWdt) diag::gRtcWdt->feed();
+        esp_task_wdt_reset();
         auto now = static_cast<uint32_t>(
             xTaskGetTickCount() * portTICK_PERIOD_MS);
         auto action = s_calSpeedSeqSm.onTick(now);
@@ -389,6 +392,7 @@ void run_homing(StepperMotor& stepper, LimitSwitch& fullSwitch) {
         } else {
             puts("DBG: gRtcWdt IS NULL!"); fflush(stdout);
         }
+        esp_task_wdt_reset();
         assert_rmt_preconditions();
 
         if (domain::gStopFull.load(std::memory_order_acquire)) {
@@ -472,6 +476,7 @@ void execute_move_steps(StepperMotor& stepper, int32_t steps) {
     int32_t remaining = steps;
     while (remaining > 0) {
         if (diag::gRtcWdt) diag::gRtcWdt->feed();
+        esp_task_wdt_reset();
         assert_rmt_preconditions();
 
         if (domain::gStopFull.load(std::memory_order_acquire)) {
@@ -532,6 +537,7 @@ extern "C" void motorTaskEntry(void* pvParameters) {
         return;
     }
     puts("DBG: motor queue created"); fflush(stdout);
+    esp_task_wdt_add(NULL);
 
     puts("DBG: before StepperMotor ctor (gpio 21,5,27)"); fflush(stdout);
     StepperMotor stepper(config::PIN_STEP, config::PIN_DIR, config::PIN_EN);
@@ -584,6 +590,7 @@ extern "C" void motorTaskEntry(void* pvParameters) {
 
     MotorCommand cmd;
     while (true) {
+        esp_task_wdt_reset();
         if (xQueueReceive(gMotorCmdQueue, &cmd, pdMS_TO_TICKS(100))) {
             switch (cmd.type) {
 

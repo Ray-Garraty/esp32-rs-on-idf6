@@ -3,6 +3,7 @@
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
@@ -186,6 +187,7 @@ extern "C" void netTaskEntry(void* pvParameters) {
     using namespace ecotiter::infrastructure::network;
     ecotiter::diag::StackMonitor::instance().registerThread(
         "net_owner", ecotiter::domain::NET_OWNER_STACK);
+    esp_task_wdt_add(NULL);
 
     WifiManager wifiManager;
     auto wifiResult = wifiManager.init();
@@ -200,6 +202,7 @@ extern "C" void netTaskEntry(void* pvParameters) {
     // (CPU hangs in _xt_lowint1 → tick freezes → RWDT 6s timeout).
     puts("DBG: waiting for homing..."); fflush(stdout);
     while (!ecotiter::domain::gHomingDone.load(std::memory_order_acquire)) {
+        esp_task_wdt_reset();
         vTaskDelay(pdMS_TO_TICKS(10));
     }
     puts("DBG: homing done, starting AP"); fflush(stdout);
@@ -244,6 +247,7 @@ extern "C" void netTaskEntry(void* pvParameters) {
                 nullptr, 0, nullptr);
 
     while (true) {
+        esp_task_wdt_reset();
         wifiManager.process();
         vTaskDelay(pdMS_TO_TICKS(100));
     }
@@ -417,6 +421,8 @@ extern "C" void app_main(void)
         }
     };
 
+    esp_task_wdt_add(NULL);
+
     while (true)
     {
         ecotiter::diag::TickWatchdog watchdog;
@@ -425,6 +431,7 @@ extern "C" void app_main(void)
         // Feed RWDT every main loop iteration (10ms).
         // If ANY task holds a spinlock > 6s, RWDT fires → RESET_SYSTEM.
         rtcWdt.feed();
+        esp_task_wdt_reset();
 
         scheduler.tick();
 

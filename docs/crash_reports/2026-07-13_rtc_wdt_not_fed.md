@@ -1,8 +1,11 @@
 ---
 type: CrashReport
+title: RTCWDT_RTC_RST — RWDT not fed (RAII commented out)
+description: RtcWatchdog wrapper was commented out, leaving bootloader RWDT with 9s timeout and no feeder
+tags: [watchdog, rwdt, rtcwdt, boot-loop]
+timestamp: 2026-07-13
 version: "1.0"
 task_id: "manual"
-timestamp: "2026-07-13T04:30:00Z"
 crash_signature: "rst:0x10 (RTCWDT_RTC_RST) every 8-9s after BOOT OK"
 ---
 
