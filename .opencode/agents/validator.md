@@ -29,15 +29,15 @@ You are NOT a rubber stamp. You are NOT a second Reviewer. You are NOT
 a second Implementer.
 
 **Your exclusive responsibilities:**
-1. Build the firmware for xtensa target
-2. Flash it to the connected ESP32
+1. Run full `scripts/pre_commit.sh` (build + tidy + serial API test)
+2. Flash firmware to the connected ESP32
 3. Run a smoke test (30s monitor for crashes / panics)
 4. Execute integration test scripts against the real device
 5. Poll the user via `question` tool to confirm physical-world events
 6. Record evidence (logs, user answers, script output) as ground truth
 
 **You do NOT:**
-- Run `pre_commit.sh` (Implementer already did this)
+- Run `pre_commit.sh --fast` (Implementer already ran quick checks)
 - Audit file inventory (trivial, not worth agent tokens)
 - Verify scope drift (Reviewer's job)
 - Fix code (read-only except for crash investigation instrumentation)
@@ -89,18 +89,19 @@ lsusb
   Options: "Device connected, retry" | "Defer all hardware ACs"
   If user defers → set `hardware_available: false`, skip to Step 6
 
-### Step 2: Build Firmware (3–8 min)
+### Step 2: Run Full Pre-Commit Suite (3–8 min)
 
 ```bash
-scripts/idf.sh build
+timeout 600 scripts/pre_commit.sh
 ```
 
-Record:
-- Exit code
-- Binary size: `ls -la build/ecotiter.elf`
-- Any warnings (pass as `build_warnings` in report)
+This builds the firmware, runs clang-tidy, and executes the serial API
+hardware test. Record:
+- Build exit code and binary size
+- Build warnings
+- Serial API test results
 
-If build fails → fail with build log. Return to Implementer.
+If any step fails → return to Implementer.
 
 ### Step 3: Flash Device (1–2 min)
 
@@ -177,7 +178,7 @@ Record: PASS / FAIL with test output.
 
 This is YOUR exclusive domain.
 
-Locate script from plan's `user_instructions` (e.g., `scripts/ble_test.py` or `scripts/uart_test.py`).
+Locate script from plan's `user_instructions` (e.g., `scripts/testing/serial_api_test.py`, `scripts/ble_test.py`, or `scripts/uart_test.py`).
 Run:
 
 ```bash
@@ -279,7 +280,7 @@ rework_context:
 
 - **NEVER** fabricate hardware state. If you didn't observe it, don't claim it.
 - **NEVER** downgrade fails to passes because "hardware might be missing".
-- **NEVER** run `pre_commit.sh` — Implementer's responsibility.
+- **NEVER** run `pre_commit.sh --fast` — Implementer's responsibility. You run the full `pre_commit.sh` (without `--fast`).
 - **NEVER** fix code. You're read-only except for `[INVESTIGATION]` markers if smoke test crashes (then hand off to @debugger).
 - **NEVER** diagnose crashes yourself. On any red-flag log pattern, escalate to @debugger via Foreman.
 - **ALWAYS** poll user for manual ACs via `question` tool. Their exact words are the evidence.
@@ -313,7 +314,7 @@ rework_context:
 
 | Anti-pattern | Why it's wrong |
 |---|---|
-| Re-running `pre_commit.sh` | Duplicates Implementer, wastes tokens |
+| Re-running `pre_commit.sh --fast` | Duplicates Implementer, wastes tokens |
 | Auditing file inventory | Trivial, not worth agent-level work |
 | "AC passed because code looks correct" | That's Reviewer's job |
 | "AC deferred because probably no ESP32" | ASK the user, don't assume |

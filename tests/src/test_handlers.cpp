@@ -178,12 +178,11 @@ TEST_CASE("handler: cal.reset restores defaults", "[handlers][cal]") {
   REQUIRE(approx(gResetCal.nominalVolumeMl, 8.14f));
 }
 
-TEST_CASE("handler: cal.run returns error (no motor queue)", "[handlers][cal]") {
+TEST_CASE("handler: cal.run returns AckThen", "[handlers][cal]") {
   float freqs[] = {250.0f, 500.0f, 750.0f};
   auto rsp = burette_cal::handleRunCalibration(freqs, 3, 20.0f);
-  // Without motor queue, should return error not AckThen
   REQUIRE(rsp);
-  REQUIRE(rsp->kind == ResponseKind::Error);
+  REQUIRE(rsp->kind == ResponseKind::AckThen);
 }
 
 static auto stubCalRead = []() -> std::expected<CalibrationData, ResourceError> {

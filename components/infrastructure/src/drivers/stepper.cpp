@@ -64,9 +64,8 @@ RmtChannel& RmtChannel::operator=(RmtChannel&& other) noexcept {
     return *this;
 }
 
-StepperMotor::StepperMotor(gpio_num_t stepPin, gpio_num_t dirPin, gpio_num_t enPin)
+StepperMotor::StepperMotor(gpio_num_t stepPin, gpio_num_t enPin)
     : channel_(stepPin)
-    , dirPin_(dirPin)
     , enPin_(enPin) {
 
     puts("DBG: StepperMotor ctor"); fflush(stdout);

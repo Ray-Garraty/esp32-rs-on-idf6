@@ -6,8 +6,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-IDF_PATH="${IDF_PATH:-$HOME/.espressif/v6.0.1/esp-idf}"
-if [ -f "$IDF_PATH/export.sh" ]; then
+if [ -z "${IDF_PATH:-}" ]; then
+    for dir in "$HOME/.espressif"/v*/esp-idf; do
+        if [ -f "$dir/export.sh" ]; then
+            IDF_PATH="$dir"
+            break
+        fi
+    done
+fi
+if [ -n "${IDF_PATH:-}" ] && [ -f "$IDF_PATH/export.sh" ]; then
     export IDF_PATH
     source "$IDF_PATH/export.sh" > /dev/null 2>&1
 fi
@@ -285,14 +292,8 @@ case "$CMD" in
         ./scripts/lint.sh "${@:2}"
         ;;
 
-    check)
-        if command -v semgrep &>/dev/null; then
-            echo "Running main loop blocking check..."
-            semgrep --config="$PROJECT_DIR/.semgrep/main_loop_blocking.yaml" --error "$PROJECT_DIR/main/main.cpp"
-        else
-            echo "❌ semgrep not installed — install: pip install semgrep"
-            exit 1
-        fi
+    full-tidy)
+        ./scripts/lint.sh --full "${@:2}"
         ;;
 
     reconfigure)
@@ -326,7 +327,6 @@ case "$CMD" in
         echo ""
         echo "COMMANDS"
         echo "  build                 Clean build — removes build/, injects timestamp + git hash"
-        echo "  check                 Semgrep enforcement gate (main loop blocking rules)"
         echo "  flash [port]          Flash firmware (auto-detect port, stale source check)"
         echo "  monitor [port]        Serial monitor, 30s timeout"
         echo "  smoke [--force-build] Build (if stale) + semgrep + flash + 30s monitor"
@@ -334,7 +334,8 @@ case "$CMD" in
         echo "  test --build          Configure + build tests only, don't run"
         echo "  test --list           List test case names"
         echo "  test -- <filter>      Run specific tests (Catch2 wildcard)"
-        echo "  tidy                  clang-tidy static analysis"
+        echo   "  tidy                  clang-tidy static analysis (fast: ~2-5 min)"
+  "  full-tidy             clang-tidy full analysis (~30-40 min, code-review only)"
         echo "  uart [port]           UART integration test"
         echo "  reconfigure           Remove sdkconfig + idf.py reconfigure"
         echo "  clean                 Remove build/ and build-tests/"
@@ -369,7 +370,7 @@ case "$CMD" in
         ;;
 
     *)
-        echo "Usage: $0 {build|check|flash|monitor|smoke|test|tidy|uart|reconfigure|clean|erase-flash|erase-nvs|help}"
+        echo "Usage: $0 {build|flash|monitor|smoke|test|tidy|full-tidy|uart|reconfigure|clean|erase-flash|erase-nvs|help}"
         exit 1
         ;;
 esac

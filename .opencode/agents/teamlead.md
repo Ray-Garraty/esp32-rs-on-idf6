@@ -333,6 +333,19 @@ Present the commit message and completion summary. Ask if the user wants to proc
 4. Never skip steps in the workflow
 5. At the end, present the commit message and ask if they want to commit
 
+## Pre-Commit Execution
+
+Pre-commit runs in two phases by different agents:
+
+| Phase | Agent | Command | Coverage |
+|---|---|---|---|
+| 1 | @implementer | `scripts/pre_commit.sh --fast` | staged files, format, semgrep, tests, docs, sdkconfig |
+| 2 | @validator | `scripts/pre_commit.sh` | Phase 1 + build + tidy + serial API test |
+
+Both phases are mandatory before every commit. Implementer must report
+`pre_commit_fast: pass` in their report. Validator runs the full suite
+as part of hardware validation.
+
 ## Pre-Call Validation (MANDATORY before ANY Task() call)
 
 | Next Agent | Required Prerequisites |

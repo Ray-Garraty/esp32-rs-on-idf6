@@ -539,8 +539,8 @@ extern "C" void motorTaskEntry(void* pvParameters) {
     puts("DBG: motor queue created"); fflush(stdout);
     esp_task_wdt_add(NULL);
 
-    puts("DBG: before StepperMotor ctor (gpio 21,5,27)"); fflush(stdout);
-    StepperMotor stepper(config::PIN_STEP, config::PIN_DIR, config::PIN_EN);
+    puts("DBG: before StepperMotor ctor (gpio 21,13)"); fflush(stdout);
+    StepperMotor stepper(config::PIN_STEP, config::PIN_EN);
     puts("DBG: after StepperMotor ctor"); fflush(stdout);
 
     puts("DBG: before LimitSwitch emptySwitch ctor (gpio 15)"); fflush(stdout);

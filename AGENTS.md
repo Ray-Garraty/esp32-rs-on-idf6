@@ -56,6 +56,16 @@ NEVER call `idf.py` directly. Always use `scripts/idf.sh`.
 | `scripts/idf.sh monitor` | Serial monitor (live log) |
 | `scripts/idf.sh smoke` | Automated smoke test (build + flash + 30s monitor) |
 | `scripts/idf.sh test` | Host unit tests (Catch2) |
+| `scripts/idf.sh tidy` | clang-tidy static analysis (requires build first) |
+| `scripts/pre_commit.sh` | Pre-commit validation suite (see §3.5) |
+
+### 3.5 Pre-Commit Script
+| Mode | Steps included |
+|---|---|
+| `scripts/pre_commit.sh --fast` | Staged files scan → clang-format → semgrep → unit tests → docs OKF → sdkconfig constraint (~30s) |
+| `scripts/pre_commit.sh` (full) | Fast + build + clang-tidy + serial API hardware test (~5 min) |
+
+Each step fails fast with a clear error message. The hardware serial test (step 10) is the only non-fatal step.
 
 **Policy:**
 - **sdkconfig:** Edit only `sdkconfig.defaults` — never `sdkconfig` (auto-generated). Never run `idf.py menuconfig`.

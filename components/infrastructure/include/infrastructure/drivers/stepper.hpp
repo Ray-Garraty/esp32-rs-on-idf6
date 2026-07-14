@@ -35,7 +35,7 @@ private:
 // Concrete stepper motor driver (TMC2209 via RMT)
 class StepperMotor {
 public:
-    StepperMotor(gpio_num_t stepPin, gpio_num_t dirPin, gpio_num_t enPin);
+    StepperMotor(gpio_num_t stepPin, gpio_num_t enPin);
     ~StepperMotor();
 
     StepperMotor(const StepperMotor&) = delete;
@@ -61,7 +61,6 @@ public:
 private:
     RmtChannel channel_;
     rmt_encoder_handle_t encoder_ = nullptr;
-    gpio_num_t dirPin_;
     gpio_num_t enPin_;
     std::atomic<int32_t> position_{0};
 };
