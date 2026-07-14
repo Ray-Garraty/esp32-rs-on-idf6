@@ -7,11 +7,9 @@ description: >
   Covers the DRAM Triangle interaction, DMA constraints, and cache eviction risks.
 tags: [memory, psram, dram, esp32-s3, allocation, heap-caps, pmr]
 timestamp: 2026-07-13
-revision: 1 (post-implementation sync)
+revision: '1 (post-implementation sync)'
 changelog:
-  - 2026-07-13: Synced code listings to actual implementation.
-    Key changes: throw→abort (no exceptions), computeRamp defaults,
-    LogBuffer init() pattern, added ALLOW_BSS_SEG=n, moved monitoring to diag/.
+  - "2026-07-13: Synced code listings to actual implementation. Key changes: throw→abort, computeRamp defaults, LogBuffer init(), ALLOW_BSS_SEG=n, monitoring→diag/."
 ---
 
 # Memory Management Specification

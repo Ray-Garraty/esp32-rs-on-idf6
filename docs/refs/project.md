@@ -139,7 +139,7 @@ BLE notify thread reads `status_queue`, calls NimBLE `ble_gatts_notify()`.
 ### Thread Architecture
 
 ```
-MOTOR TASK (prio 1, 16 KB):
+MOTOR TASK (prio 1, `domain::MOTOR_THREAD_STACK`):
   FreeRTOS task (xTaskCreate). Owns RmtChannel exclusively.
   loop { read atomic target -> rmt_tx_wait_all_done -> write atomic position }
   rmt_tx_wait_all_done() blocks only this task, NOT main loop
@@ -156,13 +156,13 @@ MAIN LOOP (prio default/app_main, 32 KB):
     vTaskDelayUntil(10ms)         -> pacing tick
   }
 
-NET_OWNER TASK (prio 1, 16 KB):
+NET_OWNER TASK (prio 1, `domain::NET_OWNER_STACK`):
   FreeRTOS task (xTaskCreate). Owns init order: WiFi → HTTP → BLE.
   init: wifi.init() → startAP() → tryStartSTA() → HttpServer::create() → ble.init() → ensureGpioReady()
   loop { wifi_process(); http_events(); ble_process(); vTaskDelay(10ms) }
   Also spawns BLE notify thread (std::thread, 8 KB) as a child.
 
-TEMPERATURE TASK (prio 1, 16 KB):
+TEMPERATURE TASK (prio 1, `domain::TEMP_THREAD_STACK`):
   FreeRTOS task (xTaskCreate).
   loop {
     OneWire bitbang sequence
@@ -170,11 +170,11 @@ TEMPERATURE TASK (prio 1, 16 KB):
     vTaskDelay(1000ms)
   }
 
-BLE NOTIFY THREAD (spawned by net_owner, 8 KB):
+BLE NOTIFY THREAD (spawned by net_owner, `domain::BLE_NOTIFY_STACK`):
   std::thread, detached.
   loop { xQueueReceive -> ble_gatts_notify }
 
-LOG WORKER TASK (prio 0, 8 KB):
+LOG WORKER TASK (prio 0, `domain::LOG_WORKER_STACK`):
   FreeRTOS task (xTaskCreate), created by net_owner after HTTP init.
   Drains log_queue from LogBuffer::push() calls (any task).
   Formats each entry as JSON string on stack (char buf[384]), pushes
@@ -183,7 +183,7 @@ LOG WORKER TASK (prio 0, 8 KB):
   httpd_ws_send_frame_async, or any socket I/O). This task is
   lightweight by design — 8 KB stack is sufficient.
 
-HTTP SERVER (FreeRTOS internal, 12 KB):
+HTTP SERVER (FreeRTOS internal, `domain::HTTP_SERVER_STACK`):
   Created by httpd_start(). Calls registered handler callbacks. Not user-managed.
 ```
 

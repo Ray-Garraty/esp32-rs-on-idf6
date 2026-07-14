@@ -254,11 +254,11 @@ extern "C" void netTaskEntry(void* pvParameters) {
     // LL-038: async log worker
     TaskHandle_t logWorkerHandle = nullptr;
     xTaskCreate(ecotiter::domain::LogBuffer::workerTaskEntry,
-                "log_worker", 8192 / sizeof(configSTACK_DEPTH_TYPE),
+                "log_worker", ecotiter::domain::LOG_WORKER_STACK / sizeof(configSTACK_DEPTH_TYPE),
                 nullptr, 0, &logWorkerHandle);
     if (logWorkerHandle != nullptr) {
         ecotiter::diag::StackMonitor::instance().registerByHandle(
-            logWorkerHandle, "log_worker", 8192);
+            logWorkerHandle, "log_worker", ecotiter::domain::LOG_WORKER_STACK);
     }
 
     while (true) {

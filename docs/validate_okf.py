@@ -25,8 +25,10 @@ ALLOWED_TYPES = {
     "Metric",
     "UI Rule",
     "ESP32 Reference",
+    "Hardware Reference",
     "Build Guide",
     "Code Review",
+    "CrashReport",
     "Docs Rule",
     "CrashReport",
 }
