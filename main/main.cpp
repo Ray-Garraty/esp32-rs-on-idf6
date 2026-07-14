@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -11,10 +12,12 @@
 
 #include "application/command.hpp"
 #include "application/dispatch.hpp"
+#include "application/response.hpp"
 #include "application/scheduler.hpp"
 #include "diag/black_box.hpp"
 #include "diag/ffi_guard.hpp"
 #include "diag/heap_monitor.hpp"
+#include "diag/heap_snapshot.hpp"
 #include "diag/rtc_watchdog.hpp"
 #include "diag/stack_monitor.hpp"
 #include "diag/tick_watchdog.hpp"
@@ -35,6 +38,8 @@
 #include "interface/serial.hpp"
 #include "domain/calibration.hpp"
 #include "domain/log_buffer.hpp"
+
+using namespace ecotiter;
 
 // Manual JSON id extractor — avoids nlohmann dependency in main.cpp
 static uint64_t extractCmdId(const char* data) {
@@ -77,7 +82,7 @@ namespace { std::atomic<ecotiter::infrastructure::network::HttpServer*> gHttpSer
 
 // ws_send_queue: log_worker pushes JSON, net_owner drains and broadcasts via WebSocket
 struct WsSendEntry {
-    char data[384];
+    char data[config::WS_BUF_SIZE];
     size_t len;
 };
 static QueueHandle_t gWsSendQueue = nullptr;
@@ -101,7 +106,7 @@ static uint16_t adcSampleRead() {
 
 // ── ESP_LOG capture → LogBuffer ───────────────────────────────────
 static int logVprintf(const char* fmt, va_list args) {
-    char buf[384];
+    char buf[config::WS_BUF_SIZE];
     int n = std::vsnprintf(buf, sizeof(buf), fmt, args);
     if (n > 0 && static_cast<size_t>(n) < sizeof(buf)) {
         const char* level = "INFO";
@@ -125,7 +130,7 @@ static int logVprintf(const char* fmt, va_list args) {
 // WebSocket log push callback — formats JSON and pushes to ws_send_queue
 // net_owner drains the queue and calls broadcastWsEvent (GR-14)
 static void wsLogCallback(const ecotiter::domain::LogEntry& entry) {
-    char buf[384];
+    char buf[config::WS_BUF_SIZE];
     int n = std::snprintf(buf, sizeof(buf),
         R"({"event":"log","data":{"level":"%s","msg":")", entry.level);
 
@@ -195,6 +200,15 @@ static void configureGpioPins() {
     emptyConf.intr_type = GPIO_INTR_POSEDGE;
     ESP_ERROR_CHECK(gpio_config(&emptyConf));
 
+    // DS18B20 (GPIO6) — open-drain with pull-up for OneWire bitbang
+    gpio_config_t dsConf = {};
+    dsConf.pin_bit_mask = (1ULL << config::PIN_DS18B20);
+    dsConf.mode = GPIO_MODE_INPUT_OUTPUT_OD;
+    dsConf.pull_up_en = GPIO_PULLUP_ENABLE;
+    dsConf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    dsConf.intr_type = GPIO_INTR_DISABLE;
+    ESP_ERROR_CHECK(gpio_config(&dsConf));
+
     // Install ISR service once (for all limit switch pins)
     ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_IRAM));
 }
@@ -253,12 +267,12 @@ extern "C" void netTaskEntry(void* pvParameters) {
     }
 
     // Create ws_send_queue for log_worker → net_owner log forwarding (GR-14)
-    gWsSendQueue = xQueueCreate(16, sizeof(WsSendEntry));
+    gWsSendQueue = xQueueCreate(config::WS_SEND_QUEUE_DEPTH, sizeof(WsSendEntry));
     if (gWsSendQueue == nullptr) {
         ESP_LOGE("net_owner", "Failed to create ws_send_queue");
     }
 
-    gWsBroadcastQueue = xQueueCreate(4, sizeof(WsBroadcastEntry));
+    gWsBroadcastQueue = xQueueCreate(config::WS_BROADCAST_QUEUE_DEPTH, sizeof(WsBroadcastEntry));
     if (gWsBroadcastQueue == nullptr) {
         ESP_LOGE("net_owner", "Failed to create ws_broadcast_queue");
     }
@@ -332,6 +346,7 @@ extern "C" void app_main(void)
     {
         auto bootCal = infrastructure::storage::calibrationRead();
         if (bootCal) {
+            // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
             domain::gCalCache.store(new domain::CalibrationData(*bootCal), std::memory_order_release);
         }
     }
@@ -435,6 +450,9 @@ extern "C" void app_main(void)
     fflush(stdout);
     domain::gBootProgress.store(domain::BootProgress::NetOwner, std::memory_order_release);
     logDramBeforeTask("net_owner", domain::NET_OWNER_STACK);
+    if (!diag::HeapSnapshot::assertCanAllocate(domain::NET_OWNER_STACK + 4096)) {
+        ESP_LOGW(TAG, "Low DRAM before net_owner task creation");
+    }
     NetTaskParams netParams{&bleManager};
     BaseType_t nt = xTaskCreate(netTaskEntry, "net_owner",
                                 domain::NET_OWNER_STACK / sizeof(configSTACK_DEPTH_TYPE),
@@ -452,8 +470,8 @@ extern "C" void app_main(void)
 
     ecotiter::diag::print_heap_stats();
 
-    diag::FfiGuard guard(50);
-    infrastructure::drivers::AdcDriver adc(ADC_UNIT_1, ADC_CHANNEL_3);
+    diag::FfiGuard guard(config::FFI_BOOT_SEQUENCE);
+    infrastructure::drivers::AdcDriver adc(static_cast<adc_unit_t>(config::ADC_UNIT), static_cast<adc_channel_t>(config::ADC_CHANNEL));
     gAdcDriver = &adc;
     ecotiter::application::setAdcSampleReadCb(adcSampleRead);
 
@@ -669,7 +687,8 @@ extern "C" void app_main(void)
             auto line = serial.process();
             if (line.has_value())
             {
-                ESP_LOGI(TAG, "RX: %.*s", static_cast<int>(line->size()), line->data());
+                auto lineStr = std::string(line->data(), line->size());
+                ESP_LOGI(TAG, "RX: %s", lineStr.c_str());
 
                 ecotiter::domain::gUsbHandshakeReceived.store(true, std::memory_order_release);
 
@@ -699,69 +718,15 @@ extern "C" void app_main(void)
                 }
             }
 
-            // Deliver pending motor result over Serial/BLE
-            if (ecotiter::domain::gHasPendingResult.load(std::memory_order_acquire))
+        {
+            infrastructure::SmResult smResult;
+            if (infrastructure::gSmResultQueue &&
+                xQueueReceive(infrastructure::gSmResultQueue, &smResult, 0) == pdTRUE)
             {
                 uint64_t resultId = ecotiter::domain::gLastCmdId.load(std::memory_order_acquire);
-                auto& smResult = infrastructure::gSmResult;
 
                 ecotiter::domain::memory::ResponseBuffer buf{};
-                size_t off = 0;
-
-                // Use None type as generic "move done" for basic operations
-                if (smResult.type == infrastructure::SmResult::Type::None && smResult.stepsTaken > 0)
-                {
-                    auto cal = ecotiter::infrastructure::storage::calibrationRead();
-                    float volDispensed = cal
-                        ? static_cast<float>(smResult.stepsTaken) / cal->stepsPerMl
-                        : 0.0f;
-                    off = static_cast<size_t>(
-                        std::snprintf(buf.data(), buf.size(),
-                            R"({"id":%llu,"status":"ok","data":{"volume_dispensed_ml":%.2f}})",
-                            static_cast<unsigned long long>(resultId),
-                            static_cast<double>(volDispensed)));
-                }
-                else if (smResult.type == infrastructure::SmResult::Type::RinseComplete)
-                {
-                    off = static_cast<size_t>(
-                        std::snprintf(buf.data(), buf.size(),
-                            R"({"id":%llu,"status":"ok","data":{"cycles_completed":1}})",
-                            static_cast<unsigned long long>(resultId)));
-                }
-                else if (smResult.type == infrastructure::SmResult::Type::CalDoseComplete)
-                {
-                    auto cal = ecotiter::infrastructure::storage::calibrationRead();
-                    float volDispensed = cal
-                        ? static_cast<float>(smResult.stepsTaken) / cal->stepsPerMl
-                        : 0.0f;
-                    off = static_cast<size_t>(
-                        std::snprintf(buf.data(), buf.size(),
-                            R"({"id":%llu,"status":"ok","data":{"volume_dispensed_ml":%.2f}})",
-                            static_cast<unsigned long long>(resultId),
-                            static_cast<double>(volDispensed)));
-                }
-                else if (smResult.type == infrastructure::SmResult::Type::CalSpeedComplete)
-                {
-                    off = static_cast<size_t>(
-                        std::snprintf(buf.data(), buf.size(),
-                            R"({"id":%llu,"status":"ok","data":{"speed_ml_min":%.2f}})",
-                            static_cast<unsigned long long>(resultId),
-                            static_cast<double>(smResult.measuredSpeedMlMin)));
-                }
-                else if (smResult.type == infrastructure::SmResult::Type::CalSpeedSeqComplete)
-                {
-                    off = static_cast<size_t>(
-                        std::snprintf(buf.data(), buf.size(),
-                            R"({"id":%llu,"status":"ok","data":{"status":"complete"}})",
-                            static_cast<unsigned long long>(resultId)));
-                }
-                else
-                {
-                    off = static_cast<size_t>(
-                        std::snprintf(buf.data(), buf.size(),
-                            R"({"id":%llu,"status":"ok","data":{"status":"complete"}})",
-                            static_cast<unsigned long long>(resultId)));
-                }
+                size_t off = ecotiter::application::formatSmResult(buf, resultId, smResult);
 
                 if (off > 0 && off < buf.size())
                 {
@@ -775,12 +740,8 @@ extern "C" void app_main(void)
                         xQueueSend(bleManager.notifyQueue(), &item, 0);
                     }
                 }
-
-                // Clear result
-                ecotiter::domain::gHasPendingResult.store(false, std::memory_order_release);
-                smResult.type = infrastructure::SmResult::Type::None;
-                smResult.stepsTaken = 0;
             }
+        }
 
         } // TickWatchdog scope end
 

@@ -25,6 +25,9 @@
 
 #include "domain/types.hpp"
 #include "diag/ffi_guard.hpp"
+#include "diag/heap_snapshot.hpp"
+#include "esp_coexist.h"
+#include "infrastructure/config.hpp"
 
 static constexpr auto TAG = "ble";
 
@@ -130,6 +133,9 @@ std::expected<void, domain::AppError> BleManager::init() {
         return std::unexpected(domain::AppError::Resource);
     }
 
+    if (!diag::HeapSnapshot::assertCanAllocate(BLE_NOTIFY_QUEUE_SIZE * sizeof(BleNotifyItem))) {
+        ESP_LOGW(TAG, "Low DRAM before BLE notify queue creation");
+    }
     notifyQueue_ = xQueueCreate(BLE_NOTIFY_QUEUE_SIZE, sizeof(BleNotifyItem));
     if (notifyQueue_ == nullptr) {
         ESP_LOGE(TAG, "Failed to create notify queue");
@@ -145,12 +151,12 @@ std::expected<void, domain::AppError> BleManager::init() {
         int rc = nimble_port_init();
         if (rc != 0) {
             ESP_LOGE(TAG, "nimble_port_init failed: %d", rc);
-            return std::unexpected(domain::AppError::Hardware);
+            return std::unexpected(domain::AppError::Resource);
         }
         puts("DBG: BLE - nimble_port_init done"); fflush(stdout);
     }
 
-    ble_att_set_preferred_mtu(256);
+    ble_att_set_preferred_mtu(config::BLE_PREFERRED_MTU);
 
     ble_svc_gap_init();
     ble_svc_gatt_init();
@@ -166,12 +172,12 @@ std::expected<void, domain::AppError> BleManager::init() {
         int rc = ble_gatts_count_cfg(GATT_SVCS);
         if (rc != 0) {
             ESP_LOGE(TAG, "ble_gatts_count_cfg failed: %d", rc);
-            return std::unexpected(domain::AppError::Hardware);
+            return std::unexpected(domain::AppError::Resource);
         }
         rc = ble_gatts_add_svcs(GATT_SVCS);
         if (rc != 0) {
             ESP_LOGE(TAG, "ble_gatts_add_svcs failed: %d", rc);
-            return std::unexpected(domain::AppError::Hardware);
+            return std::unexpected(domain::AppError::Resource);
         }
     }
 
@@ -375,6 +381,10 @@ int BleManager::gapEventCallback(struct ble_gap_event* event, void* arg) {
             s_instance->connectUs_ = esp_timer_get_time();
             domain::gBleError.store(false, std::memory_order_release);
             puts("DBG: BLE CONNECTED"); fflush(stdout);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+            esp_coex_preference_set(ESP_COEX_PREFER_BT);
+#pragma GCC diagnostic pop
         } else {
             puts("DBG: BLE CONNECT FAILED"); fflush(stdout);
         }
@@ -387,6 +397,10 @@ int BleManager::gapEventCallback(struct ble_gap_event* event, void* arg) {
         s_instance->consecutiveFailures_ = 0;
         domain::gBleError.store(false, std::memory_order_release);
         puts("DBG: BLE DISCONNECTED"); fflush(stdout);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+        esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
+#pragma GCC diagnostic pop
 
         diag::FfiGuard guard(65);
         ble_gap_adv_start(s_instance->ownAddrType_, nullptr, BLE_HS_FOREVER,

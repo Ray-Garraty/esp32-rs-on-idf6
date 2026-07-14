@@ -10,7 +10,7 @@ namespace ecotiter::domain {
 /// Searches for `"fieldname"` then expects `: "value"` pattern.
 /// Returns malloc'd string (caller must free) or nullptr on failure.
 /// Does NOT handle escaped quotes inside values.
-[[nodiscard]] inline const char* findJsonField(const char* json, const char* field) {
+[[nodiscard]] inline char* findJsonField(const char* json, const char* field) {
     auto* pos = std::strstr(json, field);
     if (!pos) return nullptr;
     pos += std::strlen(field);

@@ -12,13 +12,10 @@ namespace ecotiter::infrastructure::drivers {
 
 inline std::atomic<int32_t> gTempCX100{std::numeric_limits<int32_t>::min()};
 
-[[nodiscard]] std::optional<float> tempCelsius();
-void clearTemp();
-
 class OneWireBus {
 public:
     explicit OneWireBus(gpio_num_t pin);
-    ~OneWireBus();
+    ~OneWireBus() = default;
 
     OneWireBus(const OneWireBus&) = delete;
     OneWireBus& operator=(const OneWireBus&) = delete;

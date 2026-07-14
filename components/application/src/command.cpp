@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <cstring>
+#include <string>
 #include <system_error>
 
 #include <nlohmann/json.hpp>
@@ -307,10 +308,11 @@ std::expected<size_t, domain::ProtocolError> serializeToBuffer(
 CommandResponse makeSingleResponse(std::string_view payload, size_t size) {
   CommandResponse rsp;
   rsp.kind = ResponseKind::Single;
+  std::string payloadStr(payload.data(), size);
   rsp.bodySize = static_cast<size_t>(
       std::snprintf(rsp.body.data(), rsp.body.size(),
-                    R"({"status":"ok","data":%.*s})",
-                    static_cast<int>(size), payload.data()));
+                    R"({"status":"ok","data":%s})",
+                    payloadStr.c_str()));
   return rsp;
 }
 
@@ -343,16 +345,6 @@ CommandResponse makeAckThenResponse() {
   return rsp;
 }
 
-void appendCmdField(domain::memory::ResponseBuffer& buf, size_t& offset,
-                    std::string_view cmdName) {
-  if (offset >= buf.size()) return;
-  int n = std::snprintf(buf.data() + offset, buf.size() - offset,
-                        R"("cmd":"%.*s")",
-                        static_cast<int>(cmdName.size()), cmdName.data());
-  if (n > 0) offset += static_cast<size_t>(n);
-  if (offset >= buf.size()) offset = buf.size() - 1;
-}
-
 void serializeStatusJson(domain::memory::ResponseBuffer& buf, size_t& offset,
                          domain::BuretteState state, int32_t tempCX100,
                          domain::ValvePosition valvePos, float mv,
@@ -367,17 +359,8 @@ void serializeStatusJson(domain::memory::ResponseBuffer& buf, size_t& offset,
     if (offset >= S) offset = S - 1;
   };
 
-  const char* stateStr = "";
-  switch (state) {
-    case domain::BuretteState::Idle:      stateStr = "idle"; break;
-    case domain::BuretteState::Homing:    stateStr = "working"; break;
-    case domain::BuretteState::Filling:   stateStr = "filling"; break;
-    case domain::BuretteState::Emptying:  stateStr = "emptying"; break;
-    case domain::BuretteState::Dosing:    stateStr = "dosing"; break;
-    case domain::BuretteState::Rinsing:   stateStr = "rinsing"; break;
-    case domain::BuretteState::Stopping:  stateStr = "stopping"; break;
-    case domain::BuretteState::Error:     stateStr = "error"; break;
-  }
+  const char* stateStr = domain::buretteStateStr(state);
+  if (state == domain::BuretteState::Homing) stateStr = "working";
 
   (void)valvePos;
   (void)dir;

@@ -36,7 +36,6 @@ enum class Direction : uint8_t { LiqIn, LiqOut };
 
 enum class ValvePosition : uint8_t { Input, Output };
 enum class TransportMode : uint8_t { UsbActive, BleAdvertising, BleConnected };
-enum class LimitSwitchId : uint8_t { Full, Empty };
 
 enum class BuretteState : uint8_t {
     Idle,
@@ -48,6 +47,20 @@ enum class BuretteState : uint8_t {
     Stopping,
     Error
 };
+
+[[nodiscard]] inline const char* buretteStateStr(BuretteState s) noexcept {
+    switch (s) {
+        case BuretteState::Idle:      return "idle";
+        case BuretteState::Homing:    return "homing";
+        case BuretteState::Filling:   return "filling";
+        case BuretteState::Emptying:  return "emptying";
+        case BuretteState::Dosing:    return "dosing";
+        case BuretteState::Rinsing:   return "rinsing";
+        case BuretteState::Stopping:  return "stopping";
+        case BuretteState::Error:     return "error";
+    }
+    return "unknown";
+}
 
 enum class BuretteCommand : uint8_t {
     Fill,
@@ -92,8 +105,7 @@ inline std::atomic<bool>     gBleError{false};
 inline std::atomic<uint8_t>  gStallGuardThreshold{0};
 inline std::atomic<bool>     gMotorIsMoving{false};
 
-// Result delivery for serial/BLE — motor task sets these on completion
-inline std::atomic<bool>     gHasPendingResult{false};
+// Result delivery for serial/BLE — motor task pushes to gSmResultQueue
 inline std::atomic<uint64_t> gLastCmdId{0};
 
 // Homing completion flag — net_owner waits for this before starting WiFi AP

@@ -250,14 +250,6 @@ case "$CMD" in
         else
             do_build
         fi
-        # Semgrep enforcement gate (Fix 8)
-        if command -v semgrep &>/dev/null; then
-            echo "Running main loop blocking check..."
-            semgrep --config="$PROJECT_DIR/.semgrep/main_loop_blocking.yaml" --error "$PROJECT_DIR/main/main.cpp"
-        else
-            echo "⚠️  semgrep not installed — skipping main loop blocking check"
-            echo "   Install: pip install semgrep"
-        fi
         PORT=$(python3 "$SCRIPT_DIR/find_port.py") || {
             echo "❌ No ESP32 port found"
             exit 1

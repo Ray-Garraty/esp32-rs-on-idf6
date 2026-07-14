@@ -24,19 +24,19 @@ public:
 
     [[nodiscard]] bool isValid() const noexcept { return open_; }
 
-    [[nodiscard]] domain::Result<std::optional<uint8_t>, domain::ResourceError> getU8(const char* key);
-    [[nodiscard]] domain::Result<void, domain::ResourceError> setU8(const char* key, uint8_t value);
-    [[nodiscard]] domain::Result<std::optional<uint32_t>, domain::ResourceError> getU32(const char* key);
-    [[nodiscard]] domain::Result<void, domain::ResourceError> setU32(const char* key, uint32_t value);
-    [[nodiscard]] domain::Result<std::optional<int32_t>, domain::ResourceError> getI32(const char* key);
-    [[nodiscard]] domain::Result<void, domain::ResourceError> setI32(const char* key, int32_t value);
-    [[nodiscard]] domain::Result<std::optional<float>, domain::ResourceError> getF32(const char* key);
-    [[nodiscard]] domain::Result<void, domain::ResourceError> setF32(const char* key, float value);
+    [[nodiscard]] domain::Result<std::optional<uint8_t>, domain::ResourceError> getU8(const char* key) const;
+    [[nodiscard]] domain::Result<void, domain::ResourceError> setU8(const char* key, uint8_t value) const;
+    [[nodiscard]] domain::Result<std::optional<uint32_t>, domain::ResourceError> getU32(const char* key) const;
+    [[nodiscard]] domain::Result<void, domain::ResourceError> setU32(const char* key, uint32_t value) const;
+    [[nodiscard]] domain::Result<std::optional<int32_t>, domain::ResourceError> getI32(const char* key) const;
+    [[nodiscard]] domain::Result<void, domain::ResourceError> setI32(const char* key, int32_t value) const;
+    [[nodiscard]] domain::Result<std::optional<float>, domain::ResourceError> getF32(const char* key) const;
+    [[nodiscard]] domain::Result<void, domain::ResourceError> setF32(const char* key, float value) const;
     [[nodiscard]] domain::Result<std::optional<std::string_view>, domain::ResourceError> getStr(
-        const char* key, char* buf, size_t bufSize);
-    [[nodiscard]] domain::Result<void, domain::ResourceError> setStr(const char* key, const char* value);
-    [[nodiscard]] domain::Result<void, domain::ResourceError> eraseKey(const char* key);
-    [[nodiscard]] domain::Result<void, domain::ResourceError> eraseAll();
+        const char* key, char* buf, size_t bufSize) const;
+    [[nodiscard]] domain::Result<void, domain::ResourceError> setStr(const char* key, const char* value) const;
+    [[nodiscard]] domain::Result<void, domain::ResourceError> eraseKey(const char* key) const;
+    [[nodiscard]] domain::Result<void, domain::ResourceError> eraseAll() const;
 
 private:
     nvs_handle_t handle_{0};

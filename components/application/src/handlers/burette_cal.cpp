@@ -1,6 +1,7 @@
 #include "application/handlers/burette_cal.hpp"
 
 #include <cstdarg>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -10,6 +11,7 @@
 #include "domain/ols.hpp"
 #include "domain/z_factor.hpp"
 #include "infrastructure/motor_task.hpp"
+#include "infrastructure/config.hpp"
 
 namespace ecotiter::application::handlers::burette_cal {
 namespace {
@@ -175,13 +177,13 @@ std::expected<CommandResponse, domain::AppError> handleRunCalibration(
   if (freqsCount < 2 || !freqs) {
     return makeErrorResponse("invalid_params");
   }
-  size_t count = (freqsCount > 3) ? 3 : freqsCount;
+  size_t count = (freqsCount > config::MAX_CAL_SEQ_POINTS) ? config::MAX_CAL_SEQ_POINTS : freqsCount;
   infrastructure::MotorCommand cmd{};
   cmd.type = infrastructure::MotorCommandType::StartCalSpeedSeq;
-  cmd.startCalSpeedSeq.fillSpeedMlMin = (speedMlMin > 0.0f) ? speedMlMin : 20.0f;
+  cmd.startCalSpeedSeq.fillSpeedMlMin = (speedMlMin > 0.0f) ? speedMlMin : config::FILL_DEFAULT_SPEED_ML_MIN;
   for (size_t i = 0; i < count; ++i) {
     cmd.startCalSpeedSeq.freqs[i] = (freqs[i] > 0.0f)
-        ? static_cast<uint16_t>(freqs[i] + 0.5f) : 0;
+        ? static_cast<uint16_t>(std::lround(freqs[i])) : 0;
   }
   if (infrastructure::gMotorCmdQueue == nullptr) {
     return makeErrorResponse("start_failed");
@@ -194,7 +196,10 @@ std::expected<CommandResponse, domain::AppError> handleRunCalibration(
 
 std::expected<CommandResponse, domain::AppError> handleGetCalResult(
     ReadCalCb readCal) {
-  auto& result = infrastructure::gSmResult;
+  infrastructure::SmResult result{infrastructure::SmResult::Type::None, 0, 0.0f, {}, 0};
+  if (infrastructure::gSmResultQueue) {
+    xQueuePeek(infrastructure::gSmResultQueue, &result, 0);
+  }
   CommandResponse rsp;
   rsp.kind = ResponseKind::Single;
   size_t off = 0;

@@ -2,7 +2,6 @@
 #include "esp_log.h"
 #include "esp_check.h"
 #include "freertos/FreeRTOS.h"
-#include "driver/rmt_types.h"
 
 static constexpr auto TAG = "stepper";
 
@@ -64,20 +63,49 @@ RmtChannel& RmtChannel::operator=(RmtChannel&& other) noexcept {
     return *this;
 }
 
+RmtEncoder::RmtEncoder() {
+    rmt_copy_encoder_config_t encConfig = {};
+    esp_err_t err = rmt_new_copy_encoder(&encConfig, &handle_);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create copy encoder: %s", esp_err_to_name(err));
+        handle_ = nullptr;
+    }
+}
+
+RmtEncoder::~RmtEncoder() {
+    if (handle_) {
+        rmt_del_encoder(handle_);
+    }
+}
+
+RmtEncoder::RmtEncoder(RmtEncoder&& other) noexcept
+    : handle_(other.handle_) {
+    other.handle_ = nullptr;
+}
+
+RmtEncoder& RmtEncoder::operator=(RmtEncoder&& other) noexcept {
+    if (this != &other) {
+        if (handle_) {
+            rmt_del_encoder(handle_);
+        }
+        handle_ = other.handle_;
+        other.handle_ = nullptr;
+    }
+    return *this;
+}
+
 StepperMotor::StepperMotor(gpio_num_t stepPin, gpio_num_t enPin)
     : channel_(stepPin)
     , enPin_(enPin) {
 
     puts("DBG: StepperMotor ctor"); fflush(stdout);
 
-    rmt_copy_encoder_config_t encConfig = {};
-    ESP_ERROR_CHECK(rmt_new_copy_encoder(&encConfig, &encoder_));
+    if (!encoder_.valid()) {
+        ESP_LOGE(TAG, "Failed to create copy encoder");
+    }
 }
 
 StepperMotor::~StepperMotor() {
-    if (encoder_) {
-        rmt_del_encoder(encoder_);
-    }
 }
 
 domain::Result<void, domain::StepperError> StepperMotor::moveStepsIntervals(
@@ -122,7 +150,7 @@ domain::Result<void, domain::StepperError> StepperMotor::moveStepsIntervals(
 
         esp_err_t err = rmt_transmit(
             channel_.get(),
-            encoder_,
+            encoder_.get(),
             symbols,
             chunkSize * sizeof(uint32_t),
             &txConfig);

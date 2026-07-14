@@ -126,9 +126,6 @@ CommandResponse makeAckThenResponse();
 CommandResponse makeErrorResponse(std::string_view message);
 CommandResponse makeSingleResponse(std::string_view payload, size_t size);
 
-// Build JSON response fragments for common types
-void appendCmdField(domain::memory::ResponseBuffer& buf, size_t& offset,
-                    std::string_view cmdName);
 void serializeStatusJson(domain::memory::ResponseBuffer& buf, size_t& offset,
                          domain::BuretteState state, int32_t tempCX100,
                          domain::ValvePosition valvePos, float mv,

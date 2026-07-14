@@ -72,7 +72,7 @@ struct SmResult {
 };
 
 extern QueueHandle_t gMotorCmdQueue;
-extern SmResult gSmResult;
+extern QueueHandle_t gSmResultQueue;
 extern drivers::TmcUart gTmcUart;
 
 } // namespace ecotiter::infrastructure

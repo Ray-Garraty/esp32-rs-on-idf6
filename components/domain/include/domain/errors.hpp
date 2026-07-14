@@ -24,12 +24,6 @@ enum class NetworkError : uint8_t {
     WifiConnectionFailed
 };
 
-enum class HardwareError : uint8_t {
-    StepperMotor,
-    Sensor,
-    Network
-};
-
 enum class ProtocolError : uint8_t {
     InvalidJson,
     UnknownCommand,
@@ -48,7 +42,6 @@ enum class ResourceError : uint8_t {
 };
 
 enum class AppError : uint8_t {
-    Hardware,
     Protocol,
     State,
     Resource

@@ -38,7 +38,6 @@ set(APPLICATION_SRCS
 
 set(DOMAIN_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/domain/src/burette.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/domain/src/motion.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/infrastructure/src/drivers/tmc_uart.cpp
 )
 
@@ -92,7 +91,6 @@ add_executable(unit_tests
     src/test_json_utils.cpp
     src/test_mdns.cpp
     src/test_cal_math.cpp
-    src/test_motion.cpp
     src/test_wifi_sta.cpp
 )
 

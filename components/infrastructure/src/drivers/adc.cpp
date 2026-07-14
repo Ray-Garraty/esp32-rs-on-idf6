@@ -59,20 +59,6 @@ domain::Result<uint16_t, domain::SensorError> AdcDriver::readRaw() {
     return uraw;
 }
 
-std::optional<uint16_t> AdcDriver::readAvg() const {
-    if (count_ == 0) return std::nullopt;
-
-    uint32_t sum = 0;
-    for (size_t i = 0; i < count_; ++i) {
-        sum += buf_[i];
-    }
-    return static_cast<uint16_t>(sum / static_cast<uint32_t>(count_));
-}
-
-void AdcDriver::resetAvg() {
-    count_ = 0;
-}
-
 int16_t AdcDriver::calibratedMv() {
     auto rawResult = readRaw();
     if (!rawResult) {

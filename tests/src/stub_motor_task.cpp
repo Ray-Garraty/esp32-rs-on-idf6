@@ -5,8 +5,7 @@
 // Non-null sentinel — xQueueSend stub always returns pdTRUE
 static int s_queueSentinel;
 QueueHandle_t ecotiter::infrastructure::gMotorCmdQueue = &s_queueSentinel;
-ecotiter::infrastructure::SmResult ecotiter::infrastructure::gSmResult{
-    ecotiter::infrastructure::SmResult::Type::None, 0, 0.0f, {}, 0};
+QueueHandle_t ecotiter::infrastructure::gSmResultQueue = &s_queueSentinel;
 ecotiter::infrastructure::drivers::TmcUart ecotiter::infrastructure::gTmcUart;
 
 // Calibration cache for host tests — matches default values from nvs.cpp:259

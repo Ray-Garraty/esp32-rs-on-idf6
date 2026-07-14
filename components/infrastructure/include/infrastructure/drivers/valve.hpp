@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 
 #include "driver/gpio.h"
@@ -9,10 +8,7 @@
 
 namespace ecotiter::infrastructure::drivers {
 
-inline std::atomic<uint8_t> gValvePosition{0};
 
-[[nodiscard]] domain::ValvePosition getGlobalValvePosition();
-void setGlobalValvePosition(domain::ValvePosition pos);
 
 class Valve {
 public:

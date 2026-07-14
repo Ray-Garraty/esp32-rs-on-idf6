@@ -4,7 +4,6 @@
 #include <array>
 #include <cstdint>
 #include <expected>
-#include <optional>
 
 #include "esp_adc/adc_oneshot.h"
 
@@ -29,8 +28,6 @@ public:
     AdcDriver& operator=(const AdcDriver&) = delete;
 
     [[nodiscard]] domain::Result<uint16_t, domain::SensorError> readRaw();
-    [[nodiscard]] std::optional<uint16_t> readAvg() const;
-    void resetAvg();
     [[nodiscard]] int16_t calibratedMv();
 
 private:

@@ -144,7 +144,7 @@ MOTOR TASK (prio 1, `domain::MOTOR_THREAD_STACK`):
   loop { read atomic target -> rmt_tx_wait_all_done -> write atomic position }
   rmt_tx_wait_all_done() blocks only this task, NOT main loop
 
-MAIN LOOP (prio default/app_main, 32 KB):
+MAIN LOOP (prio default/app_main):
   loop {
     cmd_queue.process()           -> set motor target atomics
     wifi_process()                -> DNS poll, reconnect logic
@@ -181,7 +181,7 @@ LOG WORKER TASK (prio 0, `domain::LOG_WORKER_STACK`):
   WsSendEntry to ws_send_queue for net_owner to broadcast.
   Must NEVER call network functions (broadcastWsEvent,
   httpd_ws_send_frame_async, or any socket I/O). This task is
-  lightweight by design — 8 KB stack is sufficient.
+  lightweight by design — stack is allocated per `domain::LOG_WORKER_STACK`.
 
 HTTP SERVER (FreeRTOS internal, `domain::HTTP_SERVER_STACK`):
   Created by httpd_start(). Calls registered handler callbacks. Not user-managed.

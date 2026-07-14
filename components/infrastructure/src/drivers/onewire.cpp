@@ -10,33 +10,10 @@ static constexpr auto TAG = "onewire";
 
 namespace ecotiter::infrastructure::drivers {
 
-std::optional<float> tempCelsius() {
-    int32_t v = gTempCX100.load(std::memory_order_relaxed);
-    if (v == std::numeric_limits<int32_t>::min()) {
-        return std::nullopt;
-    }
-    return static_cast<float>(v) / 100.0f;
-}
-
-void clearTemp() {
-    gTempCX100.store(std::numeric_limits<int32_t>::min(), std::memory_order_relaxed);
-}
-
 OneWireBus::OneWireBus(gpio_num_t pin)
     : pin_(pin) {
-
-    gpio_config_t ioConf = {};
-    ioConf.pin_bit_mask = (1ULL << pin_);
-    ioConf.mode = GPIO_MODE_INPUT_OUTPUT_OD;
-    ioConf.pull_up_en = GPIO_PULLUP_ENABLE;
-    ioConf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    ioConf.intr_type = GPIO_INTR_DISABLE;
-    ESP_ERROR_CHECK(gpio_config(&ioConf));
-
     gpio_set_level(pin_, 1);
 }
-
-OneWireBus::~OneWireBus() = default;
 
 // CONTRACT: OneWire bitbang timing via esp_rom_delay_us. All delays are
 // derived from the DS18B20 datasheet and are tolerant of 1-10 us variance.

@@ -20,8 +20,8 @@ public:
     [[nodiscard]] bool init(gpio_num_t txPin, gpio_num_t rxPin, uint32_t baud);
     void deinit();
 
-    [[nodiscard]] bool writeRegister(uint8_t reg, uint32_t value);
-    [[nodiscard]] bool readRegister(uint8_t reg, uint32_t& value);
+    [[nodiscard]] bool writeRegister(uint8_t reg, uint32_t value) const;
+    [[nodiscard]] bool readRegister(uint8_t reg, uint32_t& value) const;
     [[nodiscard]] bool testConnection();
 
 private:

@@ -44,16 +44,14 @@ public:
     [[nodiscard]] std::optional<uint32_t> getSTAIP() const noexcept;
 
     // Non-blocking: poll DNS UDP socket for captive portal
-    void process();
+    void process() const;
 
 private:
     static void eventHandler(void* arg, esp_event_base_t base, int32_t id, void* data);
     void handleEvent(esp_event_base_t base, int32_t id, void* data);
-    void startDnsServer();
     void stopDnsServer();
     void startMdns();
 
-    static constexpr uint16_t DNS_PORT = 53;
     static constexpr uint32_t AP_IP = 0x0104A8C0; // 192.168.4.1 in network order
     static constexpr const char* AP_SSID = "EcoTiter-AP";
 

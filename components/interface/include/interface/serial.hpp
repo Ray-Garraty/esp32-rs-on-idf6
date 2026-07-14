@@ -51,7 +51,7 @@ public:
         return splitBuffer(data);
     }
 
-    void write(std::string_view s) noexcept;
+    void write(std::string_view s) const noexcept;
     void setSilent(bool s) noexcept { silent_.store(s, std::memory_order_release); }
     [[nodiscard]] bool isSilent() const noexcept { return silent_.load(std::memory_order_acquire); }
     [[nodiscard]] bool isInitialized() const noexcept { return fd_ >= 0; }

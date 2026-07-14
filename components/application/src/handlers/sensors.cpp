@@ -11,6 +11,7 @@
 #include "domain/memory.hpp"
 #include "infrastructure/motor_task.hpp"
 #include "infrastructure/storage/nvs.hpp"
+#include "infrastructure/config.hpp"
 
 namespace ecotiter::application::handlers::sensors {
 namespace {
@@ -49,8 +50,8 @@ std::expected<CommandResponse, domain::AppError> handleReadTemperature(
     int32_t tempCX100) {
   CommandResponse rsp;
   rsp.kind = ResponseKind::Single;
-  float tempC = (tempCX100 > -99999)
-      ? static_cast<float>(tempCX100) / 100.0f
+  float tempC = (tempCX100 > config::TEMP_SENTINEL_CX100)
+      ? static_cast<float>(tempCX100) / config::TEMP_DIVISOR
       : 0.0f;
   rsp.bodySize = static_cast<size_t>(
       std::snprintf(rsp.body.data(), rsp.body.size(),
@@ -77,7 +78,7 @@ std::expected<CommandResponse, domain::AppError> handleAdcCalGet(
   }
   if (rawMv > 0) {
     calibratedMv = static_cast<int16_t>(
-        static_cast<float>(rawMv) * aVal + static_cast<float>(b) + 0.5f);
+        std::lround(static_cast<float>(rawMv) * aVal + static_cast<float>(b)));
   }
 
   char pointsBuf[384];

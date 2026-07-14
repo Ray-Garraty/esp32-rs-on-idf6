@@ -30,6 +30,7 @@ idf_component_register(
         esp_common
         freertos
         bt
+        esp_coex
         esp_wifi
         esp_http_server
         lwip

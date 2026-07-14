@@ -10,6 +10,7 @@ idf_component_register(
         "src/handlers/system.cpp"
         "src/handlers/valve.cpp"
         "src/handlers/serial.cpp"
+        "src/response.cpp"
     INCLUDE_DIRS "include"
     REQUIRES
         domain

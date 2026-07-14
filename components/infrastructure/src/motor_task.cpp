@@ -31,7 +31,7 @@ static constexpr auto TAG = "motor_task";
 namespace ecotiter::infrastructure {
 
 QueueHandle_t gMotorCmdQueue = nullptr;
-SmResult gSmResult{SmResult::Type::None, 0, 0.0f, {}, 0};
+QueueHandle_t gSmResultQueue = nullptr;
 drivers::TmcUart gTmcUart;
 
 namespace {
@@ -53,20 +53,6 @@ static domain::sm::CalSpeedSingleSm s_calSpeedSm;
 static domain::sm::CalSpeedSeqSm s_calSpeedSeqSm;
 
 void assert_rmt_preconditions() {
-}
-
-const char* buretteStateName(BuretteState s) {
-    switch (s) {
-        case BuretteState::Idle:      return "idle";
-        case BuretteState::Homing:    return "homing";
-        case BuretteState::Filling:   return "filling";
-        case BuretteState::Emptying:  return "emptying";
-        case BuretteState::Dosing:    return "dosing";
-        case BuretteState::Rinsing:   return "rinsing";
-        case BuretteState::Stopping:  return "stopping";
-        case BuretteState::Error:     return "error";
-    }
-    return "unknown";
 }
 
 void set_valve(ValvePosition pos) {
@@ -130,15 +116,14 @@ void move_empty(StepperMotor& stepper, uint32_t speedHz) {
 void store_result(SmResult::Type type, int32_t stepsTaken = 0,
                   float measuredSpeed = 0.0f,
                   const float* results = nullptr, int resultCount = 0) {
-    gSmResult.type = type;
-    gSmResult.stepsTaken = stepsTaken;
-    gSmResult.measuredSpeedMlMin = measuredSpeed;
-    gSmResult.resultCount = resultCount;
+    SmResult sr{type, stepsTaken, measuredSpeed, {}, resultCount};
     for (int i = 0; i < resultCount && i < 3; i++) {
-        gSmResult.results[i] = results[i];
+        sr.results[i] = results[i];
+    }
+    if (gSmResultQueue) {
+        xQueueOverwrite(gSmResultQueue, &sr);
     }
     domain::gBuretteState.store(BuretteState::Idle, std::memory_order_release);
-    domain::gHasPendingResult.store(true, std::memory_order_release);
 }
 
 void run_rinse_sm(StepperMotor& stepper,
@@ -163,7 +148,7 @@ void run_rinse_sm(StepperMotor& stepper,
         switch (action) {
             case domain::sm::RinseAction::FillToLimit:
                 diag::StateTracer::logBuretteTransition(
-                    buretteStateName(domain::gBuretteState.load(std::memory_order_acquire)),
+                    domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)),
                     "filling");
                 ESP_LOGI(TAG, "rinse: fill (cycle %u/%u)",
                          s_rinseSm.currentCycle, s_rinseSm.totalCycles);
@@ -171,7 +156,7 @@ void run_rinse_sm(StepperMotor& stepper,
                 break;
             case domain::sm::RinseAction::EmptyToLimit:
                 diag::StateTracer::logBuretteTransition(
-                    buretteStateName(domain::gBuretteState.load(std::memory_order_acquire)),
+                    domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)),
                     "emptying");
                 ESP_LOGI(TAG, "rinse: empty (cycle %u/%u)",
                          s_rinseSm.currentCycle, s_rinseSm.totalCycles);
@@ -179,14 +164,14 @@ void run_rinse_sm(StepperMotor& stepper,
                 break;
             case domain::sm::RinseAction::Complete:
                 diag::StateTracer::logBuretteTransition(
-                    buretteStateName(domain::gBuretteState.load(std::memory_order_acquire)),
+                    domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)),
                     "idle");
                 ESP_LOGI(TAG, "rinse: complete");
                 store_result(SmResult::Type::RinseComplete);
                 return;
             case domain::sm::RinseAction::Error:
                 diag::StateTracer::logBuretteTransition(
-                    buretteStateName(domain::gBuretteState.load(std::memory_order_acquire)),
+                    domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)),
                     "error");
                 diag::BlackBox::instance().record({
                     .timestampUs = static_cast<uint64_t>(xTaskGetTickCount() * portTICK_PERIOD_MS * 1000),
@@ -212,7 +197,7 @@ void run_cal_dose_sm(StepperMotor& stepper,
 
     if (action == domain::sm::CalDoseAction::FillToLimit) {
         diag::StateTracer::logBuretteTransition(
-            buretteStateName(domain::gBuretteState.load(std::memory_order_acquire)),
+            domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)),
             "filling");
         ESP_LOGI(TAG, "cal_dose: fill");
         move_fill(stepper, speedHz);
@@ -222,7 +207,7 @@ void run_cal_dose_sm(StepperMotor& stepper,
 
     if (action == domain::sm::CalDoseAction::EmptyToLimit) {
         diag::StateTracer::logBuretteTransition(
-            buretteStateName(domain::gBuretteState.load(std::memory_order_acquire)),
+            domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)),
             "emptying");
         ESP_LOGI(TAG, "cal_dose: empty");
         move_empty(stepper, speedHz);
@@ -232,7 +217,7 @@ void run_cal_dose_sm(StepperMotor& stepper,
 
     if (action == domain::sm::CalDoseAction::Complete) {
         diag::StateTracer::logBuretteTransition(
-            buretteStateName(domain::gBuretteState.load(std::memory_order_acquire)),
+            domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)),
             "idle");
         ESP_LOGI(TAG, "cal_dose: complete, steps=%ld",
                  static_cast<long>(s_calDoseSm.stepsTaken));
@@ -240,7 +225,7 @@ void run_cal_dose_sm(StepperMotor& stepper,
                      s_calDoseSm.stepsTaken);
     } else {
         diag::StateTracer::logBuretteTransition(
-            buretteStateName(domain::gBuretteState.load(std::memory_order_acquire)),
+            domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)),
             "error");
         store_result(SmResult::Type::Error);
     }
@@ -256,7 +241,7 @@ void run_cal_speed_sm(StepperMotor& stepper,
 
     if (action == domain::sm::CalSpeedAction::FillToLimit) {
         diag::StateTracer::logBuretteTransition(
-            buretteStateName(domain::gBuretteState.load(std::memory_order_acquire)),
+            domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)),
             "filling");
         ESP_LOGI(TAG, "cal_speed: fill");
         move_fill(stepper, speedHz);
@@ -266,10 +251,10 @@ void run_cal_speed_sm(StepperMotor& stepper,
 
     if (action == domain::sm::CalSpeedAction::EmptyToLimit) {
         diag::StateTracer::logBuretteTransition(
-            buretteStateName(domain::gBuretteState.load(std::memory_order_acquire)),
+            domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)),
             "emptying");
         uint32_t hz = testFreqHz;
-        if (hz < ml_min_to_hz(15.0f)) hz = ml_min_to_hz(15.0f);
+        if (hz < ml_min_to_hz(config::MIN_CAL_SPEED_ML_MIN)) hz = ml_min_to_hz(config::MIN_CAL_SPEED_ML_MIN);
         ESP_LOGI(TAG, "cal_speed: empty at %lu Hz",
                  static_cast<unsigned long>(hz));
         move_empty(stepper, hz);
@@ -279,7 +264,7 @@ void run_cal_speed_sm(StepperMotor& stepper,
 
     if (action == domain::sm::CalSpeedAction::Complete) {
         diag::StateTracer::logBuretteTransition(
-            buretteStateName(domain::gBuretteState.load(std::memory_order_acquire)),
+            domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)),
             "idle");
         ESP_LOGI(TAG, "cal_speed: complete, speed=%.2f ml/min",
                  static_cast<double>(s_calSpeedSm.measuredSpeedMlMin));
@@ -287,7 +272,7 @@ void run_cal_speed_sm(StepperMotor& stepper,
                      0, s_calSpeedSm.measuredSpeedMlMin);
     } else {
         diag::StateTracer::logBuretteTransition(
-            buretteStateName(domain::gBuretteState.load(std::memory_order_acquire)),
+            domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)),
             "error");
         store_result(SmResult::Type::Error);
     }
@@ -314,7 +299,7 @@ void run_cal_speed_seq_sm(StepperMotor& stepper,
         switch (action) {
             case domain::sm::CalSpeedAction::FillToLimit:
                 diag::StateTracer::logBuretteTransition(
-                    buretteStateName(domain::gBuretteState.load(std::memory_order_acquire)),
+                    domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)),
                     "filling");
                 ESP_LOGI(TAG, "cal_speed_seq: fill (point %d/3)",
                          s_calSpeedSeqSm.seqIdx + 1);
@@ -323,7 +308,7 @@ void run_cal_speed_seq_sm(StepperMotor& stepper,
 
             case domain::sm::CalSpeedAction::EmptyToLimit: {
                 diag::StateTracer::logBuretteTransition(
-                    buretteStateName(domain::gBuretteState.load(std::memory_order_acquire)),
+                    domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)),
                     "emptying");
                 int idx = s_calSpeedSeqSm.seqIdx;
                 uint16_t f = s_calSpeedSeqSm.freqs[idx];
@@ -339,7 +324,7 @@ void run_cal_speed_seq_sm(StepperMotor& stepper,
 
             case domain::sm::CalSpeedAction::Complete:
                 diag::StateTracer::logBuretteTransition(
-                    buretteStateName(domain::gBuretteState.load(std::memory_order_acquire)),
+                    domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)),
                     "idle");
                 ESP_LOGI(TAG, "cal_speed_seq: complete");
                 store_result(SmResult::Type::CalSpeedSeqComplete,
@@ -350,7 +335,7 @@ void run_cal_speed_seq_sm(StepperMotor& stepper,
 
             case domain::sm::CalSpeedAction::Error:
                 diag::StateTracer::logBuretteTransition(
-                    buretteStateName(domain::gBuretteState.load(std::memory_order_acquire)),
+                    domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)),
                     "error");
                 ESP_LOGE(TAG, "cal_speed_seq: SM error");
                 store_result(SmResult::Type::Error);
@@ -369,7 +354,7 @@ void run_homing(StepperMotor& stepper, LimitSwitch& fullSwitch) {
     auto oldState = domain::gBuretteState.load(std::memory_order_acquire);
     domain::gBuretteState.store(BuretteState::Homing, std::memory_order_release);
     diag::StateTracer::logBuretteTransition(
-        buretteStateName(oldState), "homing");
+        domain::buretteStateStr(oldState), "homing");
 
     gpio_set_level(config::PIN_DIR, 1);
 
@@ -497,7 +482,7 @@ void execute_move_steps(StepperMotor& stepper, int32_t steps) {
                 domain::gBuretteState.store(BuretteState::Error,
                                             std::memory_order_release);
                 diag::StateTracer::logBuretteTransition(
-                    buretteStateName(
+                    domain::buretteStateStr(
                         domain::gBuretteState.load(std::memory_order_acquire)),
                     "error");
             } else {
@@ -537,6 +522,7 @@ extern "C" void motorTaskEntry(void* pvParameters) {
         return;
     }
     puts("DBG: motor queue created"); fflush(stdout);
+    gSmResultQueue = xQueueCreate(1, sizeof(SmResult));
     esp_task_wdt_add(NULL);
 
     puts("DBG: before StepperMotor ctor (gpio 21,13)"); fflush(stdout);
@@ -586,8 +572,6 @@ extern "C" void motorTaskEntry(void* pvParameters) {
     run_homing(stepper, fullSwitch);
     domain::gHomingDone.store(true, std::memory_order_release);
 
-    gSmResult = {SmResult::Type::None, 0, 0.0f, {}, 0};
-
     MotorCommand cmd;
     while (true) {
         esp_task_wdt_reset();
@@ -600,9 +584,7 @@ extern "C" void motorTaskEntry(void* pvParameters) {
                 int32_t stepsTaken = static_cast<int32_t>(
                     stepper.position().value) - stepsBefore;
                 if (stepsTaken < 0) stepsTaken = -stepsTaken;
-                gSmResult.type = SmResult::Type::None; // reuse None as generic "done"
-                gSmResult.stepsTaken = stepsTaken;
-                domain::gHasPendingResult.store(true, std::memory_order_release);
+                store_result(SmResult::Type::None, stepsTaken);
                 break;
             }
 
@@ -625,7 +607,7 @@ extern "C" void motorTaskEntry(void* pvParameters) {
                 domain::gBuretteState.store(BuretteState::Error,
                                             std::memory_order_release);
                 diag::StateTracer::logBuretteTransition(
-                    buretteStateName(
+                    domain::buretteStateStr(
                         domain::gBuretteState.load(std::memory_order_acquire)),
                     "error");
                 break;

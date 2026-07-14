@@ -6,6 +6,7 @@
 
 #include "application/command.hpp"
 #include "application/dispatch.hpp"
+#include "application/response.hpp"
 #include "domain/types.hpp"
 #include "nlohmann/json.hpp"
 
@@ -202,8 +203,7 @@ esp_err_t ecotiter::interface::command_handler(httpd_req_t* req) {
         return ESP_OK;
     }
 
-    // AckThen: reset result and wait for motor task completion
-    infrastructure::gSmResult = {infrastructure::SmResult::Type::None, 0, 0.0f, {}, 0};
+    // AckThen: wait for result via queue
     static constexpr TickType_t CMD_TIMEOUT_TICKS = pdMS_TO_TICKS(60000);
     TickType_t startTick = xTaskGetTickCount();
 
@@ -219,67 +219,21 @@ esp_err_t ecotiter::interface::command_handler(httpd_req_t* req) {
             return ESP_OK;
         }
 
-        auto resultType = infrastructure::gSmResult.type;
-        if (resultType != infrastructure::SmResult::Type::None) {
+        infrastructure::SmResult result;
+        if (infrastructure::gSmResultQueue &&
+            xQueueReceive(infrastructure::gSmResultQueue, &result, pdMS_TO_TICKS(50)) == pdTRUE)
+        {
             domain::memory::ResponseBuffer buf{};
-            size_t off = 0;
-            uint64_t resultId = rsp->id;
-
-            switch (resultType) {
-                case infrastructure::SmResult::Type::RinseComplete:
-                    off = static_cast<size_t>(
-                        std::snprintf(buf.data(), buf.size(),
-                            R"({"id":%llu,"status":"ok","data":{"status":"complete"}})",
-                            static_cast<unsigned long long>(resultId)));
-                    break;
-                case infrastructure::SmResult::Type::CalDoseComplete:
-                    off = static_cast<size_t>(
-                        std::snprintf(buf.data(), buf.size(),
-                            R"({"id":%llu,"status":"ok","data":{"volume_dispensed_ml":%.2f}})",
-                            static_cast<unsigned long long>(resultId),
-                            static_cast<double>(
-                                static_cast<float>(infrastructure::gSmResult.stepsTaken) / 7730.0f)));
-                    break;
-                case infrastructure::SmResult::Type::CalSpeedComplete:
-                    off = static_cast<size_t>(
-                        std::snprintf(buf.data(), buf.size(),
-                            R"({"id":%llu,"status":"ok","data":{"speed_ml_min":%.2f}})",
-                            static_cast<unsigned long long>(resultId),
-                            static_cast<double>(infrastructure::gSmResult.measuredSpeedMlMin)));
-                    break;
-                case infrastructure::SmResult::Type::CalSpeedSeqComplete:
-                    off = static_cast<size_t>(
-                        std::snprintf(buf.data(), buf.size(),
-                            R"({"id":%llu,"status":"ok","data":{"status":"complete"}})",
-                            static_cast<unsigned long long>(resultId)));
-                    break;
-                case infrastructure::SmResult::Type::Error:
-                    off = static_cast<size_t>(
-                        std::snprintf(buf.data(), buf.size(),
-                            R"({"id":%llu,"status":"error","message":"start_failed"})",
-                            static_cast<unsigned long long>(resultId)));
-                    break;
-                default:
-                    off = static_cast<size_t>(
-                        std::snprintf(buf.data(), buf.size(),
-                            R"({"id":%llu,"status":"ok","data":{"status":"complete"}})",
-                            static_cast<unsigned long long>(resultId)));
-                    break;
-            }
-
-            // Clear result for next command
-            infrastructure::gSmResult = {infrastructure::SmResult::Type::None, 0, 0.0f, {}, 0};
+            size_t off = application::formatSmResult(buf, rsp->id, result);
 
             httpd_resp_set_type(req, "application/json");
-            if (off > 0) {
+            if (off > 0 && off < buf.size()) {
                 httpd_resp_send(req, buf.data(), static_cast<ssize_t>(off));
             } else {
                 httpd_resp_send(req, R"({"status":"error"})", HTTPD_RESP_USE_STRLEN);
             }
             return ESP_OK;
         }
-
-        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 

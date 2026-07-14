@@ -86,7 +86,7 @@ void TmcUart::deinit() {
     }
 }
 
-bool TmcUart::writeRegister(uint8_t reg, uint32_t value) {
+bool TmcUart::writeRegister(uint8_t reg, uint32_t value) const {
     if (!initialized_) return false;
 
     uint8_t buf[8];
@@ -116,7 +116,7 @@ bool TmcUart::writeRegister(uint8_t reg, uint32_t value) {
     return true;
 }
 
-bool TmcUart::readRegister(uint8_t reg, uint32_t& value) {
+bool TmcUart::readRegister(uint8_t reg, uint32_t& value) const {
     if (!initialized_) return false;
 
     // Send read request: sync 0x07, register, CRC

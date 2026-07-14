@@ -78,4 +78,35 @@ inline constexpr const char* NVS_NS_ADC_CAL       = "adc_cal";
 inline constexpr const char* NVS_KEY_ADC_A_X1000  = "a_x1000";
 inline constexpr const char* NVS_KEY_ADC_B        = "b";
 
+// ── Buffer and queue sizes ───────────────────────────────────────
+inline constexpr size_t WS_BUF_SIZE = 384;
+inline constexpr size_t UART_TX_RINGBUF_SIZE = 1024;
+inline constexpr uint16_t BLE_PREFERRED_MTU = 256;
+
+// ── Queue depths ─────────────────────────────────────────────────
+inline constexpr uint8_t WS_SEND_QUEUE_DEPTH = 16;
+inline constexpr uint8_t WS_BROADCAST_QUEUE_DEPTH = 4;
+
+// ── Log fetch limits ─────────────────────────────────────────────
+inline constexpr uint8_t LOG_FETCH_DEFAULT_LIMIT = 20;
+inline constexpr uint8_t LOG_FETCH_MAX_LIMIT = 100;
+
+// ── Temperature sensor ───────────────────────────────────────────
+inline constexpr int32_t TEMP_SENTINEL_CX100 = -99999;
+inline constexpr float   TEMP_DIVISOR = 100.0f;
+
+// ── Motor/motion thresholds ──────────────────────────────────────
+inline constexpr float   MIN_CAL_SPEED_ML_MIN = 15.0f;
+inline constexpr int32_t MIN_STEPS_THRESHOLD = 10;
+inline constexpr float   RINSE_DEFAULT_SPEED_ML_MIN = 50.0f;
+inline constexpr float   FILL_DEFAULT_SPEED_ML_MIN = 20.0f;
+inline constexpr uint8_t MAX_CAL_SEQ_POINTS = 3;
+
+// ── ADC ──────────────────────────────────────────────────────────
+inline constexpr int ADC_UNIT = 0;          // ADC_UNIT_1
+inline constexpr int ADC_CHANNEL = 3;       // ADC_CHANNEL_3
+
+// ── FfiGuard boundary IDs ───────────────────────────────────────
+inline constexpr uint16_t FFI_BOOT_SEQUENCE = 50;
+
 } // namespace ecotiter::config

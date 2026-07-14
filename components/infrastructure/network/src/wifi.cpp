@@ -42,7 +42,7 @@ std::expected<void, domain::AppError> WifiManager::init() {
         esp_err_t err = esp_event_loop_create_default();
         if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
             ESP_LOGE(TAG, "event loop create: %s", esp_err_to_name(err));
-            return std::unexpected(domain::AppError::Hardware);
+            return std::unexpected(domain::AppError::Resource);
         }
 
         // Create AP and STA netif BEFORE esp_wifi_init — required by ESP-IDF
@@ -51,45 +51,45 @@ std::expected<void, domain::AppError> WifiManager::init() {
         apNetif_ = esp_netif_create_default_wifi_ap();
         if (apNetif_ == nullptr) {
             ESP_LOGE(TAG, "Failed to create AP netif");
-            return std::unexpected(domain::AppError::Hardware);
+            return std::unexpected(domain::AppError::Resource);
         }
         staNetif_ = esp_netif_create_default_wifi_sta();
         if (staNetif_ == nullptr) {
             ESP_LOGE(TAG, "Failed to create STA netif");
-            return std::unexpected(domain::AppError::Hardware);
+            return std::unexpected(domain::AppError::Resource);
         }
 
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
         err = esp_wifi_init(&cfg);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "wifi init: %s", esp_err_to_name(err));
-            return std::unexpected(domain::AppError::Hardware);
+            return std::unexpected(domain::AppError::Resource);
         }
 
         err = esp_wifi_set_storage(WIFI_STORAGE_RAM);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "wifi set storage: %s", esp_err_to_name(err));
-            return std::unexpected(domain::AppError::Hardware);
+            return std::unexpected(domain::AppError::Resource);
         }
 
         err = esp_wifi_set_mode(WIFI_MODE_APSTA);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "wifi set mode: %s", esp_err_to_name(err));
-            return std::unexpected(domain::AppError::Hardware);
+            return std::unexpected(domain::AppError::Resource);
         }
 
         err = esp_event_handler_instance_register(
             WIFI_EVENT, ESP_EVENT_ANY_ID, &eventHandler, this, nullptr);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "register wifi handler: %s", esp_err_to_name(err));
-            return std::unexpected(domain::AppError::Hardware);
+            return std::unexpected(domain::AppError::Resource);
         }
 
         err = esp_event_handler_instance_register(
             IP_EVENT, IP_EVENT_STA_GOT_IP, &eventHandler, this, nullptr);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "register IP handler: %s", esp_err_to_name(err));
-            return std::unexpected(domain::AppError::Hardware);
+            return std::unexpected(domain::AppError::Resource);
         }
     }
 
@@ -177,8 +177,6 @@ void WifiManager::startAP() {
     }
 
     apActive_ = true;
-    // [INVESTIGATION] Exp F: DNS server disabled
-    // startDnsServer();
     ESP_LOGI(TAG, "AP started: %s (192.168.4.1)", apSsid_);
 }
 
@@ -522,7 +520,7 @@ std::optional<uint32_t> WifiManager::getSTAIP() const noexcept {
     return {};
 }
 
-void WifiManager::process() {
+void WifiManager::process() const {
     if (!initialized_ || dnsSocket_ < 0) return;
 
     domain::memory::DnsBuf query{};
@@ -562,41 +560,6 @@ void WifiManager::process() {
         ESP_LOGI(TAG, "DNS response to %s:%d: %zu bytes",
                  srcIp, ntohs(from.sin_port), written);
     }
-}
-
-void WifiManager::startDnsServer() {
-    if (dnsSocket_ >= 0) return;
-
-    diag::FfiGuard guard(75);
-
-    dnsSocket_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (dnsSocket_ < 0) {
-        ESP_LOGE(TAG, "Failed to create DNS socket");
-        return;
-    }
-
-    int reuse = 1;
-    setsockopt(dnsSocket_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(DNS_PORT);
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-    // 1000ms timeout — prevents lwip_recvfrom() blocking indefinitely
-    // lwip_recvfrom() returns -1 (EAGAIN) on timeout, which process() handles gracefully
-    int timeout = 1000;
-    setsockopt(dnsSocket_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-
-    esp_err_t err = bind(dnsSocket_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-    if (err != 0) {
-        ESP_LOGE(TAG, "DNS bind failed: %d", err);
-        close(dnsSocket_);
-        dnsSocket_ = -1;
-        return;
-    }
-
-    ESP_LOGI(TAG, "DNS server started on port %d", DNS_PORT);
 }
 
 void WifiManager::stopDnsServer() {

@@ -338,50 +338,58 @@ TMC2209 register values (datasheet), OneWire timing delays (datasheet), WS2812 t
 | # | Severity | Issue | Applies to | Status |
 |---|----------|-------|------------|--------|
 | 1 | HIGH | `CONFIG_BROWNOUT_DET=n` not set in sdkconfig | sdkconfig | ✅ FIXED |
-| 2 | HIGH | SmResult JSON formatting duplicated — hardcoded `7730.0f` bug in rest_api | DRY | ❌ OPEN |
-| 3 | HIGH | Burette state-to-string mapping in 3 places with inconsistencies | DRY | ❌ OPEN |
-| 4 | HIGH | `main.cpp` god file (790 lines) — SOC-1 | SOC | ❌ OPEN |
-| 5 | HIGH | `motor_task.cpp` god file (713 lines) — SOC-2 | SOC | ❌ OPEN |
-| 6 | HIGH | Main loop directly reads `gSmResult` (cross-task coupling) — SOC-5 | SOC | ❌ OPEN |
-| 7 | HIGH | `Led` class dead code (entire class never instantiated) | Dead | ❌ OPEN |
-| 8 | MEDIUM | `rmt_encoder_handle_t` raw pointer in stepper (§9.5) — RAII-1 | RAII | ❌ OPEN |
-| 9 | MEDIUM | `RgbLed` `void*` casts for RMT handles (§9.5) — RAII-2 | RAII | ❌ OPEN |
-| 10 | MEDIUM | RGB LED `void*` with 11 `reinterpret_cast` (KISS-1) | KISS | ❌ OPEN |
-| 11 | MEDIUM | `HardwareError` enum dead | Dead | ❌ OPEN |
-| 12 | MEDIUM | `CommandDispatch` class stub dead | Dead | ❌ OPEN |
-| 13 | MEDIUM | `appendCmdField()` dead | Dead | ❌ OPEN |
-| 14 | MEDIUM | Valve-related dead code (`Valve` class, free functions) | Dead | ❌ OPEN |
-| 15 | MEDIUM | `computeRamp()` dead (only in tests) | Dead | ❌ OPEN |
-| 16 | MEDIUM | `startDnsServer()` dead (call commented out) | Dead | ❌ OPEN |
-| 17 | MEDIUM | `assert_rmt_preconditions()` empty stub | Dead | ❌ OPEN |
-| 18 | MEDIUM | Duplicate `gValvePosition` global | Dead | ❌ OPEN |
-| 19 | LOW | `HeapSnapshot::assertCanAllocate()` never called (GR-7) | Diag | ❌ OPEN |
-| 20 | LOW | Art. V coexistence preference not implemented | BLE | ❌ OPEN |
-| 21 | LOW | Stack budget docs out of sync (NET_OWNER=20480, LOG=12288) | project.md | ❌ OPEN |
-| 22 | LOW | `onewire.cpp` calls `gpio_config()` outside centralized init | onewire | ❌ OPEN |
-| 23 | LOW | 46 magic numbers (8 HIGH, 26 MED, 12 LOW) | code-wide | ❌ OPEN |
-| 24 | LOW | `LimitSwitchId`, `tempCelsius`/`clearTemp`, scheduler stubs, `readAvg`/`resetAvg` dead | Dead | ❌ OPEN |
+| 2 | HIGH | SmResult JSON formatting duplicated — hardcoded `7730.0f` bug in rest_api | DRY | ✅ FIXED |
+| 3 | HIGH | Burette state-to-string mapping in 3 places with inconsistencies | DRY | ✅ FIXED |
+| 4 | HIGH | `main.cpp` god file (790 lines) — SOC-1 | SOC | ⏸️ DEFERRED |
+| 5 | HIGH | `motor_task.cpp` god file (713 lines) — SOC-2 | SOC | ⏸️ DEFERRED |
+| 6 | HIGH | Main loop directly reads `gSmResult` (cross-task coupling) — SOC-5 | SOC | ✅ FIXED |
+| 7 | HIGH | `Led` class dead code (entire class never instantiated) | Dead | ✅ FIXED |
+| 8 | MEDIUM | `rmt_encoder_handle_t` raw pointer in stepper (§9.5) — RAII-1 | RAII | ✅ FIXED |
+| 9 | MEDIUM | `RgbLed` `void*` casts for RMT handles (§9.5) — RAII-2 | RAII | ✅ FIXED |
+| 10 | MEDIUM | RGB LED `void*` with 11 `reinterpret_cast` (KISS-1) | KISS | ✅ FIXED |
+| 11 | MEDIUM | `HardwareError` enum dead | Dead | ✅ FIXED |
+| 12 | MEDIUM | `CommandDispatch` class stub dead | Dead | ✅ FIXED |
+| 13 | MEDIUM | `appendCmdField()` dead | Dead | ✅ FIXED |
+| 14 | MEDIUM | Valve-related dead code (`Valve` class, free functions) | Dead | ✅ FIXED |
+| 15 | MEDIUM | `computeRamp()` dead (only in tests) | Dead | ✅ FIXED |
+| 16 | MEDIUM | `startDnsServer()` dead (call commented out) | Dead | ✅ FIXED |
+| 17 | MEDIUM | `assert_rmt_preconditions()` empty stub | Dead | ✅ FIXED |
+| 18 | MEDIUM | Duplicate `gValvePosition` global | Dead | ✅ FIXED |
+| 19 | LOW | `HeapSnapshot::assertCanAllocate()` never called (GR-7) | Diag | ✅ FIXED |
+| 20 | LOW | Art. V coexistence preference not implemented | BLE | ✅ FIXED |
+| 21 | LOW | Stack budget docs out of sync (NET_OWNER=20480, LOG=12288) | project.md | ✅ FIXED — numeric values removed, source of truth is `domain/types.hpp` |
+| 22 | LOW | `onewire.cpp` calls `gpio_config()` outside centralized init | onewire | ✅ FIXED — moved to `configureGpioPins()` in main.cpp |
+| 23 | LOW | 46 magic numbers (8 HIGH, 26 MED, 12 LOW) | code-wide | ✅ FIXED |
+| 24 | LOW | `LimitSwitchId`, `tempCelsius`/`clearTemp`, scheduler stubs, `readAvg`/`resetAvg` dead | Dead | ✅ FIXED |
 
-### Implementation Steps (ordered by impact)
+### Execution Protocol
 
-| # | Step | Files | Risk |
-|---|------|-------|------|
-| 1 | Extract SmResult JSON serialization into shared `formatSmResult()` — eliminates DRY-1 duplication and `7730.0f` bug | `main/main.cpp`, `rest_api.cpp`, new `application/src/response.cpp` | Low |
-| 2 | Create single `buretteStateStr(BuretteState)` in domain — replace 3 state-to-string switch statements | `motor_task.cpp`, `command.cpp`, `http_server.cpp`, `domain/types.hpp` | Low |
-| 3 | Replace `void*` with proper RAII types in `RgbLed` — fixes RAII-2 + KISS-1 (11 fewer reinterpret_cast) | `rgb_led.hpp`, `rgb_led.cpp` | Low |
-| 4 | Wrap `rmt_encoder_handle_t` in `RmtEncoder` RAII class — fixes RAII-1 | `stepper.hpp`, `stepper.cpp` | Low |
-| 5 | Move SmResult to queue-based delivery (main loop drains queue instead of polling `gSmResult`) — fixes SOC-5, respects Art. II | `main/main.cpp`, `motor_task.cpp`, `motor_task.hpp` | Medium |
-| 6 | Remove dead `Led` class | `led.hpp`, `led.cpp`, CMakeLists | Low |
-| 7 | Remove other dead code: `HardwareError`, `CommandDispatch`, `appendCmdField`, Valve free functions, `computeRamp`, `startDnsServer`, scheduler stubs, `readAvg`/`resetAvg`, duplicate `gValvePosition`, `LimitSwitchId`, `tempCelsius`/`clearTemp` | Various | Low |
-| 8 | Call `HeapSnapshot::assertCanAllocate()` before allocs > 4 KB (GR-7) | `main/main.cpp`, `http_server.cpp`, `ble.cpp` | None |
-| 9 | Implement Art. V dynamic coexistence preference on BLE connect/disconnect | `ble.cpp`, `ble.hpp` | Medium |
-| 10 | Move ADC unit/channel, buffer sizes, queue depths, thresholds to named constants in `config.hpp` / `memory.hpp` | Various | Low |
-| 11 | Update project.md stack sizes: `NET_OWNER_STACK=20480`, `LOG_WORKER_STACK=12288` | `docs/refs/project.md` | None |
-| 12 | Split main.cpp into boot_sequencer + main_loop + broadcast_handler | `main/` (new files) | Medium |
-| 13 | Split motor_task.cpp — extract run_*_sm() into `application/src/` | `motor_task.cpp`, new files | Medium |
-| 14 | Document FfiGuard boundary numbering scheme | `ffi_guard.hpp` | None |
+Each step is atomic: **apply → `scripts/idf.sh build` → `scripts/idf.sh smoke` → proceed or `git revert`**.  
+Smoke (`scripts/idf.sh smoke`) is the sole acceptance gate — build-only is insufficient.
 
-**Rollback:** Each step is a single commit. If smoke test fails — `git revert <commit>`.
+### Atomic Steps (ordered by risk/dependency)
+
+| # | Step | Risk | Smoke | Done |
+|---|------|------|-------|------|
+| 1 | **Shared `formatSmResult()`** — DRY-1 + 7730.0f bug | Low | ✅ | ✅ |
+| 2 | **Single `buretteStateStr()`** — DRY-2 | Low | ✅ | ✅ |
+| 3 | **RAII for RgbLed** — RAII-2 + KISS-1 | Low | ✅ | ✅ |
+| 4 | **RAII for stepper encoder** — RAII-1 | Low | ✅ | ✅ |
+| 5 | **Queue-based SmResult** — SOC-5, Art. II | Medium | ✅ | ✅ |
+| 6 | **Remove dead `Led` class** | Low | ✅ | ✅ |
+| 7 | **Batch dead code removal** — HardwareError, CommandDispatch, appendCmdField, Valve fns, computeRamp, startDnsServer, scheduler stubs, readAvg/resetAvg, dup gValvePosition, LimitSwitchId, tempCelsius/clearTemp | Low | ✅ | ✅ |
+| 8 | **`HeapSnapshot::assertCanAllocate()`** — GR-7 gap | None | ✅ | ✅ |
+| 9 | **Art. V coexistence** — BLE priority switching | Medium | ✅ | ✅ |
+| 10 | **Magic numbers → named constants** | Low | ✅ | ✅ |
+| 11 | **Update project.md stack sizes** — remove numeric values, reference constants | None | ✅ | ✅ |
+| 12 | **clang-tidy low-effort** — NOLINT reserved identifiers, default OneWireBus dtor | Low | ✅ | ✅ |
+| 13 | **Document FfiGuard boundaries** — numbering convention comment in header | None | ✅ | ✅ |
+| — | **Deferred** (architectural): split main.cpp / motor_task.cpp god files | High | — | ⏸️ |
+
+**Rollback:** Each step is a single `git add -A && git commit -m "step N: ..."`. If smoke fails — `git reset --hard HEAD~1`.
+
+**Post-audit infra changes:**
+- `scripts/idf.sh` — semgrep enforcement gate removed (2026-07-14, per user request during Step 1).
 
 ---
 

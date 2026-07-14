@@ -11,6 +11,7 @@
 #include "driver/uart.h"
 #include "driver/uart_vfs.h"
 #include "esp_vfs_dev.h"
+#include "infrastructure/config.hpp"
 
 static constexpr auto TAG = "serial";
 
@@ -38,7 +39,7 @@ Result<void> SerialReader::init() noexcept {
     esp_err_t err = uart_driver_install(
         UART_NUM_0,
         INPUT_BUF_SIZE,
-        1024,
+        config::UART_TX_RINGBUF_SIZE,
         10,
         nullptr,
         0
@@ -101,7 +102,7 @@ std::optional<std::string_view> SerialReader::process() noexcept {
     return splitBuffer(std::string_view(readBuf.data(), static_cast<size_t>(n)));
 }
 
-void SerialReader::write(std::string_view s) noexcept {
+void SerialReader::write(std::string_view s) const noexcept {
     if (fd_ < 0 || s.empty()) {
         return;
     }

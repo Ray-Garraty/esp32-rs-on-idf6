@@ -7,6 +7,8 @@
 
 namespace ecotiter::domain::sm {
 
+inline constexpr float MIN_CAL_SPEED_ML_MIN = 15.0f;
+
 enum class CalRunAction { Reject, CalDose, CalSpeed };
 enum class CalRunRejectReason { None, InvalidMode, BuretteBusy };
 
@@ -40,8 +42,8 @@ inline CalRunPlan planCalRun(
             ? static_cast<uint16_t>(maxFreqHz / 2.0f + 0.5f)
             : freqHz;
         float calSpeed = static_cast<float>(calFreq) * speedCoeff;
-        if (calSpeed < 15.0f) {
-            calSpeed = 15.0f;
+        if (calSpeed < MIN_CAL_SPEED_ML_MIN) {
+            calSpeed = MIN_CAL_SPEED_ML_MIN;
         }
         return {CalRunAction::CalDose, CalRunRejectReason::None, calFreq, calSpeed};
     }
@@ -49,7 +51,7 @@ inline CalRunPlan planCalRun(
     if (freqHz == 0) {
         return {CalRunAction::Reject, CalRunRejectReason::InvalidMode, 0, 0.0f};
     }
-    float fillSpeed = (speedMlMin < 15.0f)
+    float fillSpeed = (speedMlMin < MIN_CAL_SPEED_ML_MIN)
         ? (maxFreqHz / 2.0f) * speedCoeff
         : speedMlMin;
     return {CalRunAction::CalSpeed, CalRunRejectReason::None, freqHz, fillSpeed};

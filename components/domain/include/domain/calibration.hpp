@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <expected>
 #include <vector>
-#include "domain/motion.hpp"
 #include "domain/types.hpp"
 
 namespace ecotiter::domain {

@@ -17,6 +17,7 @@
 #include "domain/json_utils.hpp"
 #include "domain/log_buffer.hpp"
 #include "diag/ffi_guard.hpp"
+#include "diag/heap_snapshot.hpp"
 #include "infrastructure/network/wifi.hpp"
 #include "infrastructure/storage/nvs.hpp"
 #include "infrastructure/config.hpp"
@@ -72,12 +73,15 @@ std::expected<void, domain::AppError> HttpServer::init() {
     config.max_open_sockets = 13;
     config.max_uri_handlers = 24;
 
+    if (!diag::HeapSnapshot::assertCanAllocate(config.stack_size + 4096)) {
+        ESP_LOGW(TAG, "Low DRAM before httpd_start");
+    }
     esp_err_t err = httpd_start(&handle_, &config);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "httpd start: %s", esp_err_to_name(err));
         ESP_LOGE(TAG, "httpd config: stack_size=%u, max_uri_handlers=%u, max_open_sockets=%d, lru_purge=%d",
                  config.stack_size, config.max_uri_handlers, config.max_open_sockets, config.lru_purge_enable);
-        return std::unexpected(domain::AppError::Hardware);
+        return std::unexpected(domain::AppError::Resource);
     }
 
     ESP_LOGI(TAG, "HTTP server started on port 80");
@@ -136,8 +140,8 @@ esp_err_t captive_wifi_connect_handler(httpd_req_t* req) {
     auto* password = domain::findJsonField(bodyStr, "\"password\"");
 
     if (!ssid || !password) {
-        free(const_cast<char*>(ssid));
-        free(const_cast<char*>(password));
+        free(ssid);
+        free(password);
         httpd_resp_set_type(req, "application/json");
         httpd_resp_send(req, R"({"success":false,"message":"Missing ssid or password"})",
                         HTTPD_RESP_USE_STRLEN);
@@ -159,8 +163,8 @@ esp_err_t captive_wifi_connect_handler(httpd_req_t* req) {
         ESP_LOGI(TAG, "WiFi connected, restarting in STA mode");
         // Small delay so the response is sent before restart
         vTaskDelay(pdMS_TO_TICKS(500));
-        free(const_cast<char*>(ssid));
-        free(const_cast<char*>(password));
+        free(ssid);
+        free(password);
         esp_restart();
     }
 
@@ -169,8 +173,8 @@ esp_err_t captive_wifi_connect_handler(httpd_req_t* req) {
         R"({"success":false,"message":"Connection failed. Check SSID and password."})",
         HTTPD_RESP_USE_STRLEN);
     ESP_LOGW(TAG, "WiFi connect failed for: %s", ssid);
-    free(const_cast<char*>(ssid));
-    free(const_cast<char*>(password));
+    free(ssid);
+    free(password);
     return ESP_OK;
 }
 
@@ -207,17 +211,9 @@ esp_err_t api_status_handler(httpd_req_t* req) {
     float speed = domain::gSpeedMlMin.load(std::memory_order_acquire);
     uint32_t tick = application::gTick.load(std::memory_order_acquire);
 
-    const char* stateStr = "";
-    switch (state) {
-        case domain::BuretteState::Idle:      stateStr = "idle"; break;
-        case domain::BuretteState::Homing:    stateStr = "working"; break;
-        case domain::BuretteState::Filling:   stateStr = "working"; break;
-        case domain::BuretteState::Emptying:  stateStr = "working"; break;
-        case domain::BuretteState::Dosing:    stateStr = "working"; break;
-        case domain::BuretteState::Rinsing:   stateStr = "working"; break;
-        case domain::BuretteState::Stopping:  stateStr = "working"; break;
-        case domain::BuretteState::Error:     stateStr = "error"; break;
-    }
+    const char* stateStr = (state == domain::BuretteState::Idle) ? "idle"
+                       : (state == domain::BuretteState::Error) ? "error"
+                       : "working";
 
     const char* valveStr = (valvePos == domain::ValvePosition::Input) ? "input" : "output";
 
@@ -280,14 +276,14 @@ esp_err_t api_logs_handler(httpd_req_t* req) {
     diag::FfiGuard guard(82);
 
     // Parse query params
-    int limit = 20;
+    int limit = config::LOG_FETCH_DEFAULT_LIMIT;
     char levelFilter[16]{};
     char qbuf[128];
     if (httpd_req_get_url_query_str(req, qbuf, sizeof(qbuf)) == ESP_OK) {
         char val[16];
         if (httpd_query_key_value(qbuf, "limit", val, sizeof(val)) == ESP_OK) {
             int parsed = std::atoi(val);
-            if (parsed > 0 && parsed <= 100) limit = parsed;
+            if (parsed > 0 && parsed <= config::LOG_FETCH_MAX_LIMIT) limit = parsed;
         }
         if (httpd_query_key_value(qbuf, "level", val, sizeof(val)) == ESP_OK) {
             std::strncpy(levelFilter, val, sizeof(levelFilter) - 1);
@@ -597,6 +593,8 @@ void HttpServer::broadcastWsEvent(const char* jsonData, size_t len) {
 
     int sent = 0;
     int skipped = 0;
+    (void)sent;
+    (void)skipped;
     for (auto& session : sessions_) {
         if (session.fd < 0) {
             ++skipped;

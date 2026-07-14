@@ -32,6 +32,24 @@ private:
     rmt_channel_handle_t handle_ = nullptr;
 };
 
+// RAII wrapper for RMT copy encoder
+class RmtEncoder {
+public:
+    explicit RmtEncoder();
+    ~RmtEncoder();
+
+    RmtEncoder(const RmtEncoder&) = delete;
+    RmtEncoder& operator=(const RmtEncoder&) = delete;
+    RmtEncoder(RmtEncoder&&) noexcept;
+    RmtEncoder& operator=(RmtEncoder&&) noexcept;
+
+    [[nodiscard]] rmt_encoder_handle_t get() const noexcept { return handle_; }
+    [[nodiscard]] bool valid() const noexcept { return handle_ != nullptr; }
+
+private:
+    rmt_encoder_handle_t handle_ = nullptr;
+};
+
 // Concrete stepper motor driver (TMC2209 via RMT)
 class StepperMotor {
 public:
@@ -60,7 +78,7 @@ public:
 
 private:
     RmtChannel channel_;
-    rmt_encoder_handle_t encoder_ = nullptr;
+    RmtEncoder encoder_;
     gpio_num_t enPin_;
     std::atomic<int32_t> position_{0};
 };

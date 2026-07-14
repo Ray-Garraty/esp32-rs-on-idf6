@@ -3,59 +3,69 @@
 #include <cstring>
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
-#include "driver/rmt_tx.h"
 #include "infrastructure/config.hpp"
 
 static constexpr auto TAG = "rgb_led";
 
 namespace ecotiter::infrastructure::drivers {
 
-RgbLed::RgbLed(gpio_num_t pin)
-    : pin_(pin) {
-
+RmtTxChannel::RmtTxChannel(gpio_num_t pin, uint32_t resolution_hz) {
     rmt_tx_channel_config_t tx_chan_cfg = {};
-    tx_chan_cfg.gpio_num = pin_;
+    tx_chan_cfg.gpio_num = pin;
     tx_chan_cfg.clk_src = RMT_CLK_SRC_DEFAULT;
-    tx_chan_cfg.resolution_hz = config::LED_RMT_RES_HZ;
+    tx_chan_cfg.resolution_hz = resolution_hz;
     tx_chan_cfg.mem_block_symbols = 64;
     tx_chan_cfg.trans_queue_depth = 1;
-
-    esp_err_t err = rmt_new_tx_channel(&tx_chan_cfg, reinterpret_cast<rmt_channel_handle_t*>(&channel_));
+    esp_err_t err = rmt_new_tx_channel(&tx_chan_cfg, &handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to create RMT TX channel: %s", esp_err_to_name(err));
-        return;
+        handle = nullptr;
     }
+}
 
+RmtTxChannel::~RmtTxChannel() {
+    if (handle != nullptr) {
+        rmt_del_channel(handle);
+    }
+}
+
+RmtCopyEncoder::RmtCopyEncoder() {
     rmt_copy_encoder_config_t enc_cfg = {};
-    err = rmt_new_copy_encoder(&enc_cfg, reinterpret_cast<rmt_encoder_handle_t*>(&encoder_));
+    esp_err_t err = rmt_new_copy_encoder(&enc_cfg, &handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to create copy encoder: %s", esp_err_to_name(err));
-        rmt_del_channel(reinterpret_cast<rmt_channel_handle_t>(channel_));
-        channel_ = nullptr;
+        handle = nullptr;
+    }
+}
+
+RmtCopyEncoder::~RmtCopyEncoder() {
+    if (handle != nullptr) {
+        rmt_del_encoder(handle);
+    }
+}
+
+RgbLed::RgbLed(gpio_num_t pin)
+    : pin_(pin), channel_(pin, config::LED_RMT_RES_HZ), encoder_() {
+    if (channel_.handle == nullptr) {
+        ESP_LOGE(TAG, "Failed to create RMT TX channel on GPIO %d", pin_);
         return;
     }
-
-    err = rmt_enable(reinterpret_cast<rmt_channel_handle_t>(channel_));
+    if (encoder_.handle == nullptr) {
+        ESP_LOGE(TAG, "Failed to create copy encoder");
+        return;
+    }
+    esp_err_t err = rmt_enable(channel_.handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to enable RMT channel: %s", esp_err_to_name(err));
-        rmt_del_encoder(reinterpret_cast<rmt_encoder_handle_t>(encoder_));
-        encoder_ = nullptr;
-        rmt_del_channel(reinterpret_cast<rmt_channel_handle_t>(channel_));
-        channel_ = nullptr;
         return;
     }
-
     initialized_ = true;
     ESP_LOGD(TAG, "RgbLed initialized on GPIO %d", pin_);
 }
 
 RgbLed::~RgbLed() {
-    if (encoder_ != nullptr) {
-        rmt_disable(reinterpret_cast<rmt_channel_handle_t>(channel_));
-        rmt_del_encoder(reinterpret_cast<rmt_encoder_handle_t>(encoder_));
-    }
-    if (channel_ != nullptr) {
-        rmt_del_channel(reinterpret_cast<rmt_channel_handle_t>(channel_));
+    if (initialized_ && channel_.handle != nullptr) {
+        rmt_disable(channel_.handle);
     }
 }
 
@@ -66,7 +76,7 @@ void RgbLed::setColor(uint8_t r, uint8_t g, uint8_t b) {
 }
 
 void RgbLed::refresh() {
-    if (!initialized_ || channel_ == nullptr || encoder_ == nullptr) {
+    if (!initialized_ || channel_.handle == nullptr || encoder_.handle == nullptr) {
         return;
     }
 
@@ -117,8 +127,8 @@ void RgbLed::refresh() {
     tx_cfg.flags.eot_level = 0;
 
     esp_err_t err = rmt_transmit(
-        reinterpret_cast<rmt_channel_handle_t>(channel_),
-        reinterpret_cast<rmt_encoder_handle_t>(encoder_),
+        channel_.handle,
+        encoder_.handle,
         symbols, idx * sizeof(rmt_symbol_word_t),
         &tx_cfg);
     if (err != ESP_OK) {
@@ -130,17 +140,17 @@ void RgbLed::refresh() {
 
 void RgbLed::setTransportMode(domain::TransportMode mode, bool error) {
     if (error) {
-        setColor(255, 0, 0);
+        setColor(color::RED_R, color::RED_G, color::RED_B);
     } else {
         switch (mode) {
         case domain::TransportMode::UsbActive:
-            setColor(0, 0, 0);
+            setColor(color::OFF_R, color::OFF_G, color::OFF_B);
             break;
         case domain::TransportMode::BleAdvertising:
-            setColor(0, 0, 255);
+            setColor(color::BLUE_R, color::BLUE_G, color::BLUE_B);
             break;
         case domain::TransportMode::BleConnected:
-            setColor(0, 255, 0);
+            setColor(color::GREEN_R, color::GREEN_G, color::GREEN_B);
             break;
         }
     }
