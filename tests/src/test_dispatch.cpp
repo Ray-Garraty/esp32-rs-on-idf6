@@ -179,13 +179,6 @@ TEST_CASE("dispatch: adc.cal.reset returns JSON", "[dispatch]") {
   REQUIRE(rsp->kind == ResponseKind::Single);
 }
 
-TEST_CASE("dispatch: system.reboot returns AckThen", "[dispatch]") {
-  Command cmd{CommandType::SystemReboot};
-  auto rsp = dispatch(cmd);
-  REQUIRE(rsp);
-  REQUIRE(rsp->kind == ResponseKind::AckThen);
-}
-
 TEST_CASE("dispatch: system.firmwareVersion returns JSON", "[dispatch]") {
   Command cmd{CommandType::SystemFirmwareVersion};
   auto rsp = dispatch(cmd);

@@ -39,8 +39,6 @@ using domain::ValvePosition;
 
 static constexpr uint32_t HOME_SPEED_HZ = 1500;
 static constexpr uint32_t HOME_INTERVAL_US = 1'000'000 / HOME_SPEED_HZ;
-static constexpr uint32_t HOMING_TIMEOUT_MS = 120000;
-
 void assert_rmt_preconditions() {
 }
 
@@ -222,6 +220,11 @@ extern "C" void motorTaskEntry(void* pvParameters) { // NOLINT(readability-funct
                                      curVol, nominalVol);
                 break;
             }
+
+            case MotorCommandType::SetValve:
+                set_valve(cmd.valvePos);
+                vTaskDelay(pdMS_TO_TICKS(config::VALVE_SETTLE_MS));
+                break;
 
             }
         }

@@ -496,9 +496,10 @@ def main() -> int:
         drain_buf(buf)
 
         # ── 7d: Restore original position ──
+        restore_pos = "input" if cur_vlv == "in" else "output"
         status(f"  (7d) Restoring to {cur_vlv}")
         rsp_restore = send_and_expect(ser, buf, "valve.setPosition", cmd_id=9,
-                                      params={"position": cur_vlv},
+                                      params={"position": restore_pos},
                                       expect_keys=["position"])
         if rsp_restore and validate_spec_response(rsp_restore, 9, ["position"]):
             pass_msg(f"valve.setPosition({cur_vlv}): response conforms to spec format")

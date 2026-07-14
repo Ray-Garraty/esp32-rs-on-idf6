@@ -163,12 +163,6 @@ TEST_CASE("parseCommand: cal.save", "[command]") {
   REQUIRE(cmd->type == CommandType::CalSave);
 }
 
-TEST_CASE("parseCommand: system.reboot", "[command]") {
-  auto cmd = parseCommand(R"({"cmd":"system.reboot"})");
-  REQUIRE(cmd);
-  REQUIRE(cmd->type == CommandType::SystemReboot);
-}
-
 TEST_CASE("parseCommand: system.firmwareVersion", "[command]") {
   auto cmd = parseCommand(R"({"cmd":"system.firmwareVersion"})");
   REQUIRE(cmd);

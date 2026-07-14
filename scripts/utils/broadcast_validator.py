@@ -3,7 +3,7 @@ Broadcast message format validation and interval diagnostics.
 Shared between serial and BLE integration tests.
 
 Compact broadcast format spec:
-  {"ts": uint32, "temp": float|null, "mv": number, "vlv": "in"|"out"|"unk", 
+  {"ts": uint32, "temp": float|null, "mv": number, "vlv": "in"|"out"|"unk",
    "brt": {"sts": "idle"|"working"|"error", "vl": float|null, "spd": number}}
 """
 
@@ -15,8 +15,8 @@ VLV_VALID = {"in", "out", "unk"}
 BRT_STS_VALID = {"idle", "working", "error"}
 
 SPEC_INTERVAL_MS = 300
-FIRMWARE_INTERVAL_MS = 2000
-OUTLIER_THRESHOLD_MS = 4000
+SPEC_INTERVAL_TOLERANCE_MS = 10
+OUTLIER_THRESHOLD_MS = 400
 
 
 def validate_broadcast_format(broadcasts: list[tuple[dict, float]], log_fn=print) -> tuple[int, int]:
@@ -79,9 +79,8 @@ def diagnose_broadcast_intervals(broadcasts: list[tuple[dict, float]], log_fn=pr
     for i in range(1, len(broadcasts)):
         ts_prev = broadcasts[i - 1][0]["ts"]
         ts_curr = broadcasts[i][0]["ts"]
-        # ts ticks at CONFIG_FREERTOS_HZ=1000 → each tick = 1 ms.
-        # Legacy firmware used 100 Hz → 10 ms ticks; this *10 factor
-        # converts ts ticks to milliseconds for that legacy format.
+        # gTick increments every ~10 ms (see scheduler.hpp BROADCAST_INTERVAL
+        # comment). The *10 factor converts ts ticks to milliseconds.
         delta_ts = (ts_curr - ts_prev) * 10
         if delta_ts > 0:
             ts_deltas_ms.append(delta_ts)
@@ -103,16 +102,17 @@ def _report_deltas(label: str, deltas: list[float], issue_hint: str, log_fn) -> 
     mean = sum(deltas) / len(deltas)
     variance = sum((d - mean) ** 2 for d in deltas) / len(deltas)
     stddev = math.sqrt(variance)
-    outliers = [d for d in deltas if d > OUTLIER_THRESHOLD_MS]
     max_d = max(deltas)
     min_d = min(deltas)
+    lower = SPEC_INTERVAL_MS - SPEC_INTERVAL_TOLERANCE_MS
+    upper = SPEC_INTERVAL_MS + SPEC_INTERVAL_TOLERANCE_MS
+    n_out = sum(1 for d in deltas if d < lower or d > upper)
     log_fn(f"  {label}:")
-    log_fn(f"    Expected (spec): {SPEC_INTERVAL_MS} ms")
-    log_fn(f"    Expected (firmware): ~{FIRMWARE_INTERVAL_MS} ms (known deviation)")
-    log_fn(f"    Actual: min={min_d:.0f}ms  max={max_d:.0f}ms  "
+    log_fn(f"    Target: {SPEC_INTERVAL_MS} ±{SPEC_INTERVAL_TOLERANCE_MS} ms  "
+           f"Actual: min={min_d:.0f}ms  max={max_d:.0f}ms  "
            f"mean={mean:.0f}ms  stddev={stddev:.0f}ms")
-    log_fn(f"    Outliers (>{OUTLIER_THRESHOLD_MS}ms): {len(outliers)}/{len(deltas)}")
-    if max_d > FIRMWARE_INTERVAL_MS * 1.5:
-        log_fn(f"    -> WARN: large gap detected — possible {issue_hint}")
+    log_fn(f"    Out of tolerance (±{SPEC_INTERVAL_TOLERANCE_MS}ms): {n_out}/{len(deltas)}")
+    if n_out > 0:
+        log_fn(f"    -> WARN: {n_out} intervals exceed tolerance — possible {issue_hint}")
     else:
-        log_fn(f"    -> OK: no anomalies detected")
+        log_fn(f"    -> ALL intervals within tolerance")

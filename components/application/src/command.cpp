@@ -52,7 +52,6 @@ constexpr CmdName kCmdNames[] = {
   {"system.getStatus",  CommandType::SystemGetStatus},
   {"system.getFormattedLogs", CommandType::SystemGetFormattedLogs},
   {"system.readLog",    CommandType::SystemReadLog},
-  {"system.reboot",     CommandType::SystemReboot},
   {"system.firmwareVersion", CommandType::SystemFirmwareVersion},
   {"serial.ping",       CommandType::SerialPing},
   {"ping",              CommandType::SerialPing},

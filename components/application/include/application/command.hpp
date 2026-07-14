@@ -54,7 +54,6 @@ enum class CommandType : uint8_t {
   SystemGetStatus,
   SystemGetFormattedLogs,
   SystemReadLog,
-  SystemReboot,
   SystemFirmwareVersion,
   // Serial
   SerialPing

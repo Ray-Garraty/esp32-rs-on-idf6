@@ -5,6 +5,7 @@
 
 #include "application/command.hpp"
 #include "domain/memory.hpp"
+#include "infrastructure/motor_task.hpp"
 
 namespace ecotiter::application::handlers::valve {
 
@@ -12,6 +13,13 @@ std::expected<CommandResponse, domain::AppError> handleSetPosition(
     std::optional<domain::ValvePosition> pos) {
   if (!pos) {
     return makeErrorResponse("invalid_params");
+  }
+  infrastructure::MotorCommand cmd{};
+  cmd.type = infrastructure::MotorCommandType::SetValve;
+  cmd.valvePos = *pos;
+  if (infrastructure::gMotorCmdQueue == nullptr ||
+      xQueueSend(infrastructure::gMotorCmdQueue, &cmd, 0) != pdTRUE) {
+    return makeErrorResponse("start_failed");
   }
   const char* posStr = (*pos == domain::ValvePosition::Input) ? "input" : "output";
   CommandResponse rsp;

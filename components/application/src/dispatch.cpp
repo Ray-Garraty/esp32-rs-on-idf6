@@ -153,8 +153,6 @@ std::expected<CommandResponse, domain::AppError> dispatch(
       return withId(system::handleGetFormattedLogs());
     case CommandType::SystemReadLog:
       return withId(system::handleReadLog());
-    case CommandType::SystemReboot:
-      return withId(system::handleReboot());
     case CommandType::SystemFirmwareVersion:
       return withId(system::handleFirmwareVersion(std::nullopt));
 

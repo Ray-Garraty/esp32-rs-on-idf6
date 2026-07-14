@@ -14,6 +14,13 @@ This document defines the operational rules, safety protocols, and workflows for
 Before ANY commit or declaring a task done:
 `scripts/idf.sh smoke` — the only final gate. Build/test/tidy may be used during work for syntax checks, but the sole acceptance criterion is smoke on real ESP32-S3. Do NOT ask permission, do NOT check connectivity, do NOT resolve the port — just run it blindly. Build and unit tests are INSUFFICIENT — only smoke on hardware proves the firmware works. If smoke fails, show logs and stop.
 
+### GR-0.1: GREEN UNIT TESTS PROVE NOTHING
+`valve.setPosition` returned `{"status":"ok"}` for 2+ years through 3 rewrites.
+246 unit tests, 774 assertions — all green. The GPIO never toggled.
+No review, no analysis, no audit caught it. Only hardware proved it.
+**Green CI is not evidence. Every handler must be verified through
+hardware state — broadcast fields, GPIO levels, serial logs.**
+
 
 ### GR-10: ONLY THE USER ASSESSES PHYSICAL STATE
 The AI MUST NEVER claim physical observations (LED colors, motor movements, relay clicks, valve position).

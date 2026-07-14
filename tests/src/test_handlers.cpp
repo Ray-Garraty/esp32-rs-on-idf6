@@ -474,8 +474,4 @@ TEST_CASE("handler: system.firmwareVersion custom", "[handlers][system]") {
   REQUIRE(sv.find("2.0.0") != std::string_view::npos);
 }
 
-TEST_CASE("handler: system.reboot returns AckThen", "[handlers][system]") {
-  auto rsp = system::handleReboot();
-  REQUIRE(rsp);
-  REQUIRE(rsp->kind == ResponseKind::AckThen);
-}
+

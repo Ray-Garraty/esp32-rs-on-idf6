@@ -117,7 +117,8 @@ class TestDiagnoseBroadcastIntervals(unittest.TestCase):
         base = time.monotonic()
         broadcasts = []
         for i in range(5):
-            broadcasts.append(({"ts": 100 + i * 200}, base + i * 2.0))
+            # 30 ts ticks × 10 = 300 ms — matches SPEC_INTERVAL_MS
+            broadcasts.append(({"ts": 100 + i * 30}, base + i * 0.3))
         diagnose_broadcast_intervals(broadcasts, log_fn=lambda m: logged.append(m))
         # Should not warn about anomalies
         self.assertFalse(any("WARN" in m for m in logged))

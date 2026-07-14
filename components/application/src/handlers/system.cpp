@@ -36,11 +36,6 @@ std::expected<CommandResponse, domain::AppError> handleReadLog() {
   return rsp;
 }
 
-std::expected<CommandResponse, domain::AppError> handleReboot() {
-  // Return ack — actual reboot is triggered by the caller (Step 6 integration)
-  return makeAckThenResponse();
-}
-
 std::expected<CommandResponse, domain::AppError> handleFirmwareVersion(
     std::optional<std::string_view> version) {
   CommandResponse rsp;

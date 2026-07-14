@@ -16,7 +16,6 @@ namespace ecotiter::application::handlers::system {
     uint32_t accel, float volumeMl);
 [[nodiscard]] std::expected<CommandResponse, domain::AppError> handleGetFormattedLogs();
 [[nodiscard]] std::expected<CommandResponse, domain::AppError> handleReadLog();
-[[nodiscard]] std::expected<CommandResponse, domain::AppError> handleReboot();
 [[nodiscard]] std::expected<CommandResponse, domain::AppError> handleFirmwareVersion(
     std::optional<std::string_view> version);
 
