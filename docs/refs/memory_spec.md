@@ -466,6 +466,42 @@ void app_main() {
 | JSON in main loop | DRAM for small status (< 512 B); PSRAM for large dumps |
 | WiFi/LWIP internal buffers | Auto-managed by `TRY_ALLOCATE_WIFI_LWIP`; do not override |
 
+### 5.4 Task Stack Budgets
+
+Measured at ~62s after cold boot (first `logAllWatermarks()` from log_worker at 60s interval). Watermarks from `uxTaskGetStackHighWaterMark(nullptr)` in bytes.
+
+| Task | Stack (B) | Watermark (B) | Used (B) | Used % | Headroom % | Deepest call chain | Largest locals |
+|------|-----------|---------------|----------|--------|------------|-------------------|----------------|
+| HTTP server¹ | 16384 | — | — | — | — | `valve_post_handler`→`handleCommandCore`→`dispatch`→`handleSetPosition`→gpio (≈12 frames) | `uint8_t buf[1024]` (ws_handler), `LogEntry entries[50]` (~1600 B), `CommandBuffer body[256]` |
+| Main (`app_main`) | 32768 | 25980 | 6788 | 20% | **80%** ✅ | `sendResponse`→`serializeToBuffer`→`serializeStatusJson` (≈6 frames) | `ResponseBuffer[2048]` ×4 (non-nested) — left as-is per Phase 2, `BroadcastEvent`, `BleCmdItem` |
+| Motor | 16384 | 1460 | 14924 | 91% | **9%** ❌ | `motorTaskEntry`→`run_rinse_sm`→`move_fill`→`set_valve`→`move_to_endstop`→`stepper.moveStepsIntervals`→RMT (≈10 frames) | `uint32_t intervals[128]` (512 B), `MotorCommand` |
+| Temperature | 16384 | 2148 | 14236 | 86% | **14%** ❌ | `tempTaskEntry`→`run_temp_loop`→`readSensor`→OneWire bitbang→`calibratedMv` (≈8 frames) | `OneWireBus`, `FfiGuard` |
+| Net owner | 20480 | 220 | 20260 | 98% | **2%** ❌ | `netTaskEntry`→`wifiManager.init()`→`httpServer.init()`→`httpd_start`→`bleManager.init()`→`startBleNotifyThread` (≈15 frames during init) | `WifiManager`, `HttpServer`, `WsSendEntry`, `WsBroadcastEntry` |
+| Log worker | 16384 | 2140 | 14244 | 86% | **14%** ❌ | `workerTaskEntry`→`xQueueReceive`→callback→`logAllWatermarks`→printf (≈8 frames, 60s) | `LogEntry` (384 B + strings), `WsSendEntry` |
+| BLE notify | 8192 | 5272 | 2920 | 35% | **65%** ✅ | `bleNotifyLoop`→`manager->sendNotification`→`ble_gatts_notify` (≈5 frames) | `BleNotifyItem` (~2052 B) |
+| ipc0² | 4096 | 476 | 3620 | 88% | **12%** ❌ | ESP-IDF internal IPC | N/A (ESP-IDF internal) |
+| ipc1² | 4096 | 560 | 3536 | 86% | **14%** ❌ | ESP-IDF internal IPC | N/A (ESP-IDF internal) |
+
+¹ **HTTP server** is created by `httpd_start()` internally and not registered with StackMonitor. Stack size set via `HttpServer::STACK_SIZE = 16384` in `http_server.hpp:52`. Cannot be measured directly without registration.
+
+² **ipc0, ipc1** are ESP-IDF internal inter-processor call tasks. Stack sizes controlled by ESP-IDF's `config(IPC_STACK_SIZE)`.
+
+**Measurement notes:**
+- Tmr Svc, wifi, phy_init are not registered due to `xTaskGetHandle()` timing (see [ISSUE-006](../issues/active/ISSUE-006-deferred-task-registration.md))
+- Watermark values may vary ±5% across boots due to init timing and network state
+- `logAllWatermarks()` adds ~43ms UART burst every 60s in log_worker (acceptable — worker task domain)
+
+**Headroom target:** ≥25% (75% usage threshold). Tasks below target:
+| Task | Headroom | Action needed |
+|------|----------|---------------|
+| Motor | 9% | Refactor: move `uint32_t intervals[128]` to heap or increase stack to 24 KB |
+| Net owner | 2% | Init objects (WifiManager, HttpServer, BleManager via params) dominate. Move large init objects to heap or increase stack to 32 KB |
+| Temperature | 14% | Refactor: smaller stack acceptable if call chain verified; or increase to 20 KB |
+| Log worker | 14% | Monitor: Phase 1 bumped to 16 KB (was 12 KB at 90%). Acceptable risk for diagnostic task |
+| ipc0/ipc1 | 12-14% | ESP-IDF internal — not user-configurable |
+
+**Call chain analysis methodology:** Code review of each task's entry point, tracing through all reachable function calls (including nested switches, state machine dispatch, and library calls). Largest locals identified by scanning for `uint8_t buf[N]`, `std::array<T,N>`, or structs with embedded arrays on the stack.
+
 ---
 
 ## 6. Anti-Patterns (Auto-Revert)

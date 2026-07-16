@@ -187,6 +187,10 @@ HTTP SERVER (FreeRTOS internal, `domain::HTTP_SERVER_STACK`):
   Created by httpd_start(). Calls registered handler callbacks. Not user-managed.
 ```
 
+### Stack budgets
+
+См. [memory_spec.md §5.4](../refs/memory_spec.md#54-task-stack-budgets) для полной таблицы бюджетов, headroom deficits, call chain analysis и measurement methodology.
+
 ## Task Independence Principle (CRITICAL)
 
 Every FreeRTOS task is an independent execution context. Tasks communicate
