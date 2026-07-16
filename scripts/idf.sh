@@ -257,7 +257,7 @@ case "$CMD" in
         echo "Port: $PORT"
         idf.py -p "$PORT" flash
         sleep 0.3
-        python3 "$SCRIPT_DIR/monitor.py" "$PORT" --timeout 30 --log-dir "$PROJECT_DIR/logs" --no-reset
+        python3 "$SCRIPT_DIR/monitor.py" "$PORT" --timeout 70 --log-dir "$PROJECT_DIR/logs" --no-reset
         exit $?
         ;;
 
@@ -321,7 +321,7 @@ case "$CMD" in
         echo "  build                 Clean build — removes build/, injects timestamp + git hash"
         echo "  flash [port]          Flash firmware (auto-detect port, stale source check)"
         echo "  monitor [port]        Serial monitor, 30s timeout"
-        echo "  smoke [--force-build] Build (if stale) + semgrep + flash + 30s monitor"
+        echo "  smoke [--force-build] Build (if stale) + semgrep + flash + 70s monitor"
         echo "  test                  Run host unit tests (Catch2)"
         echo "  test --build          Configure + build tests only, don't run"
         echo "  test --list           List test case names"

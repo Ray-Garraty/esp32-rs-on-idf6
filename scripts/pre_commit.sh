@@ -90,6 +90,14 @@ echo "=== 5. Host unit tests ==="
 echo "  ✅ All unit tests pass"
 
 # ============================================================
+echo "=== 5.5 Stack watermark check ==="
+if ls "$PROJECT_DIR"/logs/serial_*.log >/dev/null 2>&1; then
+    python3 "$SCRIPT_DIR/check_watermarks.py"
+else
+    echo "  ⏭️  No serial log found — skipping watermark check"
+fi
+
+# ============================================================
 echo "=== 6. Docs OKF validation ==="
 python "$PROJECT_DIR/docs/validate_okf.py"
 echo "  ✅ All docs valid"
