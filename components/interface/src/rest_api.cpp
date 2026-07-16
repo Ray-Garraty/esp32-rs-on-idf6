@@ -120,12 +120,14 @@ std::expected<size_t, int> handleValvePostCore(
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "infrastructure/memory/psram_buffer.hpp"
 #include "infrastructure/motor_task.hpp"
 
 static constexpr auto TAG = "rest_api";
 
 esp_err_t ecotiter::interface::ping_handler(httpd_req_t* req) {
-    domain::memory::ResponseBuffer buf{};
+    ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
+    auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
     auto result = handlePingCore(buf);
     if (!result) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "internal error");
@@ -137,7 +139,8 @@ esp_err_t ecotiter::interface::ping_handler(httpd_req_t* req) {
 }
 
 esp_err_t ecotiter::interface::status_handler(httpd_req_t* req) {
-    domain::memory::ResponseBuffer buf{};
+    ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
+    auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
     auto result = handleStatusCore(buf);
     if (!result) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "internal error");
@@ -164,7 +167,8 @@ esp_err_t ecotiter::interface::command_handler(httpd_req_t* req) {
     auto cmd = application::parseCommand(sv);
     if (!cmd) {
         const char* detail = "Protocol error";
-        domain::memory::ResponseBuffer buf{};
+        ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
+        auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
         std::snprintf(buf.data(), buf.size(),
             R"({"status":"error","message":"%s"})", detail);
         httpd_resp_set_type(req, "application/json");
@@ -181,7 +185,8 @@ esp_err_t ecotiter::interface::command_handler(httpd_req_t* req) {
 
     // For synchronous commands (Single, Error), return immediately
     if (rsp->kind != application::ResponseKind::AckThen) {
-        domain::memory::ResponseBuffer rspBuf{};
+        ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _rspBuf{};
+        auto& rspBuf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_rspBuf.data());
         auto serialized = application::serializeToBuffer(*rsp, rspBuf);
         if (!serialized) {
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "serialize failed");
@@ -199,7 +204,8 @@ esp_err_t ecotiter::interface::command_handler(httpd_req_t* req) {
     while (true) {
         TickType_t now = xTaskGetTickCount();
         if (now - startTick >= CMD_TIMEOUT_TICKS) {
-            domain::memory::ResponseBuffer buf{};
+            ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
+            auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
             std::snprintf(buf.data(), buf.size(),
                 R"({"status":"error","message":"watchdog_timeout"})");
             httpd_resp_set_type(req, "application/json");
@@ -212,7 +218,8 @@ esp_err_t ecotiter::interface::command_handler(httpd_req_t* req) {
         if (infrastructure::gSmResultQueue &&
             xQueueReceive(infrastructure::gSmResultQueue, &result, pdMS_TO_TICKS(50)) == pdTRUE)
         {
-            domain::memory::ResponseBuffer buf{};
+            ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
+            auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
             size_t off = application::formatSmResult(buf, rsp->id, result);
 
             httpd_resp_set_type(req, "application/json");
@@ -227,7 +234,8 @@ esp_err_t ecotiter::interface::command_handler(httpd_req_t* req) {
 }
 
 esp_err_t ecotiter::interface::valve_get_handler(httpd_req_t* req) {
-    domain::memory::ResponseBuffer buf{};
+    ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
+    auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
     auto result = handleCommandCore(
         R"({"cmd":"valve.getState"})", buf);
     if (!result) {
@@ -284,7 +292,8 @@ esp_err_t ecotiter::interface::valve_post_handler(httpd_req_t* req) {
         return ESP_FAIL;
     }
 
-    domain::memory::ResponseBuffer rspBuf{};
+    ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _rspBuf{};
+    auto& rspBuf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_rspBuf.data());
     auto result = handleCommandCore(
         std::string_view(cmdBuf.data(), static_cast<size_t>(n)), rspBuf);
     if (!result) {

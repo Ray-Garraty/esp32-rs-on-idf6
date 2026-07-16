@@ -1,10 +1,9 @@
 #pragma once
 
 #include <esp_heap_caps.h>
-#include <stdexcept>
 #include <cstddef>
 #include <cstdint>
-#include <new>
+#include <cstdlib>
 
 namespace ecotiter::memory {
 
@@ -22,7 +21,7 @@ public:
         data_ = static_cast<uint8_t*>(
             heap_caps_malloc(N, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
         if (!data_) {
-            throw std::bad_alloc();
+            std::abort();
         }
     }
 

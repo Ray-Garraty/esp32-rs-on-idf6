@@ -15,6 +15,7 @@
 #include "domain/types.hpp"
 #include "domain/memory.hpp"
 #include "domain/json_utils.hpp"
+#include "infrastructure/memory/psram_buffer.hpp"
 #include "domain/log_buffer.hpp"
 #include "diag/ffi_guard.hpp"
 #include "diag/heap_snapshot.hpp"
@@ -233,8 +234,8 @@ esp_err_t api_status_handler(httpd_req_t* req) {
         }
     }
 
-    domain::memory::ResponseBuffer buf{};
-    int n = std::snprintf(buf.data(), buf.size(),
+    ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> buf{};
+    int n = std::snprintf(reinterpret_cast<char*>(buf.data()), buf.size(),
         R"({"ts":%lu,"meta":{"ip":"%s"},)"
         R"("sensors":{"temperature":{"is_connected":%s,"celsius_val":%.1f},"electrode":{"mv":%u}},)"
         R"("valve":{"position":"%s"},)"
@@ -252,7 +253,7 @@ esp_err_t api_status_handler(httpd_req_t* req) {
 
     httpd_resp_set_type(req, "application/json");
     if (n > 0) {
-        httpd_resp_send(req, buf.data(), static_cast<ssize_t>(n));
+        httpd_resp_send(req, reinterpret_cast<const char*>(buf.data()), static_cast<ssize_t>(n));
     } else {
         httpd_resp_send(req, "{}", HTTPD_RESP_USE_STRLEN);
     }
@@ -293,17 +294,17 @@ esp_err_t api_logs_handler(httpd_req_t* req) {
     }
 
     // Build JSON response
-    domain::memory::ResponseBuffer rsp{};
+    ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> rsp{};
     size_t pos = 0;
     auto append = [&](const char* s) {
         size_t len = std::strlen(s);
         if (pos + len < rsp.size()) {
-            std::memcpy(rsp.data() + pos, s, len);
+            std::memcpy(reinterpret_cast<char*>(rsp.data()) + pos, s, len);
             pos += len;
         }
     };
     auto appendCh = [&](char c) {
-        if (pos + 1 < rsp.size()) { rsp.data()[pos++] = c; }
+        if (pos + 1 < rsp.size()) { reinterpret_cast<char*>(rsp.data())[pos++] = c; }
     };
 
     append(R"({"entries":)");
@@ -344,7 +345,7 @@ esp_err_t api_logs_handler(httpd_req_t* req) {
     appendCh('}');
 
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, rsp.data(), static_cast<ssize_t>(pos));
+    httpd_resp_send(req, reinterpret_cast<const char*>(rsp.data()), static_cast<ssize_t>(pos));
     return ESP_OK;
 }
 
@@ -387,12 +388,12 @@ esp_err_t api_logs_download_handler(httpd_req_t* req) {
     domain::LogEntry entries[20];
     size_t count = domain::LogBuffer::instance().fetch(entries, 20);
 
-    domain::memory::ResponseBuffer rsp{};
+    ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> rsp{};
     size_t pos = 0;
     for (size_t i = 0; i < count; ++i) {
         size_t remaining = rsp.size() - pos;
         if (remaining < 4) break;
-        int n = std::snprintf(rsp.data() + pos, remaining,
+        int n = std::snprintf(reinterpret_cast<char*>(rsp.data()) + pos, remaining,
             "[%s] %s\n", entries[i].level, entries[i].message);
         if (n > 0) {
             size_t written = std::min(static_cast<size_t>(n), remaining - 1);
@@ -407,7 +408,7 @@ esp_err_t api_logs_download_handler(httpd_req_t* req) {
     }
 
     httpd_resp_set_type(req, "text/plain");
-    httpd_resp_send(req, rsp.data(), static_cast<ssize_t>(pos));
+    httpd_resp_send(req, reinterpret_cast<const char*>(rsp.data()), static_cast<ssize_t>(pos));
     return ESP_OK;
 }
 
