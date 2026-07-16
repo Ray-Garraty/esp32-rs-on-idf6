@@ -6,6 +6,7 @@
 #include "hal/uart_hal.h"
 #include "xtensa_context.h"
 #include "diag/black_box.hpp"
+#include "diag/stack_monitor.hpp"
 
 // Forward declare: defined in esp_system/panic.c, not in any public header
 extern "C" void esp_panic_handler_feed_wdts(void);
@@ -117,10 +118,7 @@ extern "C" void __wrap_esp_panic_handler(void* info) noexcept {
     ecotiter::diag::BlackBox::instance().dump(panic_puts);
 
     panic_puts("=== STACK ===\n");
-    UBaseType_t wm = uxTaskGetStackHighWaterMark(nullptr);
-    panic_puts("current watermark=");
-    panic_print_uint(static_cast<unsigned long>(wm));
-    panic_puts("\n");
+    ecotiter::diag::StackMonitor::instance().logAllWatermarks(panic_puts);
 
     panic_puts("!!! EXCEPTION END !!!\n");
 

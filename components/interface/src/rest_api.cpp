@@ -70,6 +70,45 @@ std::expected<size_t, int> handleCommandCore(
     return *serialized;
 }
 
+std::expected<size_t, int> handleValveGetCore(
+    domain::memory::ResponseBuffer& buf) {
+    return handleCommandCore(R"({"cmd":"valve.getState"})", buf);
+}
+
+std::expected<size_t, int> handleValvePostCore(
+    std::string_view body,
+    domain::memory::ResponseBuffer& buf) {
+
+    auto j = nlohmann::json::parse(body, nullptr, false);
+    if (j.is_discarded()) {
+        std::snprintf(buf.data(), buf.size(),
+            R"({"status":"error","message":"invalid_json"})");
+        return std::unexpected(400);
+    }
+
+    auto it = j.find("position");
+    if (it == j.end() || !it->is_string()) {
+        std::snprintf(buf.data(), buf.size(),
+            R"({"status":"error","message":"missing_position"})");
+        return std::unexpected(400);
+    }
+
+    std::string posStr = it->get<std::string>();
+    if (posStr != "input" && posStr != "output") {
+        std::snprintf(buf.data(), buf.size(),
+            R"({"status":"error","message":"invalid_position"})");
+        return std::unexpected(400);
+    }
+
+    domain::memory::CommandBuffer cmdBuf{};
+    int n = std::snprintf(cmdBuf.data(), cmdBuf.size(),
+        R"({"cmd":"valve.setPosition","position":"%s"})", posStr.c_str());
+    if (n < 0) return std::unexpected(500);
+
+    return handleCommandCore(
+        std::string_view(cmdBuf.data(), static_cast<size_t>(n)), buf);
+}
+
 } // namespace ecotiter::interface
 
 // ---------------------------------------------------------------------------

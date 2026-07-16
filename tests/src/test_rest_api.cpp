@@ -93,7 +93,8 @@ TEST_CASE("handleValveGetCore: returns current valve state", "[rest_api]") {
 
     std::string_view sv(buf.data(), *result);
     auto j = json::parse(sv);
-    REQUIRE(j["valve"] == "input");
+    REQUIRE(j["status"] == "ok");
+    REQUIRE(j["data"]["position"] == "input");
 
     // Change state and verify
     gValvePosition.store(ValvePosition::Output, std::memory_order_release);
@@ -102,7 +103,7 @@ TEST_CASE("handleValveGetCore: returns current valve state", "[rest_api]") {
     REQUIRE(result);
     sv = std::string_view(buf.data(), *result);
     j = json::parse(sv);
-    REQUIRE(j["valve"] == "output");
+    REQUIRE(j["data"]["position"] == "output");
 }
 
 TEST_CASE("handleValvePostCore: set valve to input", "[rest_api]") {
@@ -115,7 +116,8 @@ TEST_CASE("handleValvePostCore: set valve to input", "[rest_api]") {
 
     std::string_view sv(buf.data(), *result);
     auto j = json::parse(sv);
-    REQUIRE(j["valve"] == "input");
+    REQUIRE(j["status"] == "ok");
+    REQUIRE(j["data"]["position"] == "input");
 
     // Verify global was updated
     REQUIRE(gValvePosition.load(std::memory_order_acquire) == ValvePosition::Input);

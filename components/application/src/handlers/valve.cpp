@@ -7,6 +7,7 @@
 #include "domain/memory.hpp"
 #include "domain/types.hpp"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "infrastructure/config.hpp"
 #include "infrastructure/drivers/valve.hpp"
 

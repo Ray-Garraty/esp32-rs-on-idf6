@@ -3,6 +3,8 @@
 #include <cstring>
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/task.h"
+#include "diag/stack_monitor.hpp"
 
 namespace ecotiter::domain {
 
@@ -65,9 +67,10 @@ void LogBuffer::workerTaskEntry(void* pvParameters) {
     }
 
     LogEntry entry;
+    TickType_t lastWmLog = xTaskGetTickCount();
     while (true) {
         size_t idx;
-        if (xQueueReceive(q, &idx, portMAX_DELAY) == pdTRUE) {
+        if (xQueueReceive(q, &idx, pdMS_TO_TICKS(60000)) == pdTRUE) {
             auto& slot = self.slots_[idx];
             uint32_t ts = slot.timestampMs.load(std::memory_order_acquire);
             if (ts == 0) continue;
@@ -81,6 +84,11 @@ void LogBuffer::workerTaskEntry(void* pvParameters) {
             if (self.callback_) {
                 self.callback_(entry);
             }
+        }
+
+        if ((xTaskGetTickCount() - lastWmLog) >= pdMS_TO_TICKS(60000)) {
+            ecotiter::diag::StackMonitor::instance().logAllWatermarks();
+            lastWmLog = xTaskGetTickCount();
         }
     }
 }

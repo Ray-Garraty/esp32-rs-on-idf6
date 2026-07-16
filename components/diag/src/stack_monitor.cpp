@@ -72,4 +72,33 @@ void StackMonitor::logAllWatermarks() const noexcept { // NOLINT(readability-fun
     }
 }
 
+void StackMonitor::logAllWatermarks(void (*print)(const char*)) const noexcept {
+    for (size_t i = 0; i < count_; ++i) {
+        UBaseType_t wm = uxTaskGetStackHighWaterMark(handles_[i]);
+        uint32_t usedBytes = static_cast<uint32_t>(
+            stackSizes_[i] - static_cast<size_t>(wm));
+        uint32_t usedPct = (stackSizes_[i] > 0)
+            ? (usedBytes * 100 / static_cast<uint32_t>(stackSizes_[i])) : 0;
+
+        char buf[128];
+        int n = std::snprintf(buf, sizeof(buf),
+            "Thread %s: cfg=%zuB wmark=%u used=%u%%\n",
+            names_[i], stackSizes_[i],
+            static_cast<unsigned>(wm),
+            static_cast<unsigned>(usedPct));
+        if (n > 0 && static_cast<size_t>(n) < sizeof(buf)) {
+            print(buf);
+        }
+        if (usedPct > 90) {
+            char warn[64];
+            int wn = std::snprintf(warn, sizeof(warn),
+                "Thread %s: LOW STACK! %u%% used\n",
+                names_[i], static_cast<unsigned>(usedPct));
+            if (wn > 0 && static_cast<size_t>(wn) < sizeof(warn)) {
+                print(warn);
+            }
+        }
+    }
+}
+
 } // namespace ecotiter::diag

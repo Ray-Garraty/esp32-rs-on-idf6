@@ -1,5 +1,8 @@
 ---
 type: CrashReport
+title: "HTTP valve POST handler stack overflow"
+description: "Stack overflow in HTTP server task during POST /api/valve handler chain. Task stack was 12 KB, bumped to 16 KB (LL-050)."
+tags: [crash, stack-overflow, http, valve, esp32-s3]
 version: "1.0"
 task_id: "manual"
 timestamp: "2026-07-16"
