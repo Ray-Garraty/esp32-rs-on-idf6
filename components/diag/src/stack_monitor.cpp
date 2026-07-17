@@ -1,5 +1,6 @@
 #include "diag/stack_monitor.hpp"
 #include <cstdio>
+#include <cstring>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -7,22 +8,40 @@
 static constexpr auto TAG = "stack_monitor";
 
 namespace ecotiter::diag {
+namespace {
+struct KnownTask { const char* name; size_t stack; };
+} // anonymous namespace
 
 void StackMonitor::registerMainTask() noexcept {
     registerThread("main", 32768);
-    // Also register known internal ESP-IDF tasks (Gap 10)
-    struct KnownTask { const char* name; size_t stack; };
     static constexpr KnownTask kInternal[] = {
-        {"Tmr Svc", 4096},
         {"ipc0", 4096},
         {"ipc1", 4096},
-        {"wifi", 8192},
-        {"phy_init", 4096},
     };
     for (auto& t : kInternal) {
         TaskHandle_t h = xTaskGetHandle(t.name);
         if (h != nullptr) {
             registerByHandle(h, t.name, t.stack);
+        }
+    }
+}
+
+void StackMonitor::registerLazyTasks() noexcept {
+    static constexpr KnownTask kLazy[] = {
+        {"wifi", 8192},
+    };
+    for (auto& t : kLazy) {
+        TaskHandle_t h = nullptr;
+        for (int attempt = 0; attempt < 5; ++attempt) {
+            h = xTaskGetHandle(t.name);
+            if (h != nullptr) {
+                registerByHandle(h, t.name, t.stack);
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+        if (h == nullptr) {
+            ESP_LOGW("stack_monitor", "Deferred task '%s' not found after 5 retries", t.name);
         }
     }
 }

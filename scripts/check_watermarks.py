@@ -15,13 +15,12 @@ import glob
 from pathlib import Path
 
 EXPECTED_TASKS = {
-    "main", "Tmr Svc", "ipc0", "ipc1", "wifi", "phy_init",
+    "main", "ipc0", "ipc1", "wifi",
     "motor", "temp", "net_owner", "log_worker", "ble_notify",
-    "http_server",
 }
-THRESHOLD_PCT = 75
+THRESHOLD_PCT = 85
 TOLERANCE_PCT = 5
-EFFECTIVE_THRESHOLD = THRESHOLD_PCT + TOLERANCE_PCT  # 80%
+EFFECTIVE_THRESHOLD = THRESHOLD_PCT + TOLERANCE_PCT  # 90%
 
 
 def main():

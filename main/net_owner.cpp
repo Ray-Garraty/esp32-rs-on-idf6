@@ -75,6 +75,8 @@ extern "C" void netTaskEntry(void* pvParameters) { // NOLINT(readability-functio
         }
     }
 
+    ecotiter::diag::StackMonitor::instance().registerLazyTasks();
+
     // Create ws_send_queue for log_worker → net_owner log forwarding (GR-14)
     gWsSendQueue = xQueueCreate(config::WS_SEND_QUEUE_DEPTH, sizeof(WsSendEntry));
     if (gWsSendQueue == nullptr) {
@@ -95,6 +97,8 @@ extern "C" void netTaskEntry(void* pvParameters) { // NOLINT(readability-functio
         ecotiter::diag::StackMonitor::instance().registerByHandle(
             logWorkerHandle, "log_worker", ecotiter::domain::LOG_WORKER_STACK);
     }
+    vTaskDelay(pdMS_TO_TICKS(100));
+    ecotiter::diag::StackMonitor::instance().logAllWatermarks();
 
     while (true) {
         esp_task_wdt_reset();
