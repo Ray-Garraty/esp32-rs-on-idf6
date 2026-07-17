@@ -12,6 +12,7 @@ idf_component_register(
         "src/motor/motion.cpp"
         "src/motor/sm_runners.cpp"
         "src/motor/homing.cpp"
+        "src/motor/motor_controller_impl.cpp"
         "src/temp_thread.cpp"
         "network/src/ble.cpp"
         "network/src/ble_notify_thread.cpp"

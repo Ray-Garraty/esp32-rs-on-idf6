@@ -6,6 +6,9 @@
 #include <cstring>
 
 #include "application/command.hpp"
+#include "application/dispatch.hpp"
+#include "application/motor_controller.hpp"
+#include "application/send_motor_command.hpp"
 #include "domain/calibration.hpp"
 #include "domain/memory.hpp"
 #include "domain/ols.hpp"
@@ -185,10 +188,7 @@ std::expected<CommandResponse, domain::AppError> handleRunCalibration(
     cmd.startCalSpeedSeq.freqs[i] = (freqs[i] > 0.0f)
         ? static_cast<uint16_t>(std::lround(freqs[i])) : 0;
   }
-  if (infrastructure::gMotorCmdQueue == nullptr) {
-    return makeErrorResponse("start_failed");
-  }
-  if (xQueueSend(infrastructure::gMotorCmdQueue, &cmd, pdMS_TO_TICKS(10)) != pdTRUE) {
+  if (!application::sendMotorCommand(cmd)) {
     return makeErrorResponse("start_failed");
   }
   return makeAckThenResponse();
@@ -196,15 +196,18 @@ std::expected<CommandResponse, domain::AppError> handleRunCalibration(
 
 std::expected<CommandResponse, domain::AppError> handleGetCalResult(
     ReadCalCb readCal) {
-  infrastructure::SmResult result{infrastructure::SmResult::Type::None, 0, 0.0f, {}, 0};
-  if (infrastructure::gSmResultQueue) {
-    xQueuePeek(infrastructure::gSmResultQueue, &result, 0);
+  auto* controller = application::getMotorController();
+  if (!controller) {
+    return makeErrorResponse("start_failed");
   }
+  auto resultOpt = controller->peekResult();
+  domain::SmResult result = resultOpt.value_or(
+      domain::SmResult{domain::SmResult::Type::None, 0, 0.0f, {}, 0});
   CommandResponse rsp;
   rsp.kind = ResponseKind::Single;
   size_t off = 0;
 
-  if (result.type == infrastructure::SmResult::Type::None) {
+  if (result.type == domain::SmResult::Type::None) {
     off = static_cast<size_t>(
         std::snprintf(rsp.body.data(), rsp.body.size(),
                       R"({"status":"ok","data":{"result":"no_result"}})"));
@@ -217,24 +220,24 @@ std::expected<CommandResponse, domain::AppError> handleGetCalResult(
                     R"({"status":"ok","data":{"result":"ok")"));
 
   switch (result.type) {
-    case infrastructure::SmResult::Type::RinseComplete:
+    case domain::SmResult::Type::RinseComplete:
       off += static_cast<size_t>(
           std::snprintf(rsp.body.data() + off, rsp.body.size() - off,
                         R"(,"resultType":"rinse")"));
       break;
-    case infrastructure::SmResult::Type::CalDoseComplete:
+    case domain::SmResult::Type::CalDoseComplete:
       off += static_cast<size_t>(
           std::snprintf(rsp.body.data() + off, rsp.body.size() - off,
                         R"(,"resultType":"cal_dose","stepsTaken":%ld)",
                         static_cast<long>(result.stepsTaken)));
       break;
-    case infrastructure::SmResult::Type::CalSpeedComplete:
+    case domain::SmResult::Type::CalSpeedComplete:
       off += static_cast<size_t>(
           std::snprintf(rsp.body.data() + off, rsp.body.size() - off,
                         R"(,"resultType":"cal_speed","speedMlMin":%.2f)",
                         static_cast<double>(result.measuredSpeedMlMin)));
       break;
-    case infrastructure::SmResult::Type::CalSpeedSeqComplete: {
+    case domain::SmResult::Type::CalSpeedSeqComplete: {
       off += static_cast<size_t>(
           std::snprintf(rsp.body.data() + off, rsp.body.size() - off,
                         R"(,"resultType":"cal_speed_seq","results":[)"));

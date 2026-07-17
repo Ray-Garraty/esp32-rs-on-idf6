@@ -82,64 +82,41 @@ TEST_CASE("handleCommandCore: unknown command returns 400", "[rest_api]") {
     REQUIRE(result.error() == 400);
 }
 
-TEST_CASE("handleValveGetCore: returns current valve state", "[rest_api]") {
-    // Set known state
+TEST_CASE("handleCommandCore: valve.getState returns current valve state", "[rest_api]") {
     gValvePosition.store(ValvePosition::Input, std::memory_order_release);
-
     memory::ResponseBuffer buf{};
-    auto result = handleValveGetCore(buf);
+    auto result = handleCommandCore(R"({"cmd":"valve.getState"})", buf);
     REQUIRE(result);
     REQUIRE(*result > 0);
-
     std::string_view sv(buf.data(), *result);
     auto j = json::parse(sv);
     REQUIRE(j["status"] == "ok");
     REQUIRE(j["data"]["position"] == "input");
 
-    // Change state and verify
     gValvePosition.store(ValvePosition::Output, std::memory_order_release);
-
-    result = handleValveGetCore(buf);
+    result = handleCommandCore(R"({"cmd":"valve.getState"})", buf);
     REQUIRE(result);
     sv = std::string_view(buf.data(), *result);
     j = json::parse(sv);
     REQUIRE(j["data"]["position"] == "output");
 }
 
-TEST_CASE("handleValvePostCore: set valve to input", "[rest_api]") {
-    gValvePosition.store(ValvePosition::Output, std::memory_order_release); // start at output
-
+TEST_CASE("handleCommandCore: valve.setPosition updates position", "[rest_api]") {
+    gValvePosition.store(ValvePosition::Output, std::memory_order_release);
     memory::ResponseBuffer buf{};
-    auto result = handleValvePostCore(R"({"position":"input"})", buf);
+    auto result = handleCommandCore(R"({"cmd":"valve.setPosition","position":"input"})", buf);
     REQUIRE(result);
     REQUIRE(*result > 0);
-
     std::string_view sv(buf.data(), *result);
     auto j = json::parse(sv);
     REQUIRE(j["status"] == "ok");
     REQUIRE(j["data"]["position"] == "input");
-
-    // Verify global was updated
     REQUIRE(gValvePosition.load(std::memory_order_acquire) == ValvePosition::Input);
 }
 
-TEST_CASE("handleValvePostCore: invalid position returns 400", "[rest_api]") {
+TEST_CASE("handleCommandCore: valve.setPosition invalid param returns error", "[rest_api]") {
     memory::ResponseBuffer buf{};
-    auto result = handleValvePostCore(R"({"position":"invalid"})", buf);
-    REQUIRE_FALSE(result);
-    REQUIRE(result.error() == 400);
-}
-
-TEST_CASE("handleValvePostCore: missing position returns 400", "[rest_api]") {
-    memory::ResponseBuffer buf{};
-    auto result = handleValvePostCore(R"({"foo":"bar"})", buf);
-    REQUIRE_FALSE(result);
-    REQUIRE(result.error() == 400);
-}
-
-TEST_CASE("handleValvePostCore: invalid JSON returns 400", "[rest_api]") {
-    memory::ResponseBuffer buf{};
-    auto result = handleValvePostCore("not json", buf);
+    auto result = handleCommandCore(R"({"cmd":"valve.setPosition","position":"invalid"})", buf);
     REQUIRE_FALSE(result);
     REQUIRE(result.error() == 400);
 }

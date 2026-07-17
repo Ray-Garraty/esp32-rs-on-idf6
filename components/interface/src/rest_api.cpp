@@ -10,103 +10,73 @@
 #include "domain/types.hpp"
 #include "nlohmann/json.hpp"
 
-namespace ecotiter::interface {
+namespace ecotiter::interface
+{
 
 // ---------------------------------------------------------------------------
 // Core logic helpers
 // ---------------------------------------------------------------------------
 
-std::expected<size_t, int> handlePingCore(
-    domain::memory::ResponseBuffer& buf) {
+std::expected<size_t, int> handlePingCore(domain::memory::ResponseBuffer& buf)
+{
     int n = std::snprintf(buf.data(), buf.size(), R"({"status":"ok"})");
-    if (n < 0) return std::unexpected(500);
+    if (n < 0)
+        return std::unexpected(500);
     return static_cast<size_t>(n);
 }
 
-std::expected<size_t, int> handleStatusCore(
-    domain::memory::ResponseBuffer& buf) {
+std::expected<size_t, int> handleStatusCore(domain::memory::ResponseBuffer& buf)
+{
     auto state = domain::gBuretteState.load(std::memory_order_acquire);
     bool volumeIsNull = (state == domain::BuretteState::Homing);
     size_t offset = 0;
     application::serializeStatusJson(
-        buf, offset,
-        state,
-        domain::gTempCX100.load(std::memory_order_acquire),
+        buf, offset, state, domain::gTempCX100.load(std::memory_order_acquire),
         domain::gValvePosition.load(std::memory_order_acquire),
         static_cast<float>(domain::gLastMv.load(std::memory_order_acquire)),
         domain::gDirection.load(std::memory_order_acquire),
         domain::gSpeed.load(std::memory_order_acquire),
         domain::gAccel.load(std::memory_order_acquire),
-        domain::gVolumeMl.load(std::memory_order_acquire),
-        volumeIsNull);
-    if (offset == 0) return std::unexpected(500);
+        domain::gVolumeMl.load(std::memory_order_acquire), volumeIsNull);
+    if (offset == 0)
+        return std::unexpected(500);
     return offset;
 }
 
-std::expected<size_t, int> handleCommandCore(
-    std::string_view body,
-    domain::memory::ResponseBuffer& buf) {
+std::expected<size_t, int> handleCommandCore(std::string_view body,
+                                             domain::memory::ResponseBuffer& buf)
+{
 
     auto cmd = application::parseCommand(body);
-    if (!cmd) {
+    if (!cmd)
+    {
         int n = std::snprintf(buf.data(), buf.size(),
-            R"({"status":"error","message":"invalid_params"})");
-        if (n < 0) return std::unexpected(500);
+                              R"({"status":"error","message":"invalid_params"})");
+        if (n < 0)
+            return std::unexpected(500);
         return std::unexpected(400);
     }
 
     auto rsp = application::dispatch(*cmd);
-    if (!rsp) {
-        int n = std::snprintf(buf.data(), buf.size(),
-            R"({"status":"error","message":"start_failed"})");
-        if (n < 0) return std::unexpected(500);
+    if (!rsp)
+    {
+        int n =
+            std::snprintf(buf.data(), buf.size(), R"({"status":"error","message":"start_failed"})");
+        if (n < 0)
+            return std::unexpected(500);
         return std::unexpected(500);
     }
 
     auto serialized = application::serializeToBuffer(*rsp, buf);
-    if (!serialized) {
+    if (!serialized)
+    {
         return std::unexpected(500);
     }
+    if (rsp->kind == application::ResponseKind::Error)
+    {
+        return std::unexpected(400);
+    }
     return *serialized;
-}
-
-std::expected<size_t, int> handleValveGetCore(
-    domain::memory::ResponseBuffer& buf) {
-    return handleCommandCore(R"({"cmd":"valve.getState"})", buf);
-}
-
-std::expected<size_t, int> handleValvePostCore(
-    std::string_view body,
-    domain::memory::ResponseBuffer& buf) {
-
-    auto j = nlohmann::json::parse(body, nullptr, false);
-    if (j.is_discarded()) {
-        std::snprintf(buf.data(), buf.size(),
-            R"({"status":"error","message":"invalid_json"})");
-        return std::unexpected(400);
-    }
-
-    auto it = j.find("position");
-    if (it == j.end() || !it->is_string()) {
-        std::snprintf(buf.data(), buf.size(),
-            R"({"status":"error","message":"missing_position"})");
-        return std::unexpected(400);
-    }
-
-    std::string posStr = it->get<std::string>();
-    if (posStr != "input" && posStr != "output") {
-        std::snprintf(buf.data(), buf.size(),
-            R"({"status":"error","message":"invalid_position"})");
-        return std::unexpected(400);
-    }
-
-    domain::memory::CommandBuffer cmdBuf{};
-    int n = std::snprintf(cmdBuf.data(), cmdBuf.size(),
-        R"({"cmd":"valve.setPosition","position":"%s"})", posStr.c_str());
-    if (n < 0) return std::unexpected(500);
-
-    return handleCommandCore(
-        std::string_view(cmdBuf.data(), static_cast<size_t>(n)), buf);
 }
 
 } // namespace ecotiter::interface
@@ -121,15 +91,16 @@ std::expected<size_t, int> handleValvePostCore(
 #include "freertos/task.h"
 
 #include "infrastructure/memory/psram_buffer.hpp"
-#include "infrastructure/motor_task.hpp"
 
 static constexpr auto TAG = "rest_api";
 
-esp_err_t ecotiter::interface::ping_handler(httpd_req_t* req) {
+esp_err_t ecotiter::interface::ping_handler(httpd_req_t* req)
+{
     ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
     auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
     auto result = handlePingCore(buf);
-    if (!result) {
+    if (!result)
+    {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "internal error");
         return ESP_FAIL;
     }
@@ -138,11 +109,13 @@ esp_err_t ecotiter::interface::ping_handler(httpd_req_t* req) {
     return ESP_OK;
 }
 
-esp_err_t ecotiter::interface::status_handler(httpd_req_t* req) {
+esp_err_t ecotiter::interface::status_handler(httpd_req_t* req)
+{
     ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
     auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
     auto result = handleStatusCore(buf);
-    if (!result) {
+    if (!result)
+    {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "internal error");
         return ESP_FAIL;
     }
@@ -151,13 +124,13 @@ esp_err_t ecotiter::interface::status_handler(httpd_req_t* req) {
     return ESP_OK;
 }
 
-esp_err_t ecotiter::interface::command_handler(httpd_req_t* req) {
+esp_err_t ecotiter::interface::command_handler(httpd_req_t* req)
+{
     domain::memory::CommandBuffer body{};
-    size_t bodyLen = std::min(
-        static_cast<size_t>(req->content_len),
-        body.size());
+    size_t bodyLen = std::min(static_cast<size_t>(req->content_len), body.size());
     int ret = httpd_req_recv(req, body.data(), bodyLen);
-    if (ret <= 0) {
+    if (ret <= 0)
+    {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad request");
         return ESP_FAIL;
     }
@@ -165,12 +138,12 @@ esp_err_t ecotiter::interface::command_handler(httpd_req_t* req) {
 
     auto sv = std::string_view(body.data(), bodyLen);
     auto cmd = application::parseCommand(sv);
-    if (!cmd) {
+    if (!cmd)
+    {
         const char* detail = "Protocol error";
         ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
         auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
-        std::snprintf(buf.data(), buf.size(),
-            R"({"status":"error","message":"%s"})", detail);
+        std::snprintf(buf.data(), buf.size(), R"({"status":"error","message":"%s"})", detail);
         httpd_resp_set_type(req, "application/json");
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_send(req, buf.data(), HTTPD_RESP_USE_STRLEN);
@@ -178,17 +151,20 @@ esp_err_t ecotiter::interface::command_handler(httpd_req_t* req) {
     }
 
     auto rsp = application::dispatch(*cmd);
-    if (!rsp) {
+    if (!rsp)
+    {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "dispatch failed");
         return ESP_FAIL;
     }
 
     // For synchronous commands (Single, Error), return immediately
-    if (rsp->kind != application::ResponseKind::AckThen) {
+    if (rsp->kind != application::ResponseKind::AckThen)
+    {
         ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _rspBuf{};
         auto& rspBuf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_rspBuf.data());
         auto serialized = application::serializeToBuffer(*rsp, rspBuf);
-        if (!serialized) {
+        if (!serialized)
+        {
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "serialize failed");
             return ESP_FAIL;
         }
@@ -197,48 +173,57 @@ esp_err_t ecotiter::interface::command_handler(httpd_req_t* req) {
         return ESP_OK;
     }
 
-    // AckThen: wait for result via queue
-    static constexpr TickType_t CMD_TIMEOUT_TICKS = pdMS_TO_TICKS(60000);
-    TickType_t startTick = xTaskGetTickCount();
-
-    while (true) {
-        TickType_t now = xTaskGetTickCount();
-        if (now - startTick >= CMD_TIMEOUT_TICKS) {
-            ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
-            auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
-            std::snprintf(buf.data(), buf.size(),
-                R"({"status":"error","message":"watchdog_timeout"})");
-            httpd_resp_set_type(req, "application/json");
-            httpd_resp_set_status(req, "408 Request Timeout");
-            httpd_resp_send(req, buf.data(), HTTPD_RESP_USE_STRLEN);
-            return ESP_OK;
-        }
-
-        infrastructure::SmResult result;
-        if (infrastructure::gSmResultQueue &&
-            xQueueReceive(infrastructure::gSmResultQueue, &result, pdMS_TO_TICKS(50)) == pdTRUE)
-        {
-            ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
-            auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
-            size_t off = application::formatSmResult(buf, rsp->id, result);
-
-            httpd_resp_set_type(req, "application/json");
-            if (off > 0 && off < buf.size()) {
-                httpd_resp_send(req, buf.data(), static_cast<ssize_t>(off));
-            } else {
-                httpd_resp_send(req, R"({"status":"error"})", HTTPD_RESP_USE_STRLEN);
-            }
-            return ESP_OK;
-        }
+    // AckThen: wait for result via motor controller (decouples from
+    // infrastructure globals — uses IMotorController interface)
+    auto* controller = application::getMotorController();
+    if (!controller)
+    {
+        ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
+        auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
+        std::snprintf(buf.data(), buf.size(),
+                      R"({"status":"error","message":"controller_unavailable"})");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_send(req, buf.data(), HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
     }
-}
 
-esp_err_t ecotiter::interface::valve_get_handler(httpd_req_t* req) {
+    auto result = controller->waitResult(60000);
+    if (result)
+    {
+        ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
+        auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
+        size_t off = application::formatSmResult(buf, rsp->id, *result);
+
+        httpd_resp_set_type(req, "application/json");
+        if (off > 0 && off < buf.size())
+        {
+            httpd_resp_send(req, buf.data(), static_cast<ssize_t>(off));
+        }
+        else
+        {
+            httpd_resp_send(req, R"({"status":"error"})", HTTPD_RESP_USE_STRLEN);
+        }
+        return ESP_OK;
+    }
+
+    // Timeout
     ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
     auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
-    auto result = handleCommandCore(
-        R"({"cmd":"valve.getState"})", buf);
-    if (!result) {
+    std::snprintf(buf.data(), buf.size(), R"({"status":"error","message":"watchdog_timeout"})");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "408 Request Timeout");
+    httpd_resp_send(req, buf.data(), HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+esp_err_t ecotiter::interface::valve_get_handler(httpd_req_t* req)
+{
+    ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
+    auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
+    auto result = handleCommandCore(R"({"cmd":"valve.getState"})", buf);
+    if (!result)
+    {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "internal error");
         return ESP_FAIL;
     }
@@ -247,20 +232,21 @@ esp_err_t ecotiter::interface::valve_get_handler(httpd_req_t* req) {
     return ESP_OK;
 }
 
-esp_err_t ecotiter::interface::valve_post_handler(httpd_req_t* req) {
+esp_err_t ecotiter::interface::valve_post_handler(httpd_req_t* req)
+{
     domain::memory::CommandBuffer body{};
-    size_t bodyLen = std::min(
-        static_cast<size_t>(req->content_len),
-        body.size());
+    size_t bodyLen = std::min(static_cast<size_t>(req->content_len), body.size());
     int ret = httpd_req_recv(req, body.data(), bodyLen);
-    if (ret <= 0) {
+    if (ret <= 0)
+    {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad request");
         return ESP_FAIL;
     }
     bodyLen = static_cast<size_t>(ret);
 
     auto j = nlohmann::json::parse(body.data(), body.data() + bodyLen, nullptr, false);
-    if (j.is_discarded()) {
+    if (j.is_discarded())
+    {
         httpd_resp_set_type(req, "application/json");
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_send(req, R"({"status":"error","message":"invalid_json"})",
@@ -268,7 +254,8 @@ esp_err_t ecotiter::interface::valve_post_handler(httpd_req_t* req) {
         return ESP_FAIL;
     }
     auto it = j.find("position");
-    if (it == j.end() || !it->is_string()) {
+    if (it == j.end() || !it->is_string())
+    {
         httpd_resp_set_type(req, "application/json");
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_send(req, R"({"status":"error","message":"missing_position"})",
@@ -276,7 +263,8 @@ esp_err_t ecotiter::interface::valve_post_handler(httpd_req_t* req) {
         return ESP_FAIL;
     }
     std::string posStr = it->get<std::string>();
-    if (posStr != "input" && posStr != "output") {
+    if (posStr != "input" && posStr != "output")
+    {
         httpd_resp_set_type(req, "application/json");
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_send(req, R"({"status":"error","message":"invalid_position"})",
@@ -286,21 +274,22 @@ esp_err_t ecotiter::interface::valve_post_handler(httpd_req_t* req) {
 
     domain::memory::CommandBuffer cmdBuf{};
     int n = std::snprintf(cmdBuf.data(), cmdBuf.size(),
-        R"({"cmd":"valve.setPosition","position":"%s"})", posStr.c_str());
-    if (n < 0) {
+                          R"({"cmd":"valve.setPosition","position":"%s"})", posStr.c_str());
+    if (n < 0)
+    {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "internal error");
         return ESP_FAIL;
     }
 
     ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _rspBuf{};
     auto& rspBuf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_rspBuf.data());
-    auto result = handleCommandCore(
-        std::string_view(cmdBuf.data(), static_cast<size_t>(n)), rspBuf);
-    if (!result) {
+    auto result =
+        handleCommandCore(std::string_view(cmdBuf.data(), static_cast<size_t>(n)), rspBuf);
+    if (!result)
+    {
         httpd_resp_set_type(req, "application/json");
         httpd_resp_set_status(req, "400 Bad Request");
-        httpd_resp_send(req, rspBuf.data(),
-            static_cast<ssize_t>(std::strlen(rspBuf.data())));
+        httpd_resp_send(req, rspBuf.data(), static_cast<ssize_t>(std::strlen(rspBuf.data())));
         return ESP_FAIL;
     }
 

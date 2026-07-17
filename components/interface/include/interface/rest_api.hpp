@@ -22,13 +22,6 @@ namespace ecotiter::interface {
     std::string_view body,
     domain::memory::ResponseBuffer& buf);
 
-[[nodiscard]] std::expected<size_t, int> handleValveGetCore(
-    domain::memory::ResponseBuffer& buf);
-
-[[nodiscard]] std::expected<size_t, int> handleValvePostCore(
-    std::string_view body,
-    domain::memory::ResponseBuffer& buf);
-
 } // namespace ecotiter::interface
 
 // ---------------------------------------------------------------------------

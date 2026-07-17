@@ -111,6 +111,4 @@ struct VolumeTracker {
     }
 };
 
-inline std::atomic<CalibrationData*> gCalCache{nullptr};
-
 } // namespace ecotiter::domain

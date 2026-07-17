@@ -1,5 +1,6 @@
 #include "infrastructure/motor_task.hpp"
 #include "infrastructure/drivers/tmc_uart.hpp"
+#include "infrastructure/cal_cache.hpp"
 #include "domain/calibration.hpp"
 
 // Non-null sentinel — xQueueSend stub always returns pdTRUE
@@ -18,7 +19,7 @@ static ecotiter::domain::CalibrationData s_testCal{
 };
 struct CalCacheInit {
     CalCacheInit() {
-        ecotiter::domain::gCalCache.store(&s_testCal, std::memory_order_release);
+        ecotiter::infrastructure::gCalCache.store(&s_testCal, std::memory_order_release);
     }
 };
 static CalCacheInit s_calInit;

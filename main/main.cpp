@@ -6,14 +6,16 @@
 #include "esp_log.h"
 #include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/task.h"
 #include "nvs_flash.h"
 
 #include "application/command.hpp"
 #include "application/dispatch.hpp"
+#include "application/motor_controller.hpp"
 #include "application/response.hpp"
 #include "application/scheduler.hpp"
+#include "application/state_machine.hpp"
 #include "diag/black_box.hpp"
 #include "diag/ffi_guard.hpp"
 #include "diag/heap_monitor.hpp"
@@ -21,23 +23,25 @@
 #include "diag/rtc_watchdog.hpp"
 #include "diag/stack_monitor.hpp"
 #include "diag/tick_watchdog.hpp"
-#include "infrastructure/config.hpp"
-#include "infrastructure/memory/psram_resource.hpp"
-#include "infrastructure/drivers/adc.hpp"
-#include "infrastructure/drivers/rgb_led.hpp"
-#include "infrastructure/motor_task.hpp"
-#include "infrastructure/network/ble.hpp"
-#include "infrastructure/network/wifi.hpp"
-#include "infrastructure/network/http_server.hpp"
-#include "infrastructure/temp_thread.hpp"
-#include "application/state_machine.hpp"
-#include "infrastructure/network/ble_notify_thread.hpp"
-#include "infrastructure/storage/nvs.hpp"
-#include "interface/broadcast.hpp"
-#include "version.h"
-#include "interface/serial.hpp"
+#include "domain/broadcast_helpers.hpp"
 #include "domain/calibration.hpp"
 #include "domain/log_buffer.hpp"
+#include "infrastructure/cal_cache.hpp"
+#include "infrastructure/config.hpp"
+#include "infrastructure/drivers/adc.hpp"
+#include "infrastructure/drivers/rgb_led.hpp"
+#include "infrastructure/memory/psram_resource.hpp"
+#include "infrastructure/motor_controller_impl.hpp"
+#include "infrastructure/motor_task.hpp"
+#include "infrastructure/network/ble.hpp"
+#include "infrastructure/network/ble_notify_thread.hpp"
+#include "infrastructure/network/http_server.hpp"
+#include "infrastructure/network/wifi.hpp"
+#include "infrastructure/storage/nvs.hpp"
+#include "infrastructure/temp_thread.hpp"
+#include "interface/broadcast.hpp"
+#include "interface/serial.hpp"
+#include "version.h"
 
 #include "gpio_config.hpp"
 #include "log_capture.hpp"
@@ -46,14 +50,19 @@
 using namespace ecotiter;
 
 // Manual JSON id extractor — avoids nlohmann dependency in main.cpp
-static uint64_t extractCmdId(const char* data) {
+static uint64_t extractCmdId(const char* data)
+{
     const char* p = std::strstr(data, "\"id\":");
-    if (!p) return 0;
+    if (!p)
+        return 0;
     p += 5;
-    while (*p == ' ' || *p == '\t') ++p;
-    if (*p < '0' || *p > '9') return 0;
+    while (*p == ' ' || *p == '\t')
+        ++p;
+    if (*p < '0' || *p > '9')
+        return 0;
     uint64_t val = 0;
-    while (*p >= '0' && *p <= '9') {
+    while (*p >= '0' && *p <= '9')
+    {
         val = val * 10 + static_cast<uint64_t>(*p - '0');
         ++p;
     }
@@ -78,17 +87,22 @@ static void logDramBeforeTask(const char* name, size_t stackSize)
 // ADC driver pointer for temp_thread — set in app_main after AdcDriver creation
 using ecotiter::infrastructure::drivers::gAdcDriver;
 
-static uint16_t adcSampleRead() {
-    if (gAdcDriver) {
+static uint16_t adcSampleRead()
+{
+    if (gAdcDriver)
+    {
         auto raw = gAdcDriver->readRaw();
-        if (raw) return *raw;
+        if (raw)
+            return *raw;
     }
     return 0;
 }
 
-extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexity) // reason: boot sequence 9 steps + event loop
+extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexity) // reason: boot
+                               // sequence 9 steps + event loop
 {
-    std::printf("BOOT OK: ecotiter v%s [%s] (git: %s)\n", ecotiter::app_version, ecotiter::build_date, ecotiter::git_hash);
+    std::printf("BOOT OK: ecotiter v%s [%s] (git: %s)\n", ecotiter::app_version,
+                ecotiter::build_date, ecotiter::git_hash);
     fflush(stdout);
 
     using namespace ecotiter;
@@ -97,9 +111,8 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
     fflush(stdout);
 
     // Initialize LogBuffer with PSRAM backing (before log hook!)
-    ecotiter::domain::LogBuffer::init(
-        ecotiter::domain::memory::LOG_BUF_ENTRIES,
-        &ecotiter::memory::psram_resource());
+    ecotiter::domain::LogBuffer::init(ecotiter::domain::memory::LOG_BUF_ENTRIES,
+                                      &ecotiter::memory::psram_resource());
 
     // Install ESP_LOG capture → LogBuffer (captures all subsequent ESP_LOGI/LOGW/LOGE calls)
     esp_log_set_vprintf(logVprintf);
@@ -112,16 +125,17 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
     domain::gBootProgress.store(domain::BootProgress::Nvs, std::memory_order_release);
     nvs_flash_init();
     infrastructure::storage::nvsInit();
-    domain::gStallGuardThreshold.store(
-        infrastructure::storage::stallguardReadThreshold(),
-        std::memory_order_release);
+    domain::gStallGuardThreshold.store(infrastructure::storage::stallguardReadThreshold(),
+                                       std::memory_order_release);
 
     // Populate NVS calibration cache once at boot (Fix 5)
     {
         auto bootCal = infrastructure::storage::calibrationRead();
-        if (bootCal) {
+        if (bootCal)
+        {
             // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) // reason: heap-allocated CalibrationData stored in gCalCache
-            domain::gCalCache.store(new domain::CalibrationData(*bootCal), std::memory_order_release);
+            infrastructure::gCalCache.store(new domain::CalibrationData(*bootCal),
+                                    std::memory_order_release);
         }
     }
 
@@ -183,8 +197,8 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
     domain::gBootProgress.store(domain::BootProgress::TempTask, std::memory_order_release);
     logDramBeforeTask("temp", domain::TEMP_THREAD_STACK);
     BaseType_t tt = xTaskCreate(tempTaskEntry, "temp",
-                                domain::TEMP_THREAD_STACK / sizeof(configSTACK_DEPTH_TYPE),
-                                nullptr, 1, nullptr);
+                                domain::TEMP_THREAD_STACK / sizeof(configSTACK_DEPTH_TYPE), nullptr,
+                                1, nullptr);
     {
         char dbg[64];
         std::snprintf(dbg, sizeof(dbg), "DBG: xTaskCreate temp returned=%d\n", (int)tt);
@@ -212,7 +226,9 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
     fflush(stdout);
     domain::gBootProgress.store(domain::BootProgress::NetOwner, std::memory_order_release);
     logDramBeforeTask("net_owner", domain::NET_OWNER_STACK);
-    if (!diag::HeapSnapshot::assertCanAllocate(domain::NET_OWNER_STACK + config::DRAM_SAFETY_MARGIN)) {
+    if (!diag::HeapSnapshot::assertCanAllocate(domain::NET_OWNER_STACK +
+                                               config::DRAM_SAFETY_MARGIN))
+    {
         ESP_LOGW(TAG, "Low DRAM before net_owner task creation");
     }
     NetTaskParams netParams{&bleManager};
@@ -232,8 +248,18 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
 
     ecotiter::diag::print_heap_stats();
 
+    // Instantiate motor controller (wraps gMotorCmdQueue / gSmResultQueue globals)
+    // Must be done after motor task creates the queues but before dispatch uses them.
+    {
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) // reason: heap-allocated
+        auto* mc = new infrastructure::MotorControllerImpl();
+        application::setMotorController(mc);
+        ESP_LOGI(TAG, "MotorControllerImpl created and registered with dispatch");
+    }
+
     diag::FfiGuard guard(config::FFI_BOOT_SEQUENCE);
-    infrastructure::drivers::AdcDriver adc(static_cast<adc_unit_t>(config::ADC_UNIT), static_cast<adc_channel_t>(config::ADC_CHANNEL));
+    infrastructure::drivers::AdcDriver adc(static_cast<adc_unit_t>(config::ADC_UNIT),
+                                           static_cast<adc_channel_t>(config::ADC_CHANNEL));
     gAdcDriver = &adc;
     ecotiter::application::setAdcSampleReadCb(adcSampleRead);
 
@@ -254,7 +280,8 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
             }
             serial.write({buf.data(), len});
             // Also send over BLE if connected (non-blocking queue push)
-            if (bleManager.notifyQueue()) {
+            if (bleManager.notifyQueue())
+            {
                 ecotiter::infrastructure::network::BleNotifyItem item;
                 size_t copyLen = std::min(len, sizeof(item.data));
                 std::memcpy(item.data, buf.data(), copyLen);
@@ -283,35 +310,32 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
 
             if (scheduler.shouldBroadcast())
             {
-                auto brtState = ecotiter::domain::gBuretteState.load(std::memory_order_acquire);
-                bool motorMoving = brtState != ecotiter::domain::BuretteState::Idle;
-                ecotiter::domain::gMotorIsMoving.store(motorMoving, std::memory_order_release);
-                    ecotiter::domain::gSpeedMlMin.store(
-                    ecotiter::domain::gSpeed.load(std::memory_order_acquire) > 0 ? config::BROADCAST_SPEED_WHEN_MOVING_ML_MIN : 0.0f,
-                    std::memory_order_release);
+                domain::updateBroadcastState();
 
                 ecotiter::interface::BroadcastEvent evt{
                     .tick = ecotiter::application::gTick.load(std::memory_order_acquire),
                     .tempCX100 = ecotiter::domain::gTempCX100.load(std::memory_order_acquire),
                     .mv = ecotiter::domain::gLastMv.load(std::memory_order_acquire),
                     .vlv = ecotiter::domain::gValvePosition.load(std::memory_order_acquire),
-                    .brt = brtState,
+                    .brt = ecotiter::domain::gBuretteState.load(std::memory_order_acquire),
                     .volumeMl = ecotiter::domain::gVolumeMl.load(std::memory_order_acquire),
-                    .speedMlMin = motorMoving
-                        ? ecotiter::domain::gSpeedMlMin.load(std::memory_order_acquire)
-                        : 0.0f,
+                    .speedMlMin =
+                        ecotiter::domain::gSpeedMlMin.load(std::memory_order_acquire),
                     .limitFull = ecotiter::domain::gStopFull.load(std::memory_order_acquire),
                     .limitEmpty = ecotiter::domain::gStopEmpty.load(std::memory_order_acquire),
-                    .usbSerialConnected = ecotiter::domain::gUsbHandshakeReceived.load(std::memory_order_acquire),
+                    .usbSerialConnected =
+                        ecotiter::domain::gUsbHandshakeReceived.load(std::memory_order_acquire),
                     .bleConnected = bleManager.isConnected(),
                     .stepperDrvConnected = true,
                     .stepperDrvOtpw = false,
                     .stepperDrvOt = false,
                     .stallGuardValue = 0,
                     .isStalled = false,
-                    .stallGuardThreshold = ecotiter::domain::gStallGuardThreshold.load(std::memory_order_acquire),
-                    .motorIsMoving = motorMoving,
-                    .stepsTaken = ecotiter::domain::gDispensedSteps.load(std::memory_order_acquire)};
+                    .stallGuardThreshold =
+                        ecotiter::domain::gStallGuardThreshold.load(std::memory_order_acquire),
+                    .motorIsMoving = ecotiter::domain::gMotorIsMoving.load(std::memory_order_acquire),
+                    .stepsTaken =
+                        ecotiter::domain::gDispensedSteps.load(std::memory_order_acquire)};
 
                 // Compact format → Serial + BLE
                 {
@@ -321,13 +345,18 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
                     {
                         serial.write(sv);
                         serial.write({"\n", 1});
-                        if (bleManager.notifyQueue()) {
+                        if (bleManager.notifyQueue())
+                        {
                             ecotiter::infrastructure::network::BleNotifyItem item;
-                            std::memcpy(item.data, sv.data(), std::min(sv.size(), sizeof(item.data)));
-                            if (sv.size() < sizeof(item.data)) {
+                            std::memcpy(item.data, sv.data(),
+                                        std::min(sv.size(), sizeof(item.data)));
+                            if (sv.size() < sizeof(item.data))
+                            {
                                 item.data[sv.size()] = '\n';
                                 item.len = sv.size() + 1;
-                            } else {
+                            }
+                            else
+                            {
                                 item.len = sv.size();
                             }
                             xQueueSend(bleManager.notifyQueue(), &item, 0);
@@ -341,7 +370,8 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
                     auto sv = ecotiter::interface::serializeBroadcastExtended(evt, buf);
                     if (!sv.empty())
                     {
-                        if (gWsBroadcastQueue) {
+                        if (gWsBroadcastQueue)
+                        {
                             WsBroadcastEntry entry;
                             size_t copyLen = std::min(sv.size(), sizeof(entry.data));
                             std::memcpy(entry.data, sv.data(), copyLen);
@@ -381,13 +411,13 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
                 if (newLedMode != currentLedMode || newLedError != currentLedError)
                 {
                     char dbg[80];
-                    std::snprintf(dbg, sizeof(dbg), "DBG: LED %d->%d err=%d isConnected=%d gBleErr=%d",
-                                  static_cast<int>(currentLedMode),
-                                  static_cast<int>(newLedMode),
-                                  static_cast<int>(newLedError),
-                                  static_cast<int>(bleManager.isConnected()),
-                                  static_cast<int>(domain::gBleError.load(std::memory_order_acquire)));
-                    puts(dbg); fflush(stdout);
+                    std::snprintf(
+                        dbg, sizeof(dbg), "DBG: LED %d->%d err=%d isConnected=%d gBleErr=%d",
+                        static_cast<int>(currentLedMode), static_cast<int>(newLedMode),
+                        static_cast<int>(newLedError), static_cast<int>(bleManager.isConnected()),
+                        static_cast<int>(domain::gBleError.load(std::memory_order_acquire)));
+                    puts(dbg);
+                    fflush(stdout);
                     currentLedMode = newLedMode;
                     currentLedError = newLedError;
                     rgbLed.setTransportMode(currentLedMode, currentLedError);
@@ -395,11 +425,16 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
             }
 
             // Update transport state in appStateMachine
-            if (domain::gUsbHandshakeReceived.load(std::memory_order_acquire)) {
+            if (domain::gUsbHandshakeReceived.load(std::memory_order_acquire))
+            {
                 appStateMachine.setTransportState(application::TransportState::UsbActive);
-            } else if (bleManager.isConnected()) {
+            }
+            else if (bleManager.isConnected())
+            {
                 appStateMachine.setTransportState(application::TransportState::BleConnected);
-            } else {
+            }
+            else
+            {
                 appStateMachine.setTransportState(application::TransportState::BleDisconnected);
             }
 
@@ -421,14 +456,15 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
                             // Save cmd id for result correlation
                             if (rsp->kind == ecotiter::application::ResponseKind::AckThen)
                             {
-                                ecotiter::domain::gLastCmdId.store(
-                                    cmd->id, std::memory_order_release);
+                                ecotiter::domain::gLastCmdId.store(cmd->id,
+                                                                   std::memory_order_release);
                             }
                             sendResponse(*rsp);
                         }
                         else
                         {
-                            sendResponse(ecotiter::application::makeErrorResponse("dispatch failed"));
+                            sendResponse(
+                                ecotiter::application::makeErrorResponse("dispatch failed"));
                         }
                     }
                     else
@@ -457,8 +493,7 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
                     {
                         if (rsp->kind == ecotiter::application::ResponseKind::AckThen)
                         {
-                            ecotiter::domain::gLastCmdId.store(
-                                cmd->id, std::memory_order_release);
+                            ecotiter::domain::gLastCmdId.store(cmd->id, std::memory_order_release);
                         }
                         sendResponse(*rsp);
                     }
@@ -475,30 +510,36 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
                 }
             }
 
-        {
-            infrastructure::SmResult smResult;
-            if (infrastructure::gSmResultQueue &&
-                xQueueReceive(infrastructure::gSmResultQueue, &smResult, 0) == pdTRUE)
             {
-                uint64_t resultId = ecotiter::domain::gLastCmdId.load(std::memory_order_acquire);
-
-                ecotiter::domain::memory::ResponseBuffer buf{};
-                size_t off = ecotiter::application::formatSmResult(buf, resultId, smResult);
-
-                if (off > 0 && off < buf.size())
+                auto* controller = ecotiter::application::getMotorController();
+                if (controller)
                 {
-                    buf[off++] = '\n';
-                    serial.write({buf.data(), off});
-                    if (bleManager.notifyQueue()) {
-                        ecotiter::infrastructure::network::BleNotifyItem item;
-                        size_t copyLen = std::min(off, sizeof(item.data));
-                        std::memcpy(item.data, buf.data(), copyLen);
-                        item.len = copyLen;
-                        xQueueSend(bleManager.notifyQueue(), &item, 0);
+                    auto smResultOpt = controller->waitResult(0);  // non-blocking
+                    if (smResultOpt.has_value())
+                    {
+                        auto& smResult = *smResultOpt;
+                        uint64_t resultId =
+                            ecotiter::domain::gLastCmdId.load(std::memory_order_acquire);
+
+                        ecotiter::domain::memory::ResponseBuffer buf{};
+                        size_t off = ecotiter::application::formatSmResult(buf, resultId, smResult);
+
+                        if (off > 0 && off < buf.size())
+                        {
+                            buf[off++] = '\n';
+                            serial.write({buf.data(), off});
+                            if (bleManager.notifyQueue())
+                            {
+                                ecotiter::infrastructure::network::BleNotifyItem item;
+                                size_t copyLen = std::min(off, sizeof(item.data));
+                                std::memcpy(item.data, buf.data(), copyLen);
+                                item.len = copyLen;
+                                xQueueSend(bleManager.notifyQueue(), &item, 0);
+                            }
+                        }
                     }
                 }
             }
-        }
 
         } // TickWatchdog scope end
 

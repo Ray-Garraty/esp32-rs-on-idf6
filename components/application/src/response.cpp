@@ -4,18 +4,18 @@
 
 #include "domain/calibration.hpp"
 #include "infrastructure/storage/nvs.hpp"
-#include "infrastructure/motor_task.hpp"
+#include "domain/sm_result.hpp"
 
 namespace ecotiter::application {
 
 size_t formatSmResult(
     domain::memory::ResponseBuffer& buf,
     uint64_t resultId,
-    const infrastructure::SmResult& smResult)
+    const domain::SmResult& smResult)
 {
     size_t off = 0;
 
-    if (smResult.type == infrastructure::SmResult::Type::None && smResult.stepsTaken > 0)
+    if (smResult.type == domain::SmResult::Type::None && smResult.stepsTaken > 0)
     {
         auto cal = infrastructure::storage::calibrationRead();
         float volDispensed = cal
@@ -27,14 +27,14 @@ size_t formatSmResult(
                 static_cast<unsigned long long>(resultId),
                 static_cast<double>(volDispensed)));
     }
-    else if (smResult.type == infrastructure::SmResult::Type::RinseComplete)
+    else if (smResult.type == domain::SmResult::Type::RinseComplete)
     {
         off = static_cast<size_t>(
             std::snprintf(buf.data(), buf.size(),
                 R"({"id":%llu,"status":"ok","data":{"cycles_completed":1}})",
                 static_cast<unsigned long long>(resultId)));
     }
-    else if (smResult.type == infrastructure::SmResult::Type::CalDoseComplete)
+    else if (smResult.type == domain::SmResult::Type::CalDoseComplete)
     {
         auto cal = infrastructure::storage::calibrationRead();
         float volDispensed = cal
@@ -46,7 +46,7 @@ size_t formatSmResult(
                 static_cast<unsigned long long>(resultId),
                 static_cast<double>(volDispensed)));
     }
-    else if (smResult.type == infrastructure::SmResult::Type::CalSpeedComplete)
+    else if (smResult.type == domain::SmResult::Type::CalSpeedComplete)
     {
         off = static_cast<size_t>(
             std::snprintf(buf.data(), buf.size(),
@@ -54,14 +54,14 @@ size_t formatSmResult(
                 static_cast<unsigned long long>(resultId),
                 static_cast<double>(smResult.measuredSpeedMlMin)));
     }
-    else if (smResult.type == infrastructure::SmResult::Type::CalSpeedSeqComplete)
+    else if (smResult.type == domain::SmResult::Type::CalSpeedSeqComplete)
     {
         off = static_cast<size_t>(
             std::snprintf(buf.data(), buf.size(),
                 R"({"id":%llu,"status":"ok","data":{"status":"complete"}})",
                 static_cast<unsigned long long>(resultId)));
     }
-    else if (smResult.type == infrastructure::SmResult::Type::Error)
+    else if (smResult.type == domain::SmResult::Type::Error)
     {
         off = static_cast<size_t>(
             std::snprintf(buf.data(), buf.size(),

@@ -3,7 +3,9 @@
 #include <cmath>
 
 #include "application/command.hpp"
+#include "application/send_motor_command.hpp"
 #include "domain/calibration.hpp"
+#include "infrastructure/cal_cache.hpp"
 #include "domain/cal_run_planner.hpp"
 #include "domain/types.hpp"
 #include "infrastructure/config.hpp"
@@ -11,19 +13,9 @@
 #include "infrastructure/storage/nvs.hpp"
 
 namespace ecotiter::application::handlers::burette_ops {
-namespace {
-
-bool sendMotorCommand(infrastructure::MotorCommand cmd) {
-  if (infrastructure::gMotorCmdQueue == nullptr) return false;
-  return xQueueSend(infrastructure::gMotorCmdQueue, &cmd, 0) == pdTRUE;
-}
-
-} // anonymous namespace
 
 std::expected<CommandResponse, domain::AppError> handleFill() {
-  domain::gBuretteState.store(domain::BuretteState::Filling, std::memory_order_release);
-
-  auto* cached = domain::gCalCache.load(std::memory_order_acquire);
+  auto* cached = infrastructure::gCalCache.load(std::memory_order_acquire);
   if (!cached) return makeErrorResponse("start_failed");
   auto& cal = *cached;
 
@@ -36,16 +28,14 @@ std::expected<CommandResponse, domain::AppError> handleFill() {
   cmd.direction = domain::Direction::LiqIn;
   cmd.speedHz = domain::gSpeed.load(std::memory_order_acquire);
   cmd.accelHzPerS = domain::gAccel.load(std::memory_order_acquire);
-  if (!sendMotorCommand(cmd)) {
+  if (!application::sendMotorCommand(cmd)) {
       return makeErrorResponse("busy");
   }
   return makeAckThenResponse();
 }
 
 std::expected<CommandResponse, domain::AppError> handleEmpty() {
-  domain::gBuretteState.store(domain::BuretteState::Emptying, std::memory_order_release);
-
-  auto* cached = domain::gCalCache.load(std::memory_order_acquire);
+  auto* cached = infrastructure::gCalCache.load(std::memory_order_acquire);
   if (!cached) return makeErrorResponse("start_failed");
   auto& cal = *cached;
 
@@ -60,7 +50,7 @@ std::expected<CommandResponse, domain::AppError> handleEmpty() {
   cmd.direction = domain::Direction::LiqOut;
   cmd.speedHz = domain::gSpeed.load(std::memory_order_acquire);
   cmd.accelHzPerS = domain::gAccel.load(std::memory_order_acquire);
-  if (!sendMotorCommand(cmd)) {
+  if (!application::sendMotorCommand(cmd)) {
       return makeErrorResponse("busy");
   }
   return makeAckThenResponse();
@@ -72,7 +62,7 @@ std::expected<CommandResponse, domain::AppError> handleDoseVolume(
   if (!volume) {
     return makeErrorResponse("invalid_params");
   }
-  auto* cached = domain::gCalCache.load(std::memory_order_acquire);
+  auto* cached = infrastructure::gCalCache.load(std::memory_order_acquire);
   if (!cached) return makeErrorResponse("start_failed");
   auto& cal = *cached;
 
@@ -87,8 +77,6 @@ std::expected<CommandResponse, domain::AppError> handleDoseVolume(
     speedHz = domain::speedMlMinToHz(domain::MlMin{*speedMlMin}, cal).value;
   }
 
-  domain::gBuretteState.store(domain::BuretteState::Dosing, std::memory_order_release);
-
   int32_t steps = static_cast<int32_t>(std::lround(plan.firstCycleVolMl * cal.stepsPerMl));
   domain::gDirection.store(domain::Direction::LiqIn, std::memory_order_release);
 
@@ -98,7 +86,7 @@ std::expected<CommandResponse, domain::AppError> handleDoseVolume(
   cmd.direction = domain::Direction::LiqIn;
   cmd.speedHz = speedHz;
   cmd.accelHzPerS = domain::gAccel.load(std::memory_order_acquire);
-  if (!sendMotorCommand(cmd)) {
+  if (!application::sendMotorCommand(cmd)) {
       return makeErrorResponse("busy");
   }
 
@@ -110,16 +98,14 @@ std::expected<CommandResponse, domain::AppError> handleRinse(
   if (!cycles || *cycles == 0) {
     return makeErrorResponse("invalid_params");
   }
-  auto* cached = domain::gCalCache.load(std::memory_order_acquire);
+  auto* cached = infrastructure::gCalCache.load(std::memory_order_acquire);
   if (!cached) return makeErrorResponse("start_failed");
-
-  domain::gBuretteState.store(domain::BuretteState::Rinsing, std::memory_order_release);
 
   infrastructure::MotorCommand cmd{};
   cmd.type = infrastructure::MotorCommandType::StartRinse;
   cmd.startRinse.cycles = static_cast<uint8_t>(*cycles);
   cmd.startRinse.speedMlMin = config::RINSE_DEFAULT_SPEED_ML_MIN;
-  if (!sendMotorCommand(cmd)) {
+  if (!application::sendMotorCommand(cmd)) {
       return makeErrorResponse("busy");
   }
   return makeAckThenResponse();
@@ -133,7 +119,7 @@ std::expected<CommandResponse, domain::AppError> handleCalRun(
     return makeErrorResponse("invalid_params");
   }
 
-  auto* cached = domain::gCalCache.load(std::memory_order_acquire);
+  auto* cached = infrastructure::gCalCache.load(std::memory_order_acquire);
   if (!cached) return makeErrorResponse("start_failed");
   auto& cal = *cached;
 
@@ -163,13 +149,11 @@ std::expected<CommandResponse, domain::AppError> handleCalRun(
     return makeErrorResponse(reason);
   }
 
-  domain::gBuretteState.store(domain::BuretteState::Dosing, std::memory_order_release);
-
   if (plan.action == domain::sm::CalRunAction::CalDose) {
     infrastructure::MotorCommand cmd{};
     cmd.type = infrastructure::MotorCommandType::StartCalDose;
     cmd.startCalDose.speedMlMin = plan.speedMlMin;
-    if (!sendMotorCommand(cmd)) {
+    if (!application::sendMotorCommand(cmd)) {
         return makeErrorResponse("busy");
     }
   } else {
@@ -177,7 +161,7 @@ std::expected<CommandResponse, domain::AppError> handleCalRun(
     cmd.type = infrastructure::MotorCommandType::StartCalSpeed;
     cmd.startCalSpeed.speedMlMin = plan.speedMlMin;
     cmd.startCalSpeed.testFreqHz = plan.freqHz;
-    if (!sendMotorCommand(cmd)) {
+    if (!application::sendMotorCommand(cmd)) {
         return makeErrorResponse("busy");
     }
   }
@@ -186,11 +170,9 @@ std::expected<CommandResponse, domain::AppError> handleCalRun(
 }
 
 std::expected<CommandResponse, domain::AppError> handleStop() {
-  domain::gBuretteState.store(domain::BuretteState::Stopping,
-                              std::memory_order_release);
   infrastructure::MotorCommand cmd{};
   cmd.type = infrastructure::MotorCommandType::Stop;
-  if (!sendMotorCommand(cmd)) {
+  if (!application::sendMotorCommand(cmd)) {
       return makeErrorResponse("busy");
   }
   return makeSingleResponse(
@@ -202,7 +184,7 @@ std::expected<CommandResponse, domain::AppError> handleEmergencyStop() {
   domain::gStopFull.store(true, std::memory_order_release);
   infrastructure::MotorCommand cmd{};
   cmd.type = infrastructure::MotorCommandType::EmergencyStop;
-  if (!sendMotorCommand(cmd)) {
+  if (!application::sendMotorCommand(cmd)) {
       return makeErrorResponse("busy");
   }
   return makeSingleResponse(
@@ -228,7 +210,7 @@ std::expected<CommandResponse, domain::AppError> handleMoveSteps(
   infrastructure::MotorCommand cmd{};
   cmd.type = infrastructure::MotorCommandType::MoveSteps;
   cmd.steps = steps->value;
-  if (!sendMotorCommand(cmd)) {
+  if (!application::sendMotorCommand(cmd)) {
       return makeErrorResponse("busy");
   }
   return makeAckThenResponse();
@@ -243,7 +225,7 @@ std::expected<CommandResponse, domain::AppError> handleSetDirection(
   infrastructure::MotorCommand cmd{};
   cmd.type = infrastructure::MotorCommandType::SetDirection;
   cmd.direction = *dir;
-  if (!sendMotorCommand(cmd)) {
+  if (!application::sendMotorCommand(cmd)) {
       return makeErrorResponse("busy");
   }
   return makeAckThenResponse();
@@ -258,7 +240,7 @@ std::expected<CommandResponse, domain::AppError> handleSetSpeed(
   infrastructure::MotorCommand cmd{};
   cmd.type = infrastructure::MotorCommandType::SetSpeed;
   cmd.speedHz = *speedHz;
-  if (!sendMotorCommand(cmd)) {
+  if (!application::sendMotorCommand(cmd)) {
       return makeErrorResponse("busy");
   }
   return makeAckThenResponse();
@@ -273,7 +255,7 @@ std::expected<CommandResponse, domain::AppError> handleSetAccel(
   infrastructure::MotorCommand cmd{};
   cmd.type = infrastructure::MotorCommandType::SetAccel;
   cmd.accelHzPerS = *accelSteps;
-  if (!sendMotorCommand(cmd)) {
+  if (!application::sendMotorCommand(cmd)) {
       return makeErrorResponse("busy");
   }
   return makeAckThenResponse();

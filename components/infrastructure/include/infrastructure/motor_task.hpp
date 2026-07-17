@@ -4,12 +4,17 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
+#include "domain/sm_result.hpp"
 #include "domain/types.hpp"
 #include "infrastructure/drivers/tmc_uart.hpp"
 
 extern "C" void motorTaskEntry(void* pvParameters);
 
 namespace ecotiter::infrastructure {
+
+// Backward-compatible alias — SmResult moved to domain layer for SRP.
+// Remove this alias once all downstream code is migrated to domain::SmResult.
+using SmResult = domain::SmResult;
 
 enum class MotorCommandType : uint8_t {
     MoveSteps,
@@ -19,6 +24,7 @@ enum class MotorCommandType : uint8_t {
     SetDirection,
     SetSpeed,
     SetAccel,
+    SetStallThreshold,
     StartRinse,
     StartCalDose,
     StartCalSpeed,
@@ -50,25 +56,11 @@ struct MotorCommand {
     domain::Direction direction;
     uint32_t speedHz;
     uint32_t accelHzPerS;
+    uint8_t stallThreshold;
     StartRinseParams startRinse;
     StartCalDoseParams startCalDose;
     StartCalSpeedParams startCalSpeed;
     StartCalSpeedSeqParams startCalSpeedSeq;
-};
-
-struct SmResult {
-    enum class Type : uint8_t {
-        None,
-        RinseComplete,
-        CalDoseComplete,
-        CalSpeedComplete,
-        CalSpeedSeqComplete,
-        Error
-    } type;
-    int32_t stepsTaken;
-    float measuredSpeedMlMin;
-    float results[3];
-    int resultCount;
 };
 
 extern QueueHandle_t gMotorCmdQueue;

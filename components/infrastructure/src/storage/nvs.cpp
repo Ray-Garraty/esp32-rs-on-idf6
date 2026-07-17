@@ -2,6 +2,7 @@
 #include "infrastructure/config.hpp"
 #include "infrastructure/drivers/adc.hpp"
 #include "domain/calibration.hpp"
+#include "infrastructure/cal_cache.hpp"
 #include "esp_log.h"
 
 #include <bit>
@@ -260,7 +261,7 @@ domain::Result<domain::CalibrationData, domain::ResourceError> calibrationRead()
         cal.maxFreqHz = (r && r->has_value()) ? static_cast<uint16_t>(r->value() & 0xFFFF) : domain::CalibrationData::kDefaultMaxFreqHz;
     }
     // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) // reason: NVS C API returns raw handle pointers
-    auto* old = domain::gCalCache.exchange(new domain::CalibrationData(cal));
+    auto* old = infrastructure::gCalCache.exchange(new domain::CalibrationData(cal));
     // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) // reason: NVS C API returns raw handle pointers
     delete old;
     return cal;
@@ -283,7 +284,7 @@ domain::Result<void, domain::ResourceError> calibrationWrite(const domain::Calib
     auto r6 = nvs.setI32(config::NVS_KEY_CAL_DATE, 0);
     if (!r6) return std::unexpected(r6.error());
     // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) // reason: NVS C API returns raw handle pointers
-    auto* old = domain::gCalCache.exchange(new domain::CalibrationData(cal));
+    auto* old = infrastructure::gCalCache.exchange(new domain::CalibrationData(cal));
     // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) // reason: NVS C API returns raw handle pointers
     delete old;
     return {};

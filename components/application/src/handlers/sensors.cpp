@@ -8,13 +8,18 @@
 #include <limits>
 
 #include "application/command.hpp"
+#include "application/dispatch.hpp"
+#include "application/motor_controller.hpp"
 #include "domain/memory.hpp"
+#include "esp_log.h"
 #include "infrastructure/motor_task.hpp"
 #include "infrastructure/storage/nvs.hpp"
 #include "infrastructure/config.hpp"
 
 namespace ecotiter::application::handlers::sensors {
 namespace {
+
+static constexpr auto TAG = "sensors_hdl";
 
 // ── Pending ADC calibration data ──────────────────────────────────
 // Holds up to 5 measurement points and computed (but unsaved) coefficients.
@@ -297,11 +302,14 @@ std::expected<CommandResponse, domain::AppError> handleStallGuardGet(
     uint8_t threshold) {
   (void)threshold;
   uint32_t sgResult = 0;
-  std::ignore = infrastructure::gTmcUart.readRegister(
-      infrastructure::drivers::TMC_REG_SG_RESULT, sgResult);
   uint32_t drvStatus = 0;
-  std::ignore = infrastructure::gTmcUart.readRegister(
-      infrastructure::drivers::TMC_REG_DRV_STATUS, drvStatus);
+  auto* controller = application::getMotorController();
+  if (controller) {
+    controller->readTmcRegister(
+        infrastructure::drivers::TMC_REG_SG_RESULT, sgResult);
+    controller->readTmcRegister(
+        infrastructure::drivers::TMC_REG_DRV_STATUS, drvStatus);
+  }
   uint8_t currentThreshold = domain::gStallGuardThreshold.load(std::memory_order_acquire);
   CommandResponse rsp;
   rsp.kind = ResponseKind::Single;
@@ -321,8 +329,16 @@ std::expected<CommandResponse, domain::AppError> handleStallGuardSetThreshold(
     return makeErrorResponse("stallGuard.setThreshold requires 'threshold' param");
   }
   domain::gStallGuardThreshold.store(*threshold, std::memory_order_release);
-  std::ignore = infrastructure::gTmcUart.writeRegister(
-      infrastructure::drivers::TMC_REG_SGTHRS, *threshold);
+
+  // Route StallGuard threshold write through motor task to avoid
+  // race condition with motor task accessing gTmcUart concurrently.
+  infrastructure::MotorCommand cmd{};
+  cmd.type = infrastructure::MotorCommandType::SetStallThreshold;
+  cmd.stallThreshold = *threshold;
+  if (xQueueSend(infrastructure::gMotorCmdQueue, &cmd, 0) != pdTRUE) {
+    ESP_LOGW(TAG, "motor cmd queue full, stall threshold will be applied on next boot");
+  }
+
   std::ignore = infrastructure::storage::stallguardWriteThreshold(*threshold);
   CommandResponse rsp;
   rsp.kind = ResponseKind::Single;

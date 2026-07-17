@@ -168,6 +168,15 @@ extern "C" void motorTaskEntry(void* pvParameters) { // NOLINT(readability-funct
                 domain::gAccel.store(cmd.accelHzPerS, std::memory_order_release);
                 break;
 
+            case MotorCommandType::SetStallThreshold:
+                domain::gStallGuardThreshold.store(cmd.stallThreshold,
+                                                   std::memory_order_release);
+                std::ignore = gTmcUart.writeRegister(drivers::TMC_REG_SGTHRS,
+                                                     cmd.stallThreshold);
+                ESP_LOGI(TAG, "StallGuard threshold set to %u",
+                         static_cast<unsigned>(cmd.stallThreshold));
+                break;
+
             case MotorCommandType::StartRinse: {
                 auto p = cmd.startRinse;
                 ESP_LOGI(TAG, "StartRinse: %u cycles", p.cycles);

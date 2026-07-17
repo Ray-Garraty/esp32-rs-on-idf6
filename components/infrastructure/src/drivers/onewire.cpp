@@ -4,8 +4,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include <limits>
-
 static constexpr auto TAG = "onewire";
 
 namespace ecotiter::infrastructure::drivers {
@@ -93,7 +91,6 @@ std::array<uint8_t, 9> OneWireBus::readScratchpad() {
 std::optional<float> readSensor(OneWireBus& bus) { // NOLINT(readability-function-cognitive-complexity) // reason: DS18B20 protocol: reset -> convert -> read scratchpad
     if (!bus.reset()) {
         ESP_LOGD(TAG, "DS18B20 not detected (no presence pulse)");
-        gTempCX100.store(std::numeric_limits<int32_t>::min(), std::memory_order_relaxed);
         return std::nullopt;
     }
 
@@ -104,7 +101,6 @@ std::optional<float> readSensor(OneWireBus& bus) { // NOLINT(readability-functio
 
     if (!bus.reset()) {
         ESP_LOGW(TAG, "DS18B20 lost during conversion");
-        gTempCX100.store(std::numeric_limits<int32_t>::min(), std::memory_order_relaxed);
         return std::nullopt;
     }
 
@@ -117,11 +113,9 @@ std::optional<float> readSensor(OneWireBus& bus) { // NOLINT(readability-functio
 
     if (temp < -55.0f || temp > 125.0f) {
         ESP_LOGW(TAG, "DS18B20 out of range: %.2f C", static_cast<double>(temp));
-        gTempCX100.store(std::numeric_limits<int32_t>::min(), std::memory_order_relaxed);
         return std::nullopt;
     }
 
-    gTempCX100.store(static_cast<int32_t>(temp * 100.0f), std::memory_order_relaxed);
     return temp;
 }
 
