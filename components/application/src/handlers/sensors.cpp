@@ -332,8 +332,8 @@ std::expected<CommandResponse, domain::AppError> handleStallGuardSetThreshold(
 
   // Route StallGuard threshold write through motor task to avoid
   // race condition with motor task accessing gTmcUart concurrently.
-  infrastructure::MotorCommand cmd{};
-  cmd.type = infrastructure::MotorCommandType::SetStallThreshold;
+  domain::MotorCommand cmd{};
+  cmd.type = domain::MotorCommandType::SetStallThreshold;
   cmd.stallThreshold = *threshold;
   if (xQueueSend(infrastructure::gMotorCmdQueue, &cmd, 0) != pdTRUE) {
     ESP_LOGW(TAG, "motor cmd queue full, stall threshold will be applied on next boot");

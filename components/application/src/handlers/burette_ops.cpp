@@ -9,7 +9,6 @@
 #include "domain/cal_run_planner.hpp"
 #include "domain/types.hpp"
 #include "infrastructure/config.hpp"
-#include "infrastructure/motor_task.hpp"
 #include "infrastructure/storage/nvs.hpp"
 
 namespace ecotiter::application::handlers::burette_ops {
@@ -22,8 +21,8 @@ std::expected<CommandResponse, domain::AppError> handleFill() {
   int32_t steps = static_cast<int32_t>(std::lround(cal.nominalVolumeMl * cal.stepsPerMl));
   domain::gDirection.store(domain::Direction::LiqIn, std::memory_order_release);
 
-  infrastructure::MotorCommand cmd{};
-  cmd.type = infrastructure::MotorCommandType::MoveSteps;
+  domain::MotorCommand cmd{};
+  cmd.type = domain::MotorCommandType::MoveSteps;
   cmd.steps = steps;
   cmd.direction = domain::Direction::LiqIn;
   cmd.speedHz = domain::gSpeed.load(std::memory_order_acquire);
@@ -44,8 +43,8 @@ std::expected<CommandResponse, domain::AppError> handleEmpty() {
   if (steps < config::MIN_STEPS_THRESHOLD) steps = static_cast<int32_t>(std::lround(cal.nominalVolumeMl * cal.stepsPerMl));
   domain::gDirection.store(domain::Direction::LiqOut, std::memory_order_release);
 
-  infrastructure::MotorCommand cmd{};
-  cmd.type = infrastructure::MotorCommandType::MoveSteps;
+  domain::MotorCommand cmd{};
+  cmd.type = domain::MotorCommandType::MoveSteps;
   cmd.steps = steps;
   cmd.direction = domain::Direction::LiqOut;
   cmd.speedHz = domain::gSpeed.load(std::memory_order_acquire);
@@ -80,8 +79,8 @@ std::expected<CommandResponse, domain::AppError> handleDoseVolume(
   int32_t steps = static_cast<int32_t>(std::lround(plan.firstCycleVolMl * cal.stepsPerMl));
   domain::gDirection.store(domain::Direction::LiqIn, std::memory_order_release);
 
-  infrastructure::MotorCommand cmd{};
-  cmd.type = infrastructure::MotorCommandType::MoveSteps;
+  domain::MotorCommand cmd{};
+  cmd.type = domain::MotorCommandType::MoveSteps;
   cmd.steps = steps;
   cmd.direction = domain::Direction::LiqIn;
   cmd.speedHz = speedHz;
@@ -101,8 +100,8 @@ std::expected<CommandResponse, domain::AppError> handleRinse(
   auto* cached = infrastructure::gCalCache.load(std::memory_order_acquire);
   if (!cached) return makeErrorResponse("start_failed");
 
-  infrastructure::MotorCommand cmd{};
-  cmd.type = infrastructure::MotorCommandType::StartRinse;
+  domain::MotorCommand cmd{};
+  cmd.type = domain::MotorCommandType::StartRinse;
   cmd.startRinse.cycles = static_cast<uint8_t>(*cycles);
   cmd.startRinse.speedMlMin = config::RINSE_DEFAULT_SPEED_ML_MIN;
   if (!application::sendMotorCommand(cmd)) {
@@ -150,15 +149,15 @@ std::expected<CommandResponse, domain::AppError> handleCalRun(
   }
 
   if (plan.action == domain::sm::CalRunAction::CalDose) {
-    infrastructure::MotorCommand cmd{};
-    cmd.type = infrastructure::MotorCommandType::StartCalDose;
+    domain::MotorCommand cmd{};
+    cmd.type = domain::MotorCommandType::StartCalDose;
     cmd.startCalDose.speedMlMin = plan.speedMlMin;
     if (!application::sendMotorCommand(cmd)) {
         return makeErrorResponse("busy");
     }
   } else {
-    infrastructure::MotorCommand cmd{};
-    cmd.type = infrastructure::MotorCommandType::StartCalSpeed;
+    domain::MotorCommand cmd{};
+    cmd.type = domain::MotorCommandType::StartCalSpeed;
     cmd.startCalSpeed.speedMlMin = plan.speedMlMin;
     cmd.startCalSpeed.testFreqHz = plan.freqHz;
     if (!application::sendMotorCommand(cmd)) {
@@ -170,8 +169,8 @@ std::expected<CommandResponse, domain::AppError> handleCalRun(
 }
 
 std::expected<CommandResponse, domain::AppError> handleStop() {
-  infrastructure::MotorCommand cmd{};
-  cmd.type = infrastructure::MotorCommandType::Stop;
+  domain::MotorCommand cmd{};
+  cmd.type = domain::MotorCommandType::Stop;
   if (!application::sendMotorCommand(cmd)) {
       return makeErrorResponse("busy");
   }
@@ -182,8 +181,8 @@ std::expected<CommandResponse, domain::AppError> handleStop() {
 
 std::expected<CommandResponse, domain::AppError> handleEmergencyStop() {
   domain::gStopFull.store(true, std::memory_order_release);
-  infrastructure::MotorCommand cmd{};
-  cmd.type = infrastructure::MotorCommandType::EmergencyStop;
+  domain::MotorCommand cmd{};
+  cmd.type = domain::MotorCommandType::EmergencyStop;
   if (!application::sendMotorCommand(cmd)) {
       return makeErrorResponse("busy");
   }
@@ -207,8 +206,8 @@ std::expected<CommandResponse, domain::AppError> handleMoveSteps(
   if (!steps) {
     return makeErrorResponse("invalid_params");
   }
-  infrastructure::MotorCommand cmd{};
-  cmd.type = infrastructure::MotorCommandType::MoveSteps;
+  domain::MotorCommand cmd{};
+  cmd.type = domain::MotorCommandType::MoveSteps;
   cmd.steps = steps->value;
   if (!application::sendMotorCommand(cmd)) {
       return makeErrorResponse("busy");
@@ -222,8 +221,8 @@ std::expected<CommandResponse, domain::AppError> handleSetDirection(
     return makeErrorResponse("invalid_params");
   }
   domain::gDirection.store(*dir, std::memory_order_release);
-  infrastructure::MotorCommand cmd{};
-  cmd.type = infrastructure::MotorCommandType::SetDirection;
+  domain::MotorCommand cmd{};
+  cmd.type = domain::MotorCommandType::SetDirection;
   cmd.direction = *dir;
   if (!application::sendMotorCommand(cmd)) {
       return makeErrorResponse("busy");
@@ -237,8 +236,8 @@ std::expected<CommandResponse, domain::AppError> handleSetSpeed(
     return makeErrorResponse("invalid_params");
   }
   domain::gSpeed.store(*speedHz, std::memory_order_release);
-  infrastructure::MotorCommand cmd{};
-  cmd.type = infrastructure::MotorCommandType::SetSpeed;
+  domain::MotorCommand cmd{};
+  cmd.type = domain::MotorCommandType::SetSpeed;
   cmd.speedHz = *speedHz;
   if (!application::sendMotorCommand(cmd)) {
       return makeErrorResponse("busy");
@@ -252,8 +251,8 @@ std::expected<CommandResponse, domain::AppError> handleSetAccel(
     return makeErrorResponse("invalid_params");
   }
   domain::gAccel.store(*accelSteps, std::memory_order_release);
-  infrastructure::MotorCommand cmd{};
-  cmd.type = infrastructure::MotorCommandType::SetAccel;
+  domain::MotorCommand cmd{};
+  cmd.type = domain::MotorCommandType::SetAccel;
   cmd.accelHzPerS = *accelSteps;
   if (!application::sendMotorCommand(cmd)) {
       return makeErrorResponse("busy");

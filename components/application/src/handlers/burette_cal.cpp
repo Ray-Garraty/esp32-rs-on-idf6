@@ -13,7 +13,6 @@
 #include "domain/memory.hpp"
 #include "domain/ols.hpp"
 #include "domain/z_factor.hpp"
-#include "infrastructure/motor_task.hpp"
 #include "infrastructure/config.hpp"
 
 namespace ecotiter::application::handlers::burette_cal {
@@ -181,8 +180,8 @@ std::expected<CommandResponse, domain::AppError> handleRunCalibration(
     return makeErrorResponse("invalid_params");
   }
   size_t count = (freqsCount > config::MAX_CAL_SEQ_POINTS) ? config::MAX_CAL_SEQ_POINTS : freqsCount;
-  infrastructure::MotorCommand cmd{};
-  cmd.type = infrastructure::MotorCommandType::StartCalSpeedSeq;
+  domain::MotorCommand cmd{};
+  cmd.type = domain::MotorCommandType::StartCalSpeedSeq;
   cmd.startCalSpeedSeq.fillSpeedMlMin = (speedMlMin > 0.0f) ? speedMlMin : config::FILL_DEFAULT_SPEED_ML_MIN;
   for (size_t i = 0; i < count; ++i) {
     cmd.startCalSpeedSeq.freqs[i] = (freqs[i] > 0.0f)
