@@ -398,6 +398,56 @@ def diagnose_broadcast_intervals(
                         arrival_deltas, "connection issue")
 
 
+# ── WS session-drop regression check (LL-052 fix) ─────────────────────
+
+WS_ADDED_RE = re.compile(r"WS session added for fd=(\d+)")
+
+
+def check_ws_session_drops(slog_path: str) -> int:
+    """Check serial log for WS session drops during the test.
+
+    The original bug (LL-052) caused the session to be removed on every
+    recv failure (e.g., transient socket errors), leading to repeated
+    'WS session added' for the same fd. This function verifies that
+    each fd appears at most once in the log during the WS collection
+    window — any duplicate means a session drop occurred.
+
+    Returns: number of session drop incidents found (0 = pass).
+    """
+    if not slog_path:
+        status("  WS session-drop check: no serial log available, skipping")
+        return 0
+
+    try:
+        with open(slog_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except FileNotFoundError:
+        status(f"  WS session-drop check: serial log not found ({slog_path})")
+        return 0
+
+    fd_adds: dict[str, int] = {}
+    for line in content.split("\n"):
+        m = WS_ADDED_RE.search(line)
+        if m:
+            fd = m.group(1)
+            fd_adds[fd] = fd_adds.get(fd, 0) + 1
+
+    drops = 0
+    for fd, count in fd_adds.items():
+        if count > 1:
+            status(f"  ==> FAIL: WS session added {count}x for fd {fd} "
+                   f"(session drop detected)")
+            drops += 1
+
+    if drops == 0 and fd_adds:
+        status(f"  ==> PASS: No WS session drops detected "
+               f"({len(fd_adds)} session(s) tracked)")
+    elif not fd_adds:
+        status("  WS session-drop check: no session additions in serial log")
+
+    return drops
+
+
 def _print_delta_stats(header: str, deltas: list[float], hint: str) -> None:
     if not deltas:
         status(f"{header}: no valid deltas")
@@ -549,6 +599,7 @@ def main() -> int:
     serial_stop = threading.Event()
     serial_thread = None
     slog_file = None
+    slog_path = None
     ser_for_log = None
 
     if not base_url:
@@ -700,6 +751,23 @@ def main() -> int:
 
         status("\n=== WS broadcast interval diagnostics ===")
         diagnose_broadcast_intervals(ws_broadcasts, "WS broadcast")
+
+        count_ok = len(ws_broadcasts) >= WS_COUNT_TARGET
+        if count_ok:
+            pass_msg(f"WS: received {len(ws_broadcasts)} broadcasts "
+                     f"(target >= {WS_COUNT_TARGET})")
+        else:
+            fail_msg(f"WS: received {len(ws_broadcasts)} broadcasts "
+                     f"(target >= {WS_COUNT_TARGET})")
+
+        # LL-052 regression: check for WS session drops in serial log
+        status("\n=== WS session-drop regression check (LL-052) ===")
+        slog_path_str = str(slog_path) if slog_file and slog_path else ""
+        drop_count = check_ws_session_drops(slog_path_str)
+        if drop_count > 0:
+            fail_msg(f"WS: {drop_count} session drop(s) detected")
+        else:
+            pass_msg("WS: No session drops detected")
     else:
         status("  WS test skipped (no broadcasts collected)")
 

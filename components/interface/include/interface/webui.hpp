@@ -375,7 +375,7 @@ function connectWs(){
 
   ws.onmessage=function(e){
     lastMsgTime=Date.now();if(!_connAlive)setConnectionStatus(true);
-    console.log('[WS] raw:', e.data);
+
     try{
       var data=JSON.parse(e.data);
       if(data.event&&data.event==='log'&&data.data){
@@ -543,15 +543,17 @@ function stepperStartStop(){
   }
   if(APP_STATE.stepper.busy){
     if(btn){btn.disabled=true;btn.textContent='Stopping...';}
-    sendCommand('burette.stop',{}).then(function(res){if(!res)showUIError('Failed to stop motor');else if(res.status==='error')console.error('stepperStartStop: stop rejected',JSON.stringify(res));if(btn)btn.disabled=false;});
+    console.log('[Stepper] sending stop');sendCommand('burette.stop',{}).then(function(res){console.log('[Stepper] stop response:',JSON.stringify(res));if(!res)showUIError('Failed to stop motor');else if(res.status==='error')console.error('[Stepper] stop rejected',JSON.stringify(res));if(btn)btn.disabled=false;});
   }else{
     var dir=(document.querySelector('input[name="stepper-dir"]:checked')||{}).value||APP_STATE.stepper.direction;
     var input=document.querySelector('#dynamic-input-container input');var val=parseInt(input?input.value:'0',10);
     if(val<=0){showUIError('Enter value > 0');return;}
     if(btn){btn.disabled=true;btn.textContent='Starting...';}
     var cmd=buildStepperCommand(APP_STATE.stepper.mode,dir,val);
+    console.log('[Stepper] sending',cmd.cmd,JSON.stringify(cmd.params));
     APP_STATE.stepper.pendingCommand=true;
     sendCommand(cmd.cmd,cmd.params).then(function(res){
+      console.log('[Stepper] response:',JSON.stringify(res));
       APP_STATE.stepper.pendingCommand=false;
       if(APP_STATE.stepper.stopPending){
         APP_STATE.stepper.stopPending=false;
@@ -569,7 +571,7 @@ function stepperStartStop(){
 
 function initStepperControls(){
   document.querySelectorAll('input[name="stepper-mode"]').forEach(function(r){r.addEventListener('change',function(e){APP_STATE.stepper.mode=e.target.value;updateDynamicInput();});});
-  document.querySelectorAll('input[name="stepper-dir"]').forEach(function(r){r.addEventListener('change',function(e){APP_STATE.stepper.direction=e.target.value;sendCommand('burette.setDirection',{direction:e.target.value}).then(function(res){if(res&&res.status==='error')console.error('stepper: setDirection rejected',JSON.stringify(res));});});});
+  document.querySelectorAll('input[name="stepper-dir"]').forEach(function(r){r.addEventListener('change',function(e){APP_STATE.stepper.direction=e.target.value;console.log('[Stepper] setDirection ->',e.target.value);sendCommand('burette.setDirection',{direction:e.target.value}).then(function(res){console.log('[Stepper] setDirection response:',JSON.stringify(res));if(res&&res.status==='error')console.error('[Stepper] setDirection rejected',JSON.stringify(res));});});});
   var btn=document.getElementById('stepper-start-stop-btn');if(btn)btn.addEventListener('click',stepperStartStop);
 }
 
@@ -794,9 +796,10 @@ var toggleValve=async function(){
   var newPos=APP_STATE.valve.position==='input'?'output':'input';
   var btn=document.getElementById('hw-valve-toggle-btn');if(btn){btn.disabled=true;btn.textContent='...';}
   try{
+    console.log('[Valve] toggling to',newPos);
     var r=await fetch('/api/valve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({position:newPos})});
-    if(r.ok){var j=await r.json();if(j.valve){APP_STATE.valve.position=j.valve;setText('hw-valve',j.valve);}}
-  }catch(e){}finally{if(btn){btn.disabled=false;btn.textContent='Toggle';}}
+    if(r.ok){var j=await r.json();console.log('[Valve] response:',JSON.stringify(j));if(j.valve){APP_STATE.valve.position=j.valve;setText('hw-valve',j.valve);}}else console.error('[Valve] HTTP',r.status);
+  }catch(e){console.error('[Valve] fetch error:',e);}finally{if(btn){btn.disabled=false;btn.textContent='Toggle';}}
 };
 
 var sendCmdRaw=async function(cmdBody){

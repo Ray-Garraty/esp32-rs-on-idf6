@@ -440,16 +440,17 @@ esp_err_t ws_handler(httpd_req_t* req) { // NOLINT(readability-function-cognitiv
     httpd_ws_frame_t frame{};
     uint8_t buf[1024]{};
     frame.payload = buf;
-    frame.len = sizeof(buf);
     frame.type = HTTPD_WS_TYPE_TEXT;
 
-    esp_err_t err = httpd_ws_recv_frame(req, &frame, frame.len);
+    esp_err_t err = httpd_ws_recv_frame(req, &frame, sizeof(buf));
     if (err != ESP_OK) {
-        if (fd >= 0 && req->user_ctx) {
-            auto* server = static_cast<HttpServer*>(req->user_ctx);
-            server->removeSession(fd);
+        if (err == ESP_ERR_INVALID_SIZE) {
+            ESP_LOGW(TAG, "ws_handler: frame too large (%u bytes, max %zu)",
+                     frame.len, sizeof(buf));
+            return ESP_FAIL;
         }
-        return err;
+        ESP_LOGW(TAG, "ws_handler: recv failed (fd=%d, err=%d)", fd, err);
+        return ESP_OK;
     }
 
     if (frame.type == HTTPD_WS_TYPE_CLOSE) {
@@ -461,7 +462,8 @@ esp_err_t ws_handler(httpd_req_t* req) { // NOLINT(readability-function-cognitiv
     }
 
     if (frame.len > 0) {
-        buf[frame.len] = '\0';
+        size_t safeLen = std::min<size_t>(frame.len, sizeof(buf) - 1);
+        buf[safeLen] = '\0';
         ESP_LOGI(TAG, "WS RX: %s", reinterpret_cast<char*>(buf));
     }
 
