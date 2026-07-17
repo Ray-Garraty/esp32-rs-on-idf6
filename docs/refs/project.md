@@ -13,15 +13,15 @@ timestamp: 2026-07-10
 >
 > **Single source of truth** for hardware pinout, architecture, protocol, state machines, NVS layout, thread model, and error hierarchy.
 >
-> Firmware for a laboratory burette titrator. ESP32-S3 microcontroller, C++23 (`-std=c++23`), ESP-IDF v6.0.1. Precision stepper-driven syringe dosing with pH/temperature sensing. Communication via USB-Serial (JSON), BLE GATT (NUS), and WiFi (REST API + WebSocket + WebUI).
+> Firmware for a laboratory burette titrator. ESP32-S3 microcontroller, C++23 (`-std=c++23`), ESP-IDF v6.0.1. Precision stepper-driven burette dosing with pH/temperature sensing. Communication via USB-Serial (JSON), BLE GATT (NUS), and WiFi (REST API + WebSocket + WebUI).
 
 ## Hardware
 
-### Burette Drive (Stepper Syringe)
+### Burette Drive (Stepper Piston)
 
 | Property | Value |
 |----------|-------|
-| Type | Linear stepper motor driving a glass/plastic syringe |
+| Type | Linear stepper motor driving a burette piston |
 | Stepper driver | TMC2209 (step/dir mode, UART config deferred) |
 | Microstepping | 16 (default), configured via TMC2209 hardware defaults |
 | Step pin | GPIO21 (RMT channel 0, TX) |
@@ -29,8 +29,8 @@ timestamp: 2026-07-10
 | EN pin | GPIO27 (Output via gpio_set_level only, active LOW) — PSRAM data bus, gpio_set_level safe, gpio_set_direction will hang |
 | Step frequency | 30-3000 Hz (period 33333-333 us) |
 | Acceleration | Trapezoidal pre-computed ramp |
-| Limit FULL | GPIO7 (pull-down, pos-edge interrupt) - syringe bottom, burette full (NOT GPIO34 — PSRAM D5, LL-027) |
-| Limit EMPTY | GPIO15 (floating, pos-edge interrupt) - syringe top, burette empty (NOT GPIO35 — PSRAM D6, LL-027) |
+| Limit FULL | GPIO7 (pull-down, pos-edge interrupt) - burette full (LIQ_IN end); NOT GPIO34 — PSRAM D5, LL-027 |
+| Limit EMPTY | GPIO15 (floating, pos-edge interrupt) - burette empty (LIQ_OUT end); NOT GPIO35 — PSRAM D6, LL-027 |
 
 ### Valve
 
@@ -71,8 +71,8 @@ timestamp: 2026-07-10
 | TMC2209 DIR | 5 | gpio_set_level | HIGH = CW (fill); moved from GPIO26 (LL-027: PSRAM CS1) |
 | TMC2209 EN | 27 | gpio_set_level | Active LOW; PSRAM data bus — gpio_set_level only, NO gpio_set_direction |
 | Valve | 14 | gpio_set_level | LOW=input, HIGH=output |
-| Limit FULL | 7 | GPIO ISR, pos-edge | Syringe bottom; moved from GPIO34 (LL-027: PSRAM D5) |
-| Limit EMPTY | 15 | GPIO ISR, pos-edge | Syringe top; moved from GPIO35 (LL-027: PSRAM D6) |
+| Limit FULL | 7 | GPIO ISR, pos-edge | Burette full (LIQ_IN); moved from GPIO34 (LL-027: PSRAM D5) |
+| Limit EMPTY | 15 | GPIO ISR, pos-edge | Burette empty (LIQ_OUT); moved from GPIO35 (LL-027: PSRAM D6) |
 | pH electrode | 4 | ADC1_CH3 (oneshot) | 0-2900 mV range (S3) |
 | DS18B20 | 6 | OneWire bitbang | 4.7k pull-up; moved from GPIO33 (LL-027: PSRAM D4) |
 | Status LED | 48 | RMT TX (WS2812 protocol) | RGB WS2812 via RMT — NOT gpio_set_level |
@@ -136,60 +136,7 @@ Motor thread reads `cmd_queue`, writes atomics. Main loop polls atomics, publish
 BLE notify thread reads `status_queue`, calls NimBLE `ble_gatts_notify()`.
 `ws_send_queue` carries JSON log messages from log_worker to net_owner for WebSocket broadcast.
 
-### Thread Architecture
-
-```
-MOTOR TASK (prio 1, `domain::MOTOR_THREAD_STACK`):
-  FreeRTOS task (xTaskCreate). Owns RmtChannel exclusively.
-  loop { read atomic target -> rmt_tx_wait_all_done -> write atomic position }
-  rmt_tx_wait_all_done() blocks only this task, NOT main loop
-
-MAIN LOOP (prio default/app_main):
-  loop {
-    cmd_queue.process()           -> set motor target atomics
-    wifi_process()                -> DNS poll, reconnect logic
-    ws_push()                     -> non-blocking socket write
-    temperature_poll()            -> DS18B20 non-blocking
-    adc_poll()                    -> 64 samples @ 1ms spacing
-    led_process()                 -> blink state machine
-    transport_sm()                -> USB / BLE priority handoff
-    vTaskDelayUntil(10ms)         -> pacing tick
-  }
-
-NET_OWNER TASK (prio 1, `domain::NET_OWNER_STACK`):
-  FreeRTOS task (xTaskCreate). Owns init order: WiFi → HTTP → BLE.
-  init: wifi.init() → startAP() → tryStartSTA() → HttpServer::create() → ble.init() → ensureGpioReady()
-  loop { wifi_process(); http_events(); ble_process(); vTaskDelay(10ms) }
-  Also spawns BLE notify thread (std::thread, 8 KB) as a child.
-
-TEMPERATURE TASK (prio 1, `domain::TEMP_THREAD_STACK`):
-  FreeRTOS task (xTaskCreate).
-  loop {
-    OneWire bitbang sequence
-    store result in std::atomic<int32_t>
-    vTaskDelay(1000ms)
-  }
-
-BLE NOTIFY THREAD (spawned by net_owner, `domain::BLE_NOTIFY_STACK`):
-  std::thread, detached.
-  loop { xQueueReceive -> ble_gatts_notify }
-
-LOG WORKER TASK (prio 0, `domain::LOG_WORKER_STACK`):
-  FreeRTOS task (xTaskCreate), created by net_owner after HTTP init.
-  Drains log_queue from LogBuffer::push() calls (any task).
-  Formats each entry as JSON string on stack (char buf[384]), pushes
-  WsSendEntry to ws_send_queue for net_owner to broadcast.
-  Must NEVER call network functions (broadcastWsEvent,
-  httpd_ws_send_frame_async, or any socket I/O). This task is
-  lightweight by design — stack is allocated per `domain::LOG_WORKER_STACK`.
-
-HTTP SERVER (FreeRTOS internal, `domain::HTTP_SERVER_STACK`):
-  Created by httpd_start(). Calls registered handler callbacks. Not user-managed.
-```
-
-### Stack budgets
-
-See [memory_spec.md §5.4](../refs/memory_spec.md#54-task-stack-budgets) for the full budget table, headroom deficits, call chain analysis, and measurement methodology.
+See [memory_spec.md §5.4](../refs/memory_spec.md#54-task-stack-budgets) for the thread architecture, stack budgets, headroom, and task responsibilities.
 
 ## Task Independence Principle (CRITICAL)
 
@@ -215,11 +162,6 @@ priority inversions that are nearly impossible to debug on embedded hardware.
 This principle is non-negotiable for all code changes.
 
 **Golden Rule:** The main loop must NEVER execute a blocking operation (`rmt_tx_wait_all_done`, `lock()`, `xQueueReceive`). All blocking calls live in dedicated threads.
-
-**Stack constraints:**
-- Default `std::thread` stack: 8 KB (`CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=8192`)
-- Forbidden in threads with stack ≤ 8 KB: `std::format()`/`std::print()` in loops, `nlohmann::json::dump()` without pre-allocated buffer, large stack-local arrays (`uint8_t buf[4096]`), deep recursion
-- After moving code between threads, verify with `uxTaskGetStackHighWaterMark()`
 
 ## Communication Protocol
 
@@ -446,20 +388,24 @@ ecotiter/
 +-- docs/
 |   +-- refs/project.md            # This file
 |   +-- refs/coding_style.md       # Coding conventions
-|   +-- refs/gpio_pins_spec.md   # GPIO safety for Octal PSRAM
+|   +-- refs/gpio_pins_spec.md     # GPIO safety for Octal PSRAM
 |   +-- guides/testing.md          # 3-tier testing strategy
 |   +-- lessons_learned/           # Crash patterns (LL-001 through LL-042)
 |   +-- protocols/                 # Debug protocols
 |
 +-- scripts/
-|   +-- build.sh                   # Build wrapper (all subcommands)
-|   +-- smoke_test.py              # Automated smoke test
+|   +-- idf.sh                     # Build/flash/monitor/smoke/test/tidy wrapper
+|   +-- pre_commit.sh              # Pre-commit validation suite
 |   +-- monitor.py                 # Python serial monitor
 |   +-- crash_analyzer.py          # Crash log analyzer
 |
 +-- main/
 |   +-- CMakeLists.txt             # Main component registration
 |   +-- main.cpp                   # app_main() entry point
+|   +-- gpio_config.cpp/hpp        # Boot-time GPIO init (DIR, EN)
+|   +-- log_capture.cpp/hpp        # esp_log capture for ring buffer
+|   +-- net_owner.cpp/hpp          # WiFi → HTTP → BLE init triangle
+|   +-- version.cpp/h              # Firmware version string
 |   +-- Kconfig.projbuild          # Project Kconfig options
 |
 +-- components/
@@ -469,16 +415,32 @@ ecotiter/
     |   |   +-- errors.hpp         # Error enums (flat hierarchy)
     |   |   +-- burette.hpp        # BuretteState enum
     |   |   +-- calibration.hpp    # Steps/ml math
+    |   |   +-- motor_command.hpp  # MotorCommand, MotorCommandType
+    |   |   +-- sm_result.hpp      # SmResult (state machine results)
+    |   |   +-- rinse_sm.hpp       # Rinse state machine
+    |   |   +-- cal_dose_sm.hpp    # Calibration dose SM
+    |   |   +-- cal_speed_sm.hpp   # Calibration speed SM
+    |   |   +-- cal_run_planner.hpp# Cal run planner
+    |   |   +-- broadcast_helpers.hpp # Broadcast field helpers
+    |   |   +-- json_utils.hpp     # JSON parsing helpers
+    |   |   +-- log_buffer.hpp     # Ring-buffer log
+    |   |   +-- dns.hpp            # DNS constants
+    |   |   +-- ols.hpp            # Ordinary least squares
+    |   |   +-- z_factor.hpp       # Z-factor correction
     |   |   +-- memory.hpp         # Fixed-size buffer type aliases
     |   +-- src/
     |       +-- burette.cpp
+    |       +-- log_buffer.cpp
     |
     +-- application/               # Orchestration layer
     |   +-- include/application/
-    |   |   +-- command_dispatch.hpp
-    |   |   +-- state_machine.hpp
-    |   |   +-- scheduler.hpp
-    |   |   +-- broadcast.hpp
+    |   |   +-- command.hpp        # CommandType enum
+    |   |   +-- dispatch.hpp       # Command dispatch table
+    |   |   +-- motor_controller.hpp # IMotorController interface
+    |   |   +-- send_motor_command.hpp # Queue send helper
+    |   |   +-- response.hpp       # CommandResponse type
+    |   |   +-- state_machine.hpp  # Burette state machine
+    |   |   +-- scheduler.hpp      # Command scheduling
     |   |   +-- handlers/
     |   |       +-- burette_ops.hpp
     |   |       +-- burette_cal.hpp
@@ -487,9 +449,11 @@ ecotiter/
     |   |       +-- system.hpp
     |   |       +-- valve.hpp
     |   +-- src/
-    |       +-- command_dispatch.cpp
+    |       +-- command.cpp
+    |       +-- dispatch.cpp
+    |       +-- response.cpp
+    |       +-- state_machine.cpp
     |       +-- scheduler.cpp
-    |       +-- broadcast.cpp
     |       +-- handlers/
     |           +-- burette_ops.cpp
     |           +-- burette_cal.cpp
@@ -501,34 +465,51 @@ ecotiter/
     +-- infrastructure/            # Hardware & platform -- imports esp-idf
     |   +-- include/infrastructure/
     |   |   +-- config.hpp         # GPIO pins, stack sizes, constants
-    |   |   +-- motor_task.hpp
-    |   |   +-- temp_thread.hpp
+    |   |   +-- motor_task.hpp     # Motor task types (domain aliases)
+    |   |   +-- motor_controller_impl.hpp # MotorController impl
+    |   |   +-- cal_cache.hpp      # Calibration cache
+    |   |   +-- temp_thread.hpp    # Temperature thread
+    |   |   +-- storage/nvs.hpp    # NVS wrapper
+    |   |   +-- memory/
+    |   |   |   +-- psram_buffer.hpp   # PSRAM buffer allocator
+    |   |   |   +-- psram_resource.hpp # PSRAM resource
     |   |   +-- drivers/
     |   |       +-- stepper.hpp    # RAII RmtChannel + StepperMotor
     |   |       +-- adc.hpp
     |   |       +-- onewire.hpp
     |   |       +-- limitswitch.hpp
     |   |       +-- valve.hpp
-    |   |       +-- led.hpp
     |   |       +-- rgb_led.hpp    # RGB WS2812 via RMT
+    |   |       +-- tmc_uart.hpp   # TMC2209 UART config
+    |   +-- network/include/infrastructure/network/
+    |   |   +-- wifi.hpp
+    |   |   +-- http_server.hpp
+    |   |   +-- ble.hpp
+    |   |   +-- ble_notify_thread.hpp
     |   +-- src/
-    |       +-- motor_task.cpp
-    |       +-- temp_thread.cpp
-    |       +-- drivers/
-    |       |   +-- stepper.cpp
-    |       |   +-- adc.cpp
-    |       |   +-- onewire.cpp
-    |       |   +-- limitswitch.cpp
-    |       |   +-- valve.cpp
-    |       |   +-- led.cpp
-    |       |   +-- rgb_led.cpp
-    |       +-- network/
-    |       |   +-- wifi.cpp
-    |       |   +-- http_server.cpp
-    |       |   +-- ble.cpp
-    |       |   +-- ble_notify_thread.cpp
-    |       +-- storage/
-    |           +-- nvs.cpp
+    |   |   +-- temp_thread.cpp
+    |   |   +-- drivers/
+    |   |   |   +-- stepper.cpp
+    |   |   |   +-- adc.cpp
+    |   |   |   +-- onewire.cpp
+    |   |   |   +-- limitswitch.cpp
+    |   |   |   +-- valve.cpp
+    |   |   |   +-- rgb_led.cpp
+    |   |   |   +-- tmc_uart.cpp
+    |   |   +-- motor/
+    |   |   |   +-- task.cpp            # Motor task entry
+    |   |   |   +-- motor_controller_impl.cpp # JSON command handler
+    |   |   |   +-- homing.cpp          # run_homing()
+    |   |   |   +-- motion.cpp          # Move helpers
+    |   |   |   +-- sm_runners.cpp      # State machine runners
+    |   |   |   +-- internal.hpp        # Internal motor helpers
+    |   |   +-- storage/
+    |   |       +-- nvs.cpp
+    |   +-- network/src/
+    |       +-- wifi.cpp
+    |       +-- http_server.cpp
+    |       +-- ble.cpp
+    |       +-- ble_notify_thread.cpp
     |
     +-- interface/                 # External boundaries
     |   +-- include/interface/
@@ -539,13 +520,13 @@ ecotiter/
     |   +-- src/
     |       +-- serial.cpp
     |       +-- rest_api.cpp
-    |       +-- webui.cpp
     |       +-- broadcast.cpp
     |
     +-- diag/                      # Diagnostic subsystem
     |   +-- include/diag/
     |   |   +-- black_box.hpp      # Lock-free event ring
     |   |   +-- stack_monitor.hpp
+    |   |   +-- heap_monitor.hpp
     |   |   +-- heap_snapshot.hpp
     |   |   +-- state_tracer.hpp
     |   |   +-- tick_watchdog.hpp
@@ -555,6 +536,10 @@ ecotiter/
     |       +-- black_box.cpp
     |       +-- crash_handler.cpp  # __wrap_esp_panic_handler in IRAM
     |       +-- stack_monitor.cpp
+    |       +-- heap_snapshot.cpp
+    |       +-- rtc_watchdog.cpp
+    |       +-- state_tracer.cpp
+    |       +-- ffi_guard.cpp
     |
     +-- json/                      # nlohmann_json bundled component
         +-- include/nlohmann/json.hpp

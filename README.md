@@ -60,10 +60,10 @@ scripts/idf.sh test            # host unit tests (Catch2)
 | 4 | pH electrode (ADC) | `adc_oneshot_read()` (ADC1_CH3) | 0–2900 mV range |
 | 5 | TMC2209 DIR | `gpio_set_direction()` + `gpio_set_level()` | HIGH=CW; moved from GPIO26 (PSRAM CS1) |
 | 6 | DS18B20 | OneWire bitbang | 4.7k pull-up; moved from GPIO33 (PSRAM D4) |
-| 7 | Limit FULL | GPIO ISR pos-edge | Syringe bottom; moved from GPIO34 (PSRAM D5) |
+| 7 | Limit FULL | GPIO ISR pos-edge | Burette full (LIQ_IN); moved from GPIO34 (PSRAM D5) |
 | 13 | TMC2209 EN | `gpio_set_direction()` + `gpio_set_level()` | Active LOW; safe GPIO; moved from GPIO27 (PSRAM HD) |
 | 14 | Valve | `gpio_set_direction()` + `gpio_set_level()` | LOW=input, HIGH=output |
-| 15 | Limit HOME | GPIO ISR pos-edge | Syringe top; moved from GPIO35 (PSRAM D6) |
+| 15 | Limit EMPTY | GPIO ISR pos-edge | Burette empty (LIQ_OUT); moved from GPIO35 (PSRAM D6) |
 | 16 | TMC2209 UART RX | `uart_set_pin(UART_NUM_2)` | PDN_UART half-duplex |
 | 17 | TMC2209 UART TX | `uart_set_pin(UART_NUM_2)` | PDN_UART half-duplex |
 | 21 | TMC2209 STEP | RMT TX (channel 0) | Pulse train |

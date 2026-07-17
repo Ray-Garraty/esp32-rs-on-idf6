@@ -25,10 +25,10 @@ timestamp: 2026-07-13
 | 4 | pH electrode (ADC) | `adc_oneshot_read()` (ADC1_CH3) | 0–2900 mV range |
 | 5 | TMC2209 DIR | `gpio_set_direction()` + `gpio_set_level()` | HIGH=CW; moved from GPIO26 (LL-027) |
 | 6 | DS18B20 | OneWire bitbang (`gpio_config`/`gpio_set_level`/`gpio_get_level`) | 4.7k pull-up; moved from GPIO33 (LL-027) |
-| 7 | Limit FULL | GPIO ISR pos-edge (`gpio_config` + `gpio_isr_handler_add`) | Syringe bottom; moved from GPIO34 (LL-027) |
+| 7 | Limit FULL | GPIO ISR pos-edge (`gpio_config` + `gpio_isr_handler_add`) | Burette full (LIQ_IN); moved from GPIO34 (LL-027) |
 | 13 | TMC2209 EN | `gpio_set_direction()` + `gpio_set_level()` | Active LOW; safe GPIO; moved from GPIO27 (LL-027) |
 | 14 | Valve | `gpio_set_direction()` + `gpio_set_level()` | LOW=input, HIGH=output |
-| 15 | Limit HOME | GPIO ISR pos-edge (`gpio_config` + `gpio_isr_handler_add`) | Syringe top; moved from GPIO35 (LL-027) |
+| 15 | Limit EMPTY | GPIO ISR pos-edge (`gpio_config` + `gpio_isr_handler_add`) | Burette empty (LIQ_OUT); moved from GPIO35 (LL-027) |
 | 16 | TMC2209 UART RX | `uart_set_pin(UART_NUM_2)` | PDN_UART half-duplex |
 | 17 | TMC2209 UART TX | `uart_set_pin(UART_NUM_2)` | PDN_UART half-duplex |
 | 21 | TMC2209 STEP | RMT TX (channel 0) | Pulse train |
@@ -54,7 +54,7 @@ that reconfigures the IOMUX on these pins will cause an immediate system hang**
 | **32** | D0 / MISO | Flash data bus | Not used |
 | **33** | D4 | PSRAM Octal data line 4 | ~~DS18B20 (MOVED to GPIO6)~~ ✅ Fixed LL-027 |
 | **34** | D5 | PSRAM Octal data line 5 | ~~Limit FULL (MOVED to GPIO7)~~ ✅ Fixed LL-027 |
-| **35** | D6 | PSRAM Octal data line 6 | ~~Limit HOME (MOVED to GPIO15)~~ ✅ Fixed LL-027 |
+| **35** | D6 | PSRAM Octal data line 6 | ~~Limit EMPTY (MOVED to GPIO15)~~ ✅ Fixed LL-027 |
 | **36** | D7 | PSRAM Octal data line 7 | Not used |
 | **37** | DQS | PSRAM data strobe (Octal) | Not used |
 | **38** | CS0 (Flash Chip Select) | Flash chip enable | Not used |
@@ -118,7 +118,7 @@ Reconfiguring these pins disables the built-in USB-JTAG interface.
 | 21 | TMC2209 STEP | `rmt_new_tx_channel()` | Safe | None | ✅ OK |
 | **6** | **DS18B20** | **`gpio_config()`** | **Safe** | **None** | **✅ Fixed (was GPIO33)** |
 | **7** | **Limit FULL** | **`gpio_config()`** | **Safe** | **None** | **✅ Fixed (was GPIO34)** |
-| **15** | **Limit HOME** | **`gpio_config()`** | **Safe** | **None** | **✅ Fixed (was GPIO35)** |
+| **15** | **Limit EMPTY (LIQ_OUT)** | **`gpio_config()`** | **Safe** | **None** | **✅ Fixed (was GPIO35)** |
 | 48 | RGB LED | `rmt_new_tx_channel()` | Safe | None | ✅ OK |
 
 ## 6. Safe GPIO Pins (Recommended)
@@ -142,7 +142,7 @@ The following pins have been moved to safe GPIOs:
 | GPIO27 | TMC2209 EN (gpio_set_level only) | **GPIO13** | PSRAM HD/D3 — `gpio_set_direction()` hangs |
 | GPIO33 | DS18B20 (OneWire bitbang) | **GPIO6** | PSRAM D4 — `gpio_config()` hangs |
 | GPIO34 | Limit FULL (ISR pos-edge) | **GPIO7** | PSRAM D5 — `gpio_config()` hangs |
-| GPIO35 | Limit HOME (ISR pos-edge) | **GPIO15** | PSRAM D6 — `gpio_config()` hangs |
+| GPIO35 | Limit EMPTY (ISR pos-edge) | **GPIO15** | PSRAM D6 — `gpio_config()` hangs |
 
 ## 7. Root Cause Reference
 

@@ -17,8 +17,8 @@ inline constexpr gpio_num_t PIN_STEP       = GPIO_NUM_21;  // RMT channel
 inline constexpr gpio_num_t PIN_DIR        = GPIO_NUM_5;   // GPIO26 is PSRAM CS1 (LL-027)
 inline constexpr gpio_num_t PIN_EN         = GPIO_NUM_13;  // Active LOW (moved from GPIO27: LL-027 PSRAM D3)
 inline constexpr gpio_num_t PIN_DS18B20    = GPIO_NUM_6;   // GPIO33 is PSRAM D4 (LL-027)
-inline constexpr gpio_num_t PIN_LIMIT_FULL = GPIO_NUM_7;   // GPIO34 is PSRAM D5 (LL-027)
-inline constexpr gpio_num_t PIN_LIMIT_EMPTY = GPIO_NUM_15;  // GPIO35 is PSRAM D6 (LL-027)
+inline constexpr gpio_num_t PIN_LIMIT_FULL = GPIO_NUM_7;   // Triggers when burette FULL (LIQ_IN end); GPIO34 is PSRAM D5 (LL-027)
+inline constexpr gpio_num_t PIN_LIMIT_EMPTY = GPIO_NUM_15;  // Triggers when burette EMPTY (LIQ_OUT end); GPIO35 is PSRAM D6 (LL-027)
 
 // RMT config
 inline constexpr uint32_t RMT_RESOLUTION_HZ = 1'000'000;  // 1 tick = 1 us
