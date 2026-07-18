@@ -10,18 +10,24 @@ QueueHandle_t ecotiter::infrastructure::gSmResultQueue = &s_queueSentinel;
 ecotiter::infrastructure::drivers::TmcUart ecotiter::infrastructure::gTmcUart;
 
 // Calibration cache for host tests — matches default values from nvs.cpp:259
-static ecotiter::domain::CalibrationData s_testCal{
-    ecotiter::domain::CalibrationData::kDefaultStepsPerMl,
-    ecotiter::domain::CalibrationData::kDefaultNominalVolumeMl,
-    ecotiter::domain::CalibrationData::kDefaultSpeedCoeff,
-    ecotiter::domain::CalibrationData::kDefaultMinFreqHz,
-    ecotiter::domain::CalibrationData::kDefaultMaxFreqHz,
-};
+// Heap-allocated so AtomicOwner can own it (no destructor clash)
 struct CalCacheInit
 {
     CalCacheInit()
     {
-        ecotiter::infrastructure::gCalCache.store(&s_testCal, std::memory_order_release);
+        auto* cal = new ecotiter::domain::CalibrationData(
+            ecotiter::domain::CalibrationData::kDefaultStepsPerMl,
+            ecotiter::domain::CalibrationData::kDefaultNominalVolumeMl,
+            ecotiter::domain::CalibrationData::kDefaultSpeedCoeff,
+            ecotiter::domain::CalibrationData::kDefaultMinFreqHz,
+            ecotiter::domain::CalibrationData::kDefaultMaxFreqHz);
+        ecotiter::infrastructure::gCalCache.store(cal, std::memory_order_release);
+    }
+    ~CalCacheInit()
+    {
+        // Clear gCalCache before AtomicOwner destructor to avoid double-delete
+        delete ecotiter::infrastructure::gCalCache.exchange(nullptr,
+                                                            std::memory_order_acq_rel);
     }
 };
 static CalCacheInit s_calInit;

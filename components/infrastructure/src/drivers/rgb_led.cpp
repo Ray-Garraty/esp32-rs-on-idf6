@@ -53,8 +53,7 @@ RmtCopyEncoder::~RmtCopyEncoder()
     }
 }
 
-RgbLed::RgbLed(gpio_num_t pin) // NOLINT(readability-function-cognitive-complexity) // reason:
-                               // WS2812 RMT encoder: color -> symbol timing
+RgbLed::RgbLed(gpio_num_t pin)
     : pin_(pin),
       channel_(pin, config::LED_RMT_RES_HZ),
       encoder_()

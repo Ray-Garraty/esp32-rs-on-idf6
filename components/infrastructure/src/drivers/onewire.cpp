@@ -107,8 +107,7 @@ std::array<uint8_t, 9> OneWireBus::readScratchpad()
 }
 
 std::optional<float> readSensor(OneWireBus& bus)
-{ // NOLINT(readability-function-cognitive-complexity) // reason: DS18B20 protocol: reset -> convert
-  // -> read scratchpad
+{
     if (!bus.reset())
     {
         ESP_LOGD(TAG, "DS18B20 not detected (no presence pulse)");

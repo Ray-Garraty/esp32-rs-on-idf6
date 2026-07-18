@@ -113,8 +113,7 @@ constexpr CommandType lookupCmdType(std::string_view name)
 } // anonymous namespace
 
 std::expected<Command, domain::ProtocolError>
-parseCommand( // NOLINT(readability-function-cognitive-complexity) // reason: JSON command parser,
-              // 11 command types
+parseCommand(
     std::string_view jsonStr)
 {
     auto j = json::parse(jsonStr, nullptr, false);
@@ -358,7 +357,9 @@ CommandResponse makeSingleResponse(std::string_view payload, size_t size)
     rsp.kind = ResponseKind::Single;
     rsp.bodySize = static_cast<size_t>(std::snprintf(rsp.body.data(), rsp.body.size(),
                                                      R"({"status":"ok","data":%.*s})",
-                                                     static_cast<int>(size), payload.data()));
+                                                     static_cast<int>(size),
+                                                     // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage) // reason: %.*s with explicit precision does not require null termination
+                                                     payload.data()));
     return rsp;
 }
 

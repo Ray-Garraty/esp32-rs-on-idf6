@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
@@ -52,9 +53,49 @@ HttpServer::~HttpServer()
     }
 }
 
+namespace
+{
+
+httpd_config_t buildHttpdConfig()
+{
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.stack_size = HttpServer::STACK_SIZE;
+    config.lru_purge_enable = true;
+    // max_open_sockets=13 as in official ESP-IDF captive portal example.
+    // HTTPD_MAX_SOCKETS = max(CONFIG_LWIP_MAX_SOCKETS, 16) → 13+3=16 ≤ 16 ✓
+    config.max_open_sockets = 13;
+    config.max_uri_handlers = 24;
+    return config;
+}
+
+} // anonymous namespace
+
+namespace
+{
+
+/// Start the HTTP server with the given config and return the handle.
+/// Logs DRAM diagnostics on failure.
+std::expected<httpd_handle_t, domain::AppError> startHttpdWithConfig(const httpd_config_t& config)
+{
+    httpd_handle_t h = nullptr;
+    esp_err_t err = httpd_start(&h, &config);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "httpd start: %s", esp_err_to_name(err));
+        ESP_LOGE(
+            TAG,
+            "httpd config: stack_size=%u, max_uri_handlers=%u, max_open_sockets=%d, lru_purge=%d",
+            config.stack_size, config.max_uri_handlers, config.max_open_sockets,
+            config.lru_purge_enable);
+        return std::unexpected(domain::AppError::Resource);
+    }
+    return h;
+}
+
+} // anonymous namespace
+
 std::expected<void, domain::AppError> HttpServer::init()
-{ // NOLINT(readability-function-cognitive-complexity) // reason: httpd config + URI handler
-  // registration
+{
     if (handle_)
         return {};
 
@@ -77,30 +118,18 @@ std::expected<void, domain::AppError> HttpServer::init()
         return std::unexpected(domain::AppError::Resource);
     }
 
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.stack_size = STACK_SIZE;
-    config.lru_purge_enable = true;
-    // max_open_sockets=13 as in official ESP-IDF captive portal example.
-    // HTTPD_MAX_SOCKETS = max(CONFIG_LWIP_MAX_SOCKETS, 16) → 13+3=16 ≤ 16 ✓
-    config.max_open_sockets = 13;
-    config.max_uri_handlers = 24;
+    httpd_config_t config = buildHttpdConfig();
 
     if (!diag::HeapSnapshot::assertCanAllocate(config.stack_size + 4096))
     {
         ESP_LOGW(TAG, "Low DRAM before httpd_start");
     }
-    esp_err_t err = httpd_start(&handle_, &config);
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "httpd start: %s", esp_err_to_name(err));
-        ESP_LOGE(
-            TAG,
-            "httpd config: stack_size=%u, max_uri_handlers=%u, max_open_sockets=%d, lru_purge=%d",
-            config.stack_size, config.max_uri_handlers, config.max_open_sockets,
-            config.lru_purge_enable);
-        return std::unexpected(domain::AppError::Resource);
-    }
 
+    auto startResult = startHttpdWithConfig(config);
+    if (!startResult)
+        return std::unexpected(startResult.error());
+
+    handle_ = *startResult;
     ESP_LOGI(TAG, "HTTP server started on port 80");
     return {};
 }
@@ -128,10 +157,8 @@ esp_err_t captive_wifi_page_handler(httpd_req_t* req)
     return serve_wifi_page(req);
 }
 
-// NOLINTBEGIN(cppcoreguidelines-owning-memory) // reason: ESP-IDF httpd C API returns raw pointers
 esp_err_t captive_wifi_connect_handler(httpd_req_t* req)
-{ // NOLINT(readability-function-cognitive-complexity) // reason: captive portal WiFi connect + JSON
-  // parse
+{
     diag::FfiGuard guard(81);
 
     if (!gNetOwnerCmdQueue)
@@ -159,20 +186,20 @@ esp_err_t captive_wifi_connect_handler(httpd_req_t* req)
              req->content_len, bodyLen, bodyStr);
 
     // Parse SSID and password using domain-layer JSON utility
-    auto* ssid = domain::findJsonField(bodyStr, "\"ssid\"");
-    auto* password = domain::findJsonField(bodyStr, "\"password\"");
+    auto ssid = std::unique_ptr<char, decltype(&free)>{domain::findJsonField(bodyStr, "\"ssid\""),
+                                                       &free};
+    auto password = std::unique_ptr<char, decltype(&free)>{
+        domain::findJsonField(bodyStr, "\"password\""), &free};
 
     if (!ssid || !password)
     {
-        free(ssid);
-        free(password);
         httpd_resp_set_type(req, "application/json");
         httpd_resp_send(req, R"({"success":false,"message":"Missing ssid or password"})",
                         HTTPD_RESP_USE_STRLEN);
         return ESP_OK;
     }
 
-    ESP_LOGI(TAG, "Enqueuing WiFi connect to SSID: %s", ssid);
+    ESP_LOGI(TAG, "Enqueuing WiFi connect to SSID: %s", ssid.get());
 
     // Push WiFi connect command to net_owner queue (async, non-blocking)
     struct WifiConnectCmd
@@ -181,12 +208,10 @@ esp_err_t captive_wifi_connect_handler(httpd_req_t* req)
         char password[64];
     };
     WifiConnectCmd cmd;
-    std::strncpy(cmd.ssid, ssid, sizeof(cmd.ssid) - 1);
+    std::strncpy(cmd.ssid, ssid.get(), sizeof(cmd.ssid) - 1);
     cmd.ssid[sizeof(cmd.ssid) - 1] = '\0';
-    std::strncpy(cmd.password, password, sizeof(cmd.password) - 1);
+    std::strncpy(cmd.password, password.get(), sizeof(cmd.password) - 1);
     cmd.password[sizeof(cmd.password) - 1] = '\0';
-    free(ssid);
-    free(password);
 
     BaseType_t qr = xQueueSend(gNetOwnerCmdQueue, &cmd, 0);
     if (qr != pdTRUE)
@@ -204,7 +229,6 @@ esp_err_t captive_wifi_connect_handler(httpd_req_t* req)
     ESP_LOGI(TAG, "WiFi connect request accepted, returning immediately");
     return ESP_OK;
 }
-// NOLINTEND(cppcoreguidelines-owning-memory) // reason: END httpd C API suppressions
 
 esp_err_t captive_wifi_status_handler(httpd_req_t* req)
 {
@@ -480,8 +504,7 @@ esp_err_t api_logs_download_handler(httpd_req_t* req)
 }
 
 esp_err_t ws_handler(httpd_req_t* req)
-{ // NOLINT(readability-function-cognitive-complexity) // reason: WebSocket frame parser + command
-  // dispatch
+{
     diag::FfiGuard guard(83);
 
     // ESP-IDF handles the HTTP_GET WebSocket upgrade internally
@@ -576,8 +599,7 @@ esp_err_t webui_file_handler(httpd_req_t* req)
 }
 
 esp_err_t root_handler(httpd_req_t* req)
-{ // NOLINT(readability-function-cognitive-complexity) // reason: static file serving with fallback
-  // chain
+{
     diag::FfiGuard guard(81);
 
     ESP_LOGI(TAG, "Root handler called for /");

@@ -29,9 +29,60 @@ using drivers::StepperMotor;
 static constexpr uint32_t HOME_INTERVAL_US = 1'000'000 / 1500;
 static constexpr uint32_t HOMING_TIMEOUT_MS = 2000;
 
+namespace
+{
+
+/// @return true if homing should stop (stop flag or timeout)
+bool checkHomingTermination(uint32_t startTick, bool& stopFlagTriggered, bool& timedOut)
+{
+    if (domain::gStopFull.load(std::memory_order_acquire))
+    {
+        stopFlagTriggered = true;
+        return true;
+    }
+
+    if ((xTaskGetTickCount() - startTick) >= pdMS_TO_TICKS(HOMING_TIMEOUT_MS))
+    {
+        timedOut = true;
+        return true;
+    }
+
+    return false;
+}
+
+void postHomingCleanup(StepperMotor& stepper, bool homed, bool timedOut, uint32_t totalSent,
+                       bool error)
+{
+    std::ignore = stepper.emergencyStop();
+    std::ignore = stepper.enable();
+
+    if (error)
+    {
+        return;
+    }
+
+    if (homed)
+    {
+        stepper.setCurrentPosition(domain::Steps{0});
+        domain::gStopFull.store(false, std::memory_order_release);
+        ESP_LOGI("motor_task", "Homing complete at step %lu (FULL limit)",
+                 static_cast<unsigned long>(totalSent));
+    }
+    else if (timedOut)
+    {
+        ESP_LOGW("motor_task", "Homing timed out after %lu ms (%lu steps)",
+                 static_cast<unsigned long>(HOMING_TIMEOUT_MS),
+                 static_cast<unsigned long>(totalSent));
+    }
+
+    domain::gBuretteState.store(BuretteState::Idle, std::memory_order_release);
+    diag::StateTracer::logBuretteTransition("homing", "idle");
+}
+
+} // anonymous namespace
+
 void run_homing(StepperMotor& stepper, LimitSwitch& fullSwitch)
-{ // NOLINT(readability-function-cognitive-complexity) // reason: homing sequence with timeout +
-  // limit switch polling
+{
     puts("DBG: run_homing START");
     fflush(stdout);
 
@@ -58,8 +109,9 @@ void run_homing(StepperMotor& stepper, LimitSwitch& fullSwitch)
     bool homed = false;
     auto startTime = xTaskGetTickCount();
     bool timedOut = false;
+    bool error = false;
 
-    while (!homed && !timedOut)
+    while (!homed && !timedOut && !error)
     {
         if (diag::gRtcWdt)
         {
@@ -73,17 +125,8 @@ void run_homing(StepperMotor& stepper, LimitSwitch& fullSwitch)
         esp_task_wdt_reset();
         assert_rmt_preconditions();
 
-        if (domain::gStopFull.load(std::memory_order_acquire))
-        {
-            homed = true;
+        if (checkHomingTermination(startTime, homed, timedOut))
             break;
-        }
-
-        if ((xTaskGetTickCount() - startTime) >= pdMS_TO_TICKS(HOMING_TIMEOUT_MS))
-        {
-            timedOut = true;
-            break;
-        }
 
         size_t chunk = config::RMT_CHUNK_SYMBOLS;
 
@@ -100,42 +143,17 @@ void run_homing(StepperMotor& stepper, LimitSwitch& fullSwitch)
                 ESP_LOGE("motor_task", "Homing RMT error: %d", static_cast<int>(result.error()));
                 domain::gBuretteState.store(BuretteState::Error, std::memory_order_release);
                 diag::StateTracer::logBuretteTransition("homing", "error");
-                return;
+                error = true;
+                break;
             }
         }
 
         totalSent += static_cast<uint32_t>(chunk);
 
-        if (domain::gStopFull.load(std::memory_order_acquire))
-        {
-            homed = true;
-        }
-
-        if ((xTaskGetTickCount() - startTime) >= pdMS_TO_TICKS(HOMING_TIMEOUT_MS))
-        {
-            timedOut = true;
-        }
+        checkHomingTermination(startTime, homed, timedOut);
     }
 
-    std::ignore = stepper.emergencyStop();
-    std::ignore = stepper.enable();
-
-    if (homed)
-    {
-        stepper.setCurrentPosition(domain::Steps{0});
-        domain::gStopFull.store(false, std::memory_order_release);
-        ESP_LOGI("motor_task", "Homing complete at step %lu (FULL limit)",
-                 static_cast<unsigned long>(totalSent));
-    }
-    else if (timedOut)
-    {
-        ESP_LOGW("motor_task", "Homing timed out after %lu ms (%lu steps)",
-                 static_cast<unsigned long>(HOMING_TIMEOUT_MS),
-                 static_cast<unsigned long>(totalSent));
-    }
-
-    domain::gBuretteState.store(BuretteState::Idle, std::memory_order_release);
-    diag::StateTracer::logBuretteTransition("homing", "idle");
+    postHomingCleanup(stepper, homed, timedOut, totalSent, error);
 }
 
 } // namespace ecotiter::infrastructure::motor

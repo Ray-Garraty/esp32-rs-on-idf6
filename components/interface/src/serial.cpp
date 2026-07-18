@@ -28,8 +28,7 @@ SerialReader::~SerialReader()
 }
 
 Result<void> SerialReader::init() noexcept
-{ // NOLINT(readability-function-cognitive-complexity) // reason: UART driver install with line
-  // reader setup
+{
     uart_config_t uart_config = {
         .baud_rate = 115200,
         .data_bits = UART_DATA_8_BITS,

@@ -95,6 +95,49 @@ BleManager::BleManager()
     s_instance = this;
 }
 
+namespace
+{
+
+struct QueuePair
+{
+    QueueHandle_t cmdQueue;
+    QueueHandle_t notifyQueue;
+};
+
+std::expected<QueuePair, domain::AppError> createQueues()
+{
+    size_t freeHeap = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    if (freeHeap < 30 * 1024)
+    {
+        ESP_LOGW(TAG, "Insufficient DRAM for BLE: %zu bytes < 30 KB", freeHeap);
+        return std::unexpected(domain::AppError::Resource);
+    }
+
+    QueuePair q{};
+    q.cmdQueue = xQueueCreate(BLE_CMD_QUEUE_SIZE, sizeof(BleCmdItem));
+    if (q.cmdQueue == nullptr)
+    {
+        ESP_LOGE(TAG, "Failed to create command queue");
+        return std::unexpected(domain::AppError::Resource);
+    }
+
+    if (!diag::HeapSnapshot::assertCanAllocate(BLE_NOTIFY_QUEUE_SIZE * sizeof(BleNotifyItem)))
+    {
+        ESP_LOGW(TAG, "Low DRAM before BLE notify queue creation");
+    }
+    q.notifyQueue = xQueueCreate(BLE_NOTIFY_QUEUE_SIZE, sizeof(BleNotifyItem));
+    if (q.notifyQueue == nullptr)
+    {
+        ESP_LOGE(TAG, "Failed to create notify queue");
+        vQueueDelete(q.cmdQueue);
+        return std::unexpected(domain::AppError::Resource);
+    }
+
+    return q;
+}
+
+} // anonymous namespace
+
 BleManager::~BleManager()
 {
     if (cmdQueue_ != nullptr)
@@ -112,38 +155,17 @@ BleManager::~BleManager()
 }
 
 std::expected<void, domain::AppError> BleManager::init()
-{ // NOLINT(readability-function-cognitive-complexity) // reason: BLE stack init with GATT services
+{
     puts("DBG: BLE init ENTER");
     fflush(stdout);
     if (initialized_)
         return {};
 
-    size_t freeHeap = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-    if (freeHeap < 30 * 1024)
-    {
-        ESP_LOGW(TAG, "Insufficient DRAM for BLE: %zu bytes < 30 KB", freeHeap);
-        return std::unexpected(domain::AppError::Resource);
-    }
-
-    cmdQueue_ = xQueueCreate(BLE_CMD_QUEUE_SIZE, sizeof(BleCmdItem));
-    if (cmdQueue_ == nullptr)
-    {
-        ESP_LOGE(TAG, "Failed to create command queue");
-        return std::unexpected(domain::AppError::Resource);
-    }
-
-    if (!diag::HeapSnapshot::assertCanAllocate(BLE_NOTIFY_QUEUE_SIZE * sizeof(BleNotifyItem)))
-    {
-        ESP_LOGW(TAG, "Low DRAM before BLE notify queue creation");
-    }
-    notifyQueue_ = xQueueCreate(BLE_NOTIFY_QUEUE_SIZE, sizeof(BleNotifyItem));
-    if (notifyQueue_ == nullptr)
-    {
-        ESP_LOGE(TAG, "Failed to create notify queue");
-        vQueueDelete(cmdQueue_);
-        cmdQueue_ = nullptr;
-        return std::unexpected(domain::AppError::Resource);
-    }
+    auto queues = createQueues();
+    if (!queues)
+        return std::unexpected(queues.error());
+    cmdQueue_ = queues->cmdQueue;
+    notifyQueue_ = queues->notifyQueue;
 
     // Fix 3: Diagnostic markers around PHY-calibration-triggering call
     {
@@ -200,8 +222,7 @@ std::expected<void, domain::AppError> BleManager::init()
 }
 
 void BleManager::process()
-{ // NOLINT(readability-function-cognitive-complexity) // reason: BLE event dispatch, command queue
-  // drain
+{
     if (!initialized_)
         return;
 
@@ -287,102 +308,124 @@ bool BleManager::sendNotification(std::string_view data)
     return true;
 }
 
+namespace
+{
+
+bool syncGattHandles(uint16_t& txAttrHandle)
+{
+    int rc = ble_gatts_find_chr(&NUS_SVC_UUID.u, &NUS_TX_UUID.u, nullptr, &txAttrHandle);
+    if (rc != 0)
+    {
+        ESP_LOGE(TAG, "find TX chr failed: %d", rc);
+        return false;
+    }
+    ESP_LOGI(TAG, "TX attr handle=%d", txAttrHandle);
+    return true;
+}
+
+bool configureAdvertising(uint8_t& ownAddrType)
+{
+    int rc = ble_hs_util_ensure_addr(0);
+    if (rc != 0)
+    {
+        ESP_LOGE(TAG, "ensure addr failed: %d", rc);
+        return false;
+    }
+
+    rc = ble_hs_id_infer_auto(0, &ownAddrType);
+    if (rc != 0)
+    {
+        ESP_LOGE(TAG, "infer addr failed: %d", rc);
+        return false;
+    }
+
+    uint8_t addrVal[6] = {};
+    rc = ble_hs_id_copy_addr(ownAddrType, addrVal, nullptr);
+    if (rc != 0)
+    {
+        ESP_LOGE(TAG, "copy addr failed: %d", rc);
+        return false;
+    }
+
+    char deviceName[20];
+    int nameLen = std::snprintf(deviceName, sizeof(deviceName), "EcoTiter-%02X%02X", addrVal[1],
+                                addrVal[0]);
+    if (nameLen < 0)
+        return false;
+
+    ESP_LOGI(TAG, "Device Address: %02X:%02X:%02X:%02X:%02X:%02X", addrVal[5], addrVal[4],
+             addrVal[3], addrVal[2], addrVal[1], addrVal[0]);
+
+    struct ble_hs_adv_fields fields;
+    std::memset(&fields, 0, sizeof(fields));
+    fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+    fields.tx_pwr_lvl_is_present = 1;
+    fields.tx_pwr_lvl = BLE_HS_ADV_TX_PWR_LVL_AUTO;
+    fields.name = reinterpret_cast<uint8_t*>(deviceName);
+    fields.name_len = static_cast<uint8_t>(nameLen);
+    fields.name_is_complete = 1;
+
+    rc = ble_gap_adv_set_fields(&fields);
+    if (rc != 0)
+    {
+        ESP_LOGE(TAG, "adv set fields failed: %d", rc);
+        return false;
+    }
+    return true;
+}
+
+bool startAdvertising(uint8_t ownAddrType)
+{
+    // Set scan response data with NUS service UUID so scanners can find
+    // the device by service UUID (ble_test.py checks SERVICE_UUID in svc_uuids)
+    {
+        struct ble_hs_adv_fields rsp_fields;
+        std::memset(&rsp_fields, 0, sizeof(rsp_fields));
+        rsp_fields.uuids128 = const_cast<ble_uuid128_t*>(&NUS_SVC_UUID);
+        rsp_fields.num_uuids128 = 1;
+        rsp_fields.uuids128_is_complete = 1;
+        int rc = ble_gap_adv_rsp_set_fields(&rsp_fields);
+        if (rc != 0)
+        {
+            ESP_LOGE(TAG, "adv rsp set fields failed: %d", rc);
+            return false;
+        }
+    }
+
+    int rc = ble_gap_adv_start(ownAddrType, nullptr, BLE_HS_FOREVER, &ADV_PARAMS,
+                               BleManager::gapEventCallback, nullptr);
+    if (rc != 0)
+    {
+        ESP_LOGE(TAG, "adv start failed: %d", rc);
+        return false;
+    }
+
+    ESP_LOGI(TAG, "Advertising");
+    domain::gBleError.store(false, std::memory_order_release);
+    return true;
+}
+
+} // anonymous namespace
+
 void BleManager::onHostSync()
-{ // NOLINT(readability-function-cognitive-complexity) // reason: BLE host state machine, 10+ sync
-  // events
+{
     if (s_instance == nullptr)
         return;
 
-    {
-        diag::FfiGuard guard(65);
+    diag::FfiGuard guard(65);
 
-        int rc = ble_gatts_find_chr(&NUS_SVC_UUID.u, &NUS_TX_UUID.u, nullptr,
-                                    &s_instance->txAttrHandle_);
-        if (rc != 0)
-        {
-            ESP_LOGE(TAG, "find TX chr failed: %d", rc);
-            return;
-        }
-        ESP_LOGI(TAG, "TX attr handle=%d", s_instance->txAttrHandle_);
+    uint16_t txAttrHandle;
+    if (!syncGattHandles(txAttrHandle))
+        return;
+    s_instance->txAttrHandle_ = txAttrHandle;
 
-        rc = ble_hs_util_ensure_addr(0);
-        if (rc != 0)
-        {
-            ESP_LOGE(TAG, "ensure addr failed: %d", rc);
-            return;
-        }
+    uint8_t ownAddrType;
+    if (!configureAdvertising(ownAddrType))
+        return;
+    s_instance->ownAddrType_ = ownAddrType;
 
-        uint8_t ownAddrType;
-        rc = ble_hs_id_infer_auto(0, &ownAddrType);
-        if (rc != 0)
-        {
-            ESP_LOGE(TAG, "infer addr failed: %d", rc);
-            return;
-        }
-        s_instance->ownAddrType_ = ownAddrType;
-
-        uint8_t addrVal[6] = {};
-        rc = ble_hs_id_copy_addr(ownAddrType, addrVal, nullptr);
-        if (rc != 0)
-        {
-            ESP_LOGE(TAG, "copy addr failed: %d", rc);
-            return;
-        }
-
-        char deviceName[20];
-        int nameLen = std::snprintf(deviceName, sizeof(deviceName), "EcoTiter-%02X%02X", addrVal[1],
-                                    addrVal[0]);
-        if (nameLen < 0)
-            return;
-
-        ESP_LOGI(TAG, "Device Address: %02X:%02X:%02X:%02X:%02X:%02X", addrVal[5], addrVal[4],
-                 addrVal[3], addrVal[2], addrVal[1], addrVal[0]);
-
-        {
-            struct ble_hs_adv_fields fields;
-            std::memset(&fields, 0, sizeof(fields));
-            fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-            fields.tx_pwr_lvl_is_present = 1;
-            fields.tx_pwr_lvl = BLE_HS_ADV_TX_PWR_LVL_AUTO;
-            fields.name = reinterpret_cast<uint8_t*>(deviceName);
-            fields.name_len = static_cast<uint8_t>(nameLen);
-            fields.name_is_complete = 1;
-
-            rc = ble_gap_adv_set_fields(&fields);
-            if (rc != 0)
-            {
-                ESP_LOGE(TAG, "adv set fields failed: %d", rc);
-                return;
-            }
-        }
-
-        // Set scan response data with NUS service UUID so scanners can find
-        // the device by service UUID (ble_test.py checks SERVICE_UUID in svc_uuids)
-        {
-            struct ble_hs_adv_fields rsp_fields;
-            std::memset(&rsp_fields, 0, sizeof(rsp_fields));
-            rsp_fields.uuids128 = const_cast<ble_uuid128_t*>(&NUS_SVC_UUID);
-            rsp_fields.num_uuids128 = 1;
-            rsp_fields.uuids128_is_complete = 1;
-            rc = ble_gap_adv_rsp_set_fields(&rsp_fields);
-            if (rc != 0)
-            {
-                ESP_LOGE(TAG, "adv rsp set fields failed: %d", rc);
-                return;
-            }
-        }
-
-        rc = ble_gap_adv_start(ownAddrType, nullptr, BLE_HS_FOREVER, &ADV_PARAMS, gapEventCallback,
-                               nullptr);
-        if (rc != 0)
-        {
-            ESP_LOGE(TAG, "adv start failed: %d", rc);
-            return;
-        }
-
-        ESP_LOGI(TAG, "Advertising as %s", deviceName);
-        domain::gBleError.store(false, std::memory_order_release);
-    }
+    if (!startAdvertising(ownAddrType))
+        return;
 }
 
 void BleManager::onHostReset(int reason)

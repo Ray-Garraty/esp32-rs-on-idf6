@@ -13,6 +13,7 @@
 #include "lwip/sockets.h"
 #include "mdns.h"
 
+#include "application/esp_check.hpp"
 #include "diag/ffi_guard.hpp"
 #include "domain/dns.hpp"
 #include "infrastructure/config.hpp"
@@ -33,9 +34,9 @@ WifiManager::~WifiManager()
     stop();
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) // reason: 9 sequential ESP-IDF init calls with FfiGuard; each call is inherently sequential
 std::expected<void, domain::AppError> WifiManager::init()
-{ // NOLINT(readability-function-cognitive-complexity) // reason: WiFi stack init with event loop
-  // registration
+{
     if (initialized_)
         return {};
 
@@ -69,42 +70,15 @@ std::expected<void, domain::AppError> WifiManager::init()
         }
 
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-        err = esp_wifi_init(&cfg);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "wifi init: %s", esp_err_to_name(err));
-            return std::unexpected(domain::AppError::Resource);
-        }
-
-        err = esp_wifi_set_storage(WIFI_STORAGE_RAM);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "wifi set storage: %s", esp_err_to_name(err));
-            return std::unexpected(domain::AppError::Resource);
-        }
-
-        err = esp_wifi_set_mode(WIFI_MODE_APSTA);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "wifi set mode: %s", esp_err_to_name(err));
-            return std::unexpected(domain::AppError::Resource);
-        }
-
-        err = esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &eventHandler, this,
-                                                  nullptr);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "register wifi handler: %s", esp_err_to_name(err));
-            return std::unexpected(domain::AppError::Resource);
-        }
-
-        err = esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &eventHandler,
-                                                  this, nullptr);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "register IP handler: %s", esp_err_to_name(err));
-            return std::unexpected(domain::AppError::Resource);
-        }
+        ESP_RETURN_UNEXPECTED(esp_wifi_init(&cfg), TAG);
+        ESP_RETURN_UNEXPECTED(esp_wifi_set_storage(WIFI_STORAGE_RAM), TAG);
+        ESP_RETURN_UNEXPECTED(esp_wifi_set_mode(WIFI_MODE_APSTA), TAG);
+        ESP_RETURN_UNEXPECTED(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                                                  &eventHandler, this, nullptr),
+                              TAG);
+        ESP_RETURN_UNEXPECTED(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                                                  &eventHandler, this, nullptr),
+                              TAG);
     }
 
     initialized_ = true;
@@ -112,48 +86,36 @@ std::expected<void, domain::AppError> WifiManager::init()
     return {};
 }
 
-void WifiManager::startAP()
-{ // NOLINT(readability-function-cognitive-complexity) // reason: AP config with DHCP + DNS +
-  // captive portal
-    if (!initialized_ || apActive_)
-        return;
-
-    diag::FfiGuard guard(71);
-
-    if (apNetif_ == nullptr)
-    {
-        ESP_LOGE(TAG, "AP netif not created (init() must be called first)");
-        return;
-    }
-
+void WifiManager::configureDhcp(esp_netif_t* netif)
+{
     esp_netif_ip_info_t ipInfo{};
     ipInfo.ip.addr = AP_IP;
     ipInfo.netmask.addr = 0x00FFFFFF; // 255.255.255.0
     ipInfo.gw.addr = AP_IP;
-    esp_netif_dhcps_stop(apNetif_);
-    esp_netif_set_ip_info(apNetif_, &ipInfo);
+    esp_netif_dhcps_stop(netif);
+    esp_netif_set_ip_info(netif, &ipInfo);
 
     // DHCP option 6 (DNS Server): enable DNS server advertisement via DHCP
-    // ESP_NETIF_DOMAIN_NAME_SERVER expects a uint8_t: 1 = enable, 0 = disable
     uint8_t dnsEnabled = 1;
-    esp_netif_dhcps_option(apNetif_, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &dnsEnabled,
+    esp_netif_dhcps_option(netif, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &dnsEnabled,
                            sizeof(dnsEnabled));
 
     // Set DNS info on the netif so lwip resolves via 192.168.4.1
     esp_netif_dns_info_t dnsInfo{};
     dnsInfo.ip.u_addr.ip4.addr = AP_IP;
     dnsInfo.ip.type = ESP_IPADDR_TYPE_V4;
-    esp_netif_set_dns_info(apNetif_, ESP_NETIF_DNS_MAIN, &dnsInfo);
+    esp_netif_set_dns_info(netif, ESP_NETIF_DNS_MAIN, &dnsInfo);
 
     // DHCP option 114 (Captive Portal URI): required by iOS/Android detection
     char captivePortalUri[] = "http://192.168.4.1/wifi";
-    esp_netif_dhcps_option(apNetif_, ESP_NETIF_OP_SET, ESP_NETIF_CAPTIVEPORTAL_URI,
+    esp_netif_dhcps_option(netif, ESP_NETIF_OP_SET, ESP_NETIF_CAPTIVEPORTAL_URI,
                            captivePortalUri, strlen(captivePortalUri) + 1);
 
-    esp_netif_dhcps_start(apNetif_);
+    esp_netif_dhcps_start(netif);
+}
 
-    uint8_t mac[6] = {};
-    esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
+wifi_config_t WifiManager::buildApConfig(const uint8_t* mac)
+{
     char ssid[32];
     int n = std::snprintf(ssid, sizeof(ssid), "EcoTiter-%02X%02X", static_cast<unsigned>(mac[4]),
                           static_cast<unsigned>(mac[3]));
@@ -171,79 +133,182 @@ void WifiManager::startAP()
     std::strncpy(reinterpret_cast<char*>(apConfig.ap.password), config::AP_PASSWORD,
                  sizeof(apConfig.ap.password) - 1);
     apConfig.ap.password[sizeof(apConfig.ap.password) - 1] = '\0';
+    return apConfig;
+}
 
-    // Ensure APSTA mode (belt-and-suspenders — init() normally sets it,
-    // but tryStartSTA() may have changed it to WIFI_MODE_STA).
+bool WifiManager::waitForStaConnection(uint32_t timeoutMs)
+{
+    EventBits_t bits =
+        xEventGroupWaitBits(staEventGroup_, STA_CONNECTED_BIT | STA_DISCONNECTED_BIT, pdTRUE,
+                            pdFALSE, pdMS_TO_TICKS(timeoutMs));
+    ESP_LOGI(TAG, "waitForStaConnection: event_bits=0x%x (CONNECTED=%d, DISCONNECTED=%d, TIMEOUT=%d)",
+             bits, (bits & STA_CONNECTED_BIT) != 0, (bits & STA_DISCONNECTED_BIT) != 0, bits == 0);
+    return (bits & STA_CONNECTED_BIT) != 0;
+}
+
+bool WifiManager::tryConnectSlot(uint8_t slot)
+{
+    char keyBuf[16];
+    char ssidBuf[64]{};
+    char passBuf[64]{};
+
+    std::snprintf(keyBuf, sizeof(keyBuf), "ssid_%u", slot);
+    auto ssidResult = storage::wifiReadStr(keyBuf, ssidBuf);
+    if (!ssidResult || !ssidResult->has_value())
+        return false;
+
+    std::snprintf(keyBuf, sizeof(keyBuf), "password_%u", slot);
+    auto passResult = storage::wifiReadStr(keyBuf, passBuf);
+    if (!passResult || !passResult->has_value())
+        return false;
+
+    ESP_LOGI(TAG, "Trying STA slot %u: %s", slot, ssidBuf);
+
+    xEventGroupClearBits(staEventGroup_, STA_CONNECTED_BIT | STA_DISCONNECTED_BIT);
+
+    wifi_config_t staConfig{};
+    std::strncpy(reinterpret_cast<char*>(staConfig.sta.ssid), ssidBuf,
+                 sizeof(staConfig.sta.ssid) - 1);
+    std::strncpy(reinterpret_cast<char*>(staConfig.sta.password), passBuf,
+                 sizeof(staConfig.sta.password) - 1);
+    staConfig.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+
+    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &staConfig);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "STA slot %u set_config failed: %s", slot, esp_err_to_name(err));
+        return false;
+    }
+
+    staConnecting_ = true;
+    err = esp_wifi_connect();
+    if (err != ESP_OK)
+    {
+        staConnecting_ = false;
+        ESP_LOGE(TAG, "STA slot %u connect failed: %s", slot, esp_err_to_name(err));
+        return false;
+    }
+
+    // Blocking wait per slot (6s per network, covers auth + DHCP)
+    if (waitForStaConnection(6000))
+    {
+        auto sv = ssidResult->value();
+        size_t len = std::min(sv.size(), sizeof(staSsid_) - 1);
+        std::memcpy(staSsid_, sv.data(), len);
+        staSsid_[len] = '\0';
+        ESP_LOGI(TAG, "Connected to STA: %s", staSsid_);
+        return true;
+    }
+
+    staConnecting_ = false;
+    esp_wifi_disconnect();
+    ESP_LOGW(TAG, "STA slot %u failed (%s)", slot, ssidBuf);
+    return false;
+}
+
+void WifiManager::stopWiFiAndRestoreAPSTA()
+{
+    esp_err_t stop_err = esp_wifi_stop();
+    if (stop_err != ESP_OK)
+    {
+        ESP_LOGW(TAG, "wifi stop after STA failure: %s", esp_err_to_name(stop_err));
+    }
+    // Restore APSTA mode expected by startAP() fallback
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_APSTA));
+}
+
+namespace
+{
+
+/// Apply the AP configuration: set APSTA mode, configure AP, start WiFi.
+/// Returns true on success, false on error.
+bool applyApConfig(wifi_config_t& apConfig)
+{
     esp_err_t err = esp_wifi_set_mode(WIFI_MODE_APSTA);
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "set APSTA mode: %s", esp_err_to_name(err));
-        return;
+        return false;
     }
 
     err = esp_wifi_set_config(WIFI_IF_AP, &apConfig);
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "set AP config: %s", esp_err_to_name(err));
-        return;
+        return false;
     }
 
     err = esp_wifi_start();
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "wifi start: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    return true;
+}
+
+} // anonymous namespace
+
+void WifiManager::startAP()
+{
+    if (!initialized_ || apActive_)
+        return;
+
+    diag::FfiGuard guard(71);
+
+    if (apNetif_ == nullptr)
+    {
+        ESP_LOGE(TAG, "AP netif not created (init() must be called first)");
         return;
     }
+
+    configureDhcp(apNetif_);
+
+    uint8_t mac[6] = {};
+    esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
+    wifi_config_t apConfig = buildApConfig(mac);
+
+    if (!applyApConfig(apConfig))
+        return;
 
     apActive_ = true;
     ESP_LOGI(TAG, "AP started: %s (192.168.4.1)", apSsid_);
 }
 
-bool WifiManager::connectSTA(
-    const char* ssid,
-    const char* password, // NOLINT(readability-function-cognitive-complexity)
-                          // // reason: STA connect with retry + event wait
-    uint32_t timeoutMs)
+namespace
 {
-    if (!initialized_)
-        return false;
 
-    diag::FfiGuard guard(72);
-
-    if (staEventGroup_ == nullptr)
-    {
-        staEventGroup_ = xEventGroupCreate();
-        if (staEventGroup_ == nullptr)
-            return false;
-    }
-    xEventGroupClearBits(staEventGroup_, STA_CONNECTED_BIT | STA_DISCONNECTED_BIT);
-
-    // If already connected to the same SSID, skip reconnection
-    if (staConnected_.load(std::memory_order_acquire) && std::strcmp(staSsid_, ssid) == 0)
-    {
-        ESP_LOGI(TAG, "connectSTA: already connected to %s", ssid);
-        return true;
-    }
-
-    ESP_LOGI(TAG, "connectSTA: ssid='%s' (len=%zu), password_len=%zu", ssid, strlen(ssid),
-             strlen(password));
-
+/// Build wifi_config_t from SSID/password and apply it.
+/// Returns ESP_OK on success.
+esp_err_t applyStaConfig(const char* ssid, const char* password)
+{
     wifi_config_t staConfig{};
     std::strncpy(reinterpret_cast<char*>(staConfig.sta.ssid), ssid, sizeof(staConfig.sta.ssid) - 1);
     std::strncpy(reinterpret_cast<char*>(staConfig.sta.password), password,
                  sizeof(staConfig.sta.password) - 1);
     staConfig.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    return esp_wifi_set_config(WIFI_IF_STA, &staConfig);
+}
 
-    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &staConfig);
-    ESP_LOGI(TAG, "connectSTA: set_config result=%s", esp_err_to_name(err));
-    if (err != ESP_OK)
+} // anonymous namespace
+
+esp_err_t WifiManager::ensureStaEventGroup()
+{
+    if (staEventGroup_ == nullptr)
     {
-        ESP_LOGE(TAG, "set STA config: %s", esp_err_to_name(err));
-        return false;
+        staEventGroup_ = xEventGroupCreate();
+        if (staEventGroup_ == nullptr)
+            return ESP_ERR_NO_MEM;
     }
+    xEventGroupClearBits(staEventGroup_, STA_CONNECTED_BIT | STA_DISCONNECTED_BIT);
+    return ESP_OK;
+}
 
+bool WifiManager::doStaConnectAndSave(uint32_t timeoutMs)
+{
     staConnecting_ = true;
-    err = esp_wifi_connect();
+    esp_err_t err = esp_wifi_connect();
     ESP_LOGI(TAG, "connectSTA: connect result=%s", esp_err_to_name(err));
     if (err != ESP_OK)
     {
@@ -252,42 +317,85 @@ bool WifiManager::connectSTA(
         return false;
     }
 
-    ESP_LOGI(TAG, "Connecting to STA: %s (timeout=%lu ms)", ssid, (unsigned long)timeoutMs);
-
-    EventBits_t bits = xEventGroupWaitBits(staEventGroup_, STA_CONNECTED_BIT | STA_DISCONNECTED_BIT,
-                                           pdTRUE, pdFALSE, pdMS_TO_TICKS(timeoutMs));
-    ESP_LOGI(TAG, "connectSTA: event_bits=0x%x (CONNECTED=%d, DISCONNECTED=%d, TIMEOUT=%d)", bits,
-             (bits & STA_CONNECTED_BIT) != 0, (bits & STA_DISCONNECTED_BIT) != 0, bits == 0);
-
-    if (bits & STA_CONNECTED_BIT)
+    if (!waitForStaConnection(timeoutMs))
     {
-        std::strncpy(staSsid_, ssid, sizeof(staSsid_) - 1);
-        staSsid_[sizeof(staSsid_) - 1] = '\0';
-        saveCredentials(ssid, password);
-        ESP_LOGI(TAG, "STA connected via connectSTA: %s", ssid);
+        ESP_LOGW(TAG, "STA connection timeout/failure");
+        staConnecting_ = false;
+        esp_wifi_disconnect();
+        return false;
+    }
+    return true;
+}
+
+bool WifiManager::doStaConnectAndWait(const char* ssid, const char* password, uint32_t timeoutMs)
+{
+    ESP_LOGI(TAG, "connectSTA: ssid='%s' (len=%zu), password_len=%zu", ssid, strlen(ssid),
+             strlen(password));
+
+    esp_err_t err = applyStaConfig(ssid, password);
+    ESP_LOGI(TAG, "connectSTA: set_config result=%s", esp_err_to_name(err));
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "set STA config: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    if (!doStaConnectAndSave(timeoutMs))
+        return false;
+
+    std::strncpy(staSsid_, ssid, sizeof(staSsid_) - 1);
+    staSsid_[sizeof(staSsid_) - 1] = '\0';
+    saveCredentials(ssid, password);
+    ESP_LOGI(TAG, "STA connected via connectSTA: %s", ssid);
+    return true;
+}
+
+bool WifiManager::connectSTA(const char* ssid, const char* password, uint32_t timeoutMs)
+{
+    if (!initialized_)
+        return false;
+
+    diag::FfiGuard guard(72);
+
+    if (ensureStaEventGroup() != ESP_OK)
+        return false;
+
+    // If already connected to the same SSID, skip reconnection
+    if (staConnected_.load(std::memory_order_acquire) && std::strcmp(staSsid_, ssid) == 0)
+    {
+        ESP_LOGI(TAG, "connectSTA: already connected to %s", ssid);
         return true;
     }
 
-    ESP_LOGW(TAG, "STA connection timeout/failure for: %s", ssid);
-    staConnecting_ = false;
-    esp_wifi_disconnect();
+    return doStaConnectAndWait(ssid, password, timeoutMs);
+}
+
+bool WifiManager::startWiFiInStaModeIfNeeded()
+{
+    // init() sets WIFI_MODE_APSTA but does NOT call esp_wifi_start().
+    // Handle both WIFI_MODE_NULL (uninitialized) and WIFI_MODE_APSTA
+    // (init called but not started) by switching to STA and starting.
+    wifi_mode_t currentMode;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_get_mode(&currentMode));
+    if (currentMode == WIFI_MODE_NULL || currentMode == WIFI_MODE_APSTA)
+    {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
+        esp_err_t err = esp_wifi_start();
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "wifi start failed: %s", esp_err_to_name(err));
+            return false;
+        }
+        return true;
+    }
     return false;
 }
 
-bool WifiManager::tryStartSTA()
-{ // NOLINT(readability-function-cognitive-complexity) // reason: multi-credential STA scan +
-  // connect loop
-    if (!initialized_ || staConnecting_)
-        return false;
+namespace
+{
 
-    // Read number of saved networks and log them
-    auto countResult = storage::wifiReadCount();
-    uint8_t count = countResult ? *countResult : 0;
-    if (count == 0)
-    {
-        ESP_LOGI(TAG, "NVS: no saved WiFi networks");
-        return false;
-    }
+void logSavedNetworks(uint8_t count)
+{
     ESP_LOGI(TAG, "NVS: %u saved WiFi network(s)", count);
     for (uint8_t s = 0; s < count && s < config::WIFI_MAX_NETWORKS; s++)
     {
@@ -300,39 +408,31 @@ bool WifiManager::tryStartSTA()
             ESP_LOGI(TAG, "NVS slot %u: SSID=%s", s, ssidBuf);
         }
     }
+}
 
+} // anonymous namespace
+
+bool WifiManager::tryStartSTA()
+{
+    if (!initialized_ || staConnecting_)
+        return false;
+
+    auto countResult = storage::wifiReadCount();
+    uint8_t count = countResult ? *countResult : 0;
+    if (count == 0)
+    {
+        ESP_LOGI(TAG, "NVS: no saved WiFi networks");
+        return false;
+    }
+
+    logSavedNetworks(count);
     diag::FfiGuard guard(72);
 
-    // Ensure event group exists
-    if (staEventGroup_ == nullptr)
-    {
-        staEventGroup_ = xEventGroupCreate();
-        if (staEventGroup_ == nullptr)
-            return false;
-    }
+    if (ensureStaEventGroup() != ESP_OK)
+        return false;
 
     // Start WiFi in STA mode if not already running.
-    // init() sets WIFI_MODE_APSTA but does NOT call esp_wifi_start().
-    // Handle both WIFI_MODE_NULL (uninitialized) and WIFI_MODE_APSTA
-    // (init called but not started) by switching to STA and starting.
-    bool startedHere = false;
-    wifi_mode_t currentMode;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_get_mode(&currentMode));
-    if (currentMode == WIFI_MODE_NULL || currentMode == WIFI_MODE_APSTA)
-    {
-        // Either init() hasn't been called (NULL) or it set APSTA without
-        // starting (init() line 75). Switch to STA-only and start.
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_STA));
-        esp_err_t err = esp_wifi_start();
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "wifi start failed: %s", esp_err_to_name(err));
-            return false;
-        }
-        startedHere = true;
-    }
-    // If currentMode == WIFI_MODE_STA or WIFI_MODE_AP, WiFi is already
-    // running — proceed with connection attempt.
+    bool startedHere = startWiFiInStaModeIfNeeded();
 
     if (staNetif_ == nullptr)
     {
@@ -343,87 +443,22 @@ bool WifiManager::tryStartSTA()
     // Try each saved network in order
     for (uint8_t slot = 0; slot < count; slot++)
     {
-        char keyBuf[16];
-        char ssidBuf[64]{};
-        char passBuf[64]{};
-
-        std::snprintf(keyBuf, sizeof(keyBuf), "ssid_%u", slot);
-        auto ssidResult = storage::wifiReadStr(keyBuf, ssidBuf);
-        if (!ssidResult || !ssidResult->has_value())
-            continue;
-
-        std::snprintf(keyBuf, sizeof(keyBuf), "password_%u", slot);
-        auto passResult = storage::wifiReadStr(keyBuf, passBuf);
-        if (!passResult || !passResult->has_value())
-            continue;
-
-        ESP_LOGI(TAG, "Trying STA slot %u: %s", slot, ssidBuf);
-
-        xEventGroupClearBits(staEventGroup_, STA_CONNECTED_BIT | STA_DISCONNECTED_BIT);
-
-        wifi_config_t staConfig{};
-        std::strncpy(reinterpret_cast<char*>(staConfig.sta.ssid), ssidBuf,
-                     sizeof(staConfig.sta.ssid) - 1);
-        std::strncpy(reinterpret_cast<char*>(staConfig.sta.password), passBuf,
-                     sizeof(staConfig.sta.password) - 1);
-        staConfig.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-
-        esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &staConfig);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "STA slot %u set_config failed: %s", slot, esp_err_to_name(err));
-            continue;
-        }
-
-        staConnecting_ = true;
-        err = esp_wifi_connect();
-        if (err != ESP_OK)
-        {
-            staConnecting_ = false;
-            ESP_LOGE(TAG, "STA slot %u connect failed: %s", slot, esp_err_to_name(err));
-            continue;
-        }
-
-        // Blocking wait per slot (6s per network, covers auth + DHCP)
-        EventBits_t bits =
-            xEventGroupWaitBits(staEventGroup_, STA_CONNECTED_BIT | STA_DISCONNECTED_BIT, pdTRUE,
-                                pdFALSE, pdMS_TO_TICKS(6000));
-
-        if (bits & STA_CONNECTED_BIT)
-        {
-            auto sv = ssidResult->value();
-            size_t len = std::min(sv.size(), sizeof(staSsid_) - 1);
-            std::memcpy(staSsid_, sv.data(), len);
-            staSsid_[len] = '\0';
-            ESP_LOGI(TAG, "Connected to STA: %s", staSsid_);
+        if (tryConnectSlot(slot))
             return true;
-        }
-
-        staConnecting_ = false;
-        esp_wifi_disconnect();
-        ESP_LOGW(TAG, "STA slot %u failed (%s)", slot, ssidBuf);
     }
 
     // If we started WiFi but all slots failed, stop and restore APSTA
     // mode so that startAP() (called by netTaskEntry on failure) can
     // start cleanly.
     if (startedHere)
-    {
-        esp_err_t stop_err = esp_wifi_stop();
-        if (stop_err != ESP_OK)
-        {
-            ESP_LOGW(TAG, "wifi stop after STA failure: %s", esp_err_to_name(stop_err));
-        }
-        // Restore APSTA mode expected by startAP() fallback
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    }
+        stopWiFiAndRestoreAPSTA();
+
     ESP_LOGW(TAG, "All %u saved networks failed", count);
     return false;
 }
 
 void WifiManager::saveCredentials(const char* ssid, const char* password)
-{ // NOLINT(readability-function-cognitive-complexity) // reason: NVS credential rotation with LRU
-  // eviction
+{
     char keyBuf[16];
     uint8_t count = 0;
     auto countResult = storage::wifiReadCount();
@@ -584,8 +619,7 @@ std::optional<uint32_t> WifiManager::getSTAIP() const noexcept
 }
 
 void WifiManager::process() const
-{ // NOLINT(readability-function-cognitive-complexity) // reason: WiFi event polling, reconnect
-  // logic
+{
     if (!initialized_ || dnsSocket_ < 0)
         return;
 
@@ -640,8 +674,7 @@ void WifiManager::stopDnsServer()
 }
 
 void WifiManager::startMdns()
-{ // NOLINT(readability-function-cognitive-complexity) // reason: mDNS service registration for all
-  // protocols
+{
     if (mdnsInitDone_)
         return;
     diag::FfiGuard guard(76);
@@ -681,76 +714,110 @@ void WifiManager::eventHandler(void* arg, esp_event_base_t base, int32_t id, voi
 }
 
 void WifiManager::handleEvent(esp_event_base_t base, int32_t id, void* data)
-{ // NOLINT(readability-function-cognitive-complexity) // reason: WiFi event handler, 10+ event
-  // types
+{
     if (base == WIFI_EVENT)
     {
-        switch (id)
-        {
-        case WIFI_EVENT_STA_START:
-            ESP_LOGI(TAG, "STA started");
-            if (staConnecting_)
-            {
-                esp_wifi_connect();
-            }
-            break;
-
-        case WIFI_EVENT_STA_CONNECTED:
-            ESP_LOGI(TAG, "STA connected");
-            if (staEventGroup_)
-            {
-                xEventGroupSetBits(staEventGroup_, STA_CONNECTED_BIT);
-            }
-            break;
-
-        case WIFI_EVENT_STA_DISCONNECTED: {
-            ESP_LOGW(TAG, "STA disconnected");
-            staConnected_.store(false);
-            if (staConnecting_)
-            {
-                staConnecting_ = false;
-            }
-            if (staEventGroup_)
-            {
-                xEventGroupSetBits(staEventGroup_, STA_DISCONNECTED_BIT);
-            }
-            break;
-        }
-
-        case WIFI_EVENT_AP_STACONNECTED:
-            ESP_LOGI(TAG, "Station connected to AP");
-            break;
-
-        case WIFI_EVENT_AP_STADISCONNECTED:
-            ESP_LOGI(TAG, "Station disconnected from AP");
-            break;
-
-        default:
-            break;
-        }
+        handleWifiEvent(id, data);
     }
     else if (base == IP_EVENT)
     {
-        if (id == IP_EVENT_STA_GOT_IP)
+        handleIpEvent(id, data);
+    }
+}
+
+void WifiManager::onStaStart() const
+{
+    ESP_LOGI(TAG, "STA started");
+    if (staConnecting_)
+    {
+        esp_wifi_connect();
+    }
+}
+
+void WifiManager::onStaConnected()
+{
+    ESP_LOGI(TAG, "STA connected");
+    if (staEventGroup_)
+    {
+        xEventGroupSetBits(staEventGroup_, STA_CONNECTED_BIT);
+    }
+}
+
+void WifiManager::onStaDisconnected()
+{
+    ESP_LOGW(TAG, "STA disconnected");
+    staConnected_.store(false);
+    if (staConnecting_)
+    {
+        staConnecting_ = false;
+    }
+    if (staEventGroup_)
+    {
+        xEventGroupSetBits(staEventGroup_, STA_DISCONNECTED_BIT);
+    }
+}
+
+void WifiManager::onApStaConnected() const
+{
+    ESP_LOGI(TAG, "Station connected to AP");
+}
+
+void WifiManager::onApStaDisconnected() const
+{
+    ESP_LOGI(TAG, "Station disconnected from AP");
+}
+
+void WifiManager::handleWifiEvent(int32_t id, void* data)
+{
+    (void)data;
+    switch (id)
+    {
+    case WIFI_EVENT_STA_START:
+        onStaStart();
+        break;
+
+    case WIFI_EVENT_STA_CONNECTED:
+        onStaConnected();
+        break;
+
+    case WIFI_EVENT_STA_DISCONNECTED:
+        onStaDisconnected();
+        break;
+
+    case WIFI_EVENT_AP_STACONNECTED:
+        onApStaConnected();
+        break;
+
+    case WIFI_EVENT_AP_STADISCONNECTED:
+        onApStaDisconnected();
+        break;
+
+    default:
+        break;
+    }
+}
+
+void WifiManager::handleIpEvent(int32_t id, void* data)
+{
+    if (id == IP_EVENT_STA_GOT_IP)
+    {
+        auto* event = static_cast<ip_event_got_ip_t*>(data);
+        staConnected_.store(true);
+        staConnecting_ = false;
+
+        char ipStr[16];
+        esp_ip4addr_ntoa(&event->ip_info.ip, ipStr, sizeof(ipStr));
+        ESP_LOGI(TAG, "STA got IP: %s", ipStr);
+
+        startMdns();
+
+        // STA connected — stop AP to save power and avoid confusion
+        if (apActive_)
         {
-            auto* event = static_cast<ip_event_got_ip_t*>(data);
-            staConnected_.store(true);
-            staConnecting_ = false;
-
-            char ipStr[16];
-            esp_ip4addr_ntoa(&event->ip_info.ip, ipStr, sizeof(ipStr));
-            ESP_LOGI(TAG, "STA got IP: %s", ipStr);
-
-            startMdns();
-
-            // STA connected — stop AP to save power and avoid confusion
-            if (apActive_)
-            {
-                stopDnsServer();
-                esp_wifi_set_mode(WIFI_MODE_STA);
-                apActive_ = false;
-                ESP_LOGI(TAG, "AP stopped (STA connected)");
-            }
+            stopDnsServer();
+            esp_wifi_set_mode(WIFI_MODE_STA);
+            apActive_ = false;
+            ESP_LOGI(TAG, "AP stopped (STA connected)");
         }
     }
 }

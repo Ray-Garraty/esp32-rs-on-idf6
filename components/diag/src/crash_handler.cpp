@@ -77,7 +77,6 @@ void panic_print_hex_addr(uint32_t addr)
 
 } // anonymous namespace
 
-// NOLINTBEGIN(bugprone-reserved-identifier) // reason: platform-specific CPU register access
 extern "C" void __wrap_esp_panic_handler(void* info) noexcept
 {
 
@@ -156,4 +155,3 @@ extern "C" void __wrap_esp_panic_handler(void* info) noexcept
     extern void __real_esp_panic_handler(void*);
     __real_esp_panic_handler(info);
 }
-// NOLINTEND(bugprone-reserved-identifier) // reason: END platform register access

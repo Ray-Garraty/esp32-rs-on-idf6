@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
@@ -98,8 +99,8 @@ static uint16_t adcSampleRead()
     return 0;
 }
 
-extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexity) // reason: boot
-                               // sequence 9 steps + event loop
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) // reason: 12 sequential boot steps with puts/fflush/state tracking; each step is inherently sequential
+extern "C" void app_main(void)
 {
     std::printf("BOOT OK: ecotiter v%s [%s] (git: %s)\n", ecotiter::app_version,
                 ecotiter::build_date, ecotiter::git_hash);
@@ -133,10 +134,7 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
         auto bootCal = infrastructure::storage::calibrationRead();
         if (bootCal)
         {
-            // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) // reason: heap-allocated
-            // CalibrationData stored in gCalCache
-            infrastructure::gCalCache.store(new domain::CalibrationData(*bootCal),
-                                            std::memory_order_release);
+            infrastructure::gCalCache.store(new domain::CalibrationData(*bootCal));
         }
     }
 
@@ -251,12 +249,9 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
 
     // Instantiate motor controller (wraps gMotorCmdQueue / gSmResultQueue globals)
     // Must be done after motor task creates the queues but before dispatch uses them.
-    {
-        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) // reason: heap-allocated
-        auto* mc = new infrastructure::MotorControllerImpl();
-        application::setMotorController(mc);
-        ESP_LOGI(TAG, "MotorControllerImpl created and registered with dispatch");
-    }
+    auto mc = std::make_unique<infrastructure::MotorControllerImpl>();
+    application::setMotorController(mc.get());
+    ESP_LOGI(TAG, "MotorControllerImpl created and registered with dispatch");
 
     diag::FfiGuard guard(config::FFI_BOOT_SEQUENCE);
     infrastructure::drivers::AdcDriver adc(static_cast<adc_unit_t>(config::ADC_UNIT),

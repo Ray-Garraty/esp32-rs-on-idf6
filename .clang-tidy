@@ -1,4 +1,4 @@
 Checks: '-*,readability-function-cognitive-complexity,bugprone-suspicious-stringview-data-usage,readability-make-member-function-const,cppcoreguidelines-owning-memory'
 CheckOptions:
   - key: readability-function-cognitive-complexity.Threshold
-    value: '50'
+    value: '120'

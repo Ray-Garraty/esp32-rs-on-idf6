@@ -41,8 +41,7 @@ uint8_t TmcUart::computeCrc(const uint8_t* data, size_t len)
 }
 
 bool TmcUart::init(gpio_num_t txPin, gpio_num_t rxPin, uint32_t baud)
-{ // NOLINT(readability-function-cognitive-complexity) // reason: UART init with TMC2209 register
-  // configuration
+{
     if (initialized_)
         deinit();
 
@@ -100,8 +99,7 @@ void TmcUart::deinit()
 }
 
 bool TmcUart::writeRegister(uint8_t reg, uint32_t value) const
-{ // NOLINT(readability-function-cognitive-complexity) // reason: half-duplex UART write with sync +
-  // CRC
+{
     if (!initialized_)
         return false;
 
@@ -133,27 +131,24 @@ bool TmcUart::writeRegister(uint8_t reg, uint32_t value) const
     return true;
 }
 
-bool TmcUart::readRegister(uint8_t reg, uint32_t& value) const
-{ // NOLINT(readability-function-cognitive-complexity) // reason: half-duplex UART read with retry +
-  // CRC validate
-    if (!initialized_)
-        return false;
+namespace
+{
 
-    // Send read request: sync 0x07, register, CRC
+bool sendReadRequest(uart_port_t uartNum, uint8_t reg)
+{
     uint8_t req[3];
     req[0] = 0x07;
     req[1] = reg;
-    req[2] = computeCrc(req, 2);
+    req[2] = TmcUart::computeCrc(req, 2);
 
-    int written = uart_write_bytes(static_cast<uart_port_t>(uartNum_), req, 3);
+    int written = uart_write_bytes(uartNum, req, 3);
     if (written != 3)
     {
         ESP_LOGE(TAG, "readRegister(0x%02X) wrote %d bytes", reg, written);
         return false;
     }
 
-    esp_err_t err =
-        uart_wait_tx_done(static_cast<uart_port_t>(uartNum_), pdMS_TO_TICKS(TMC_UART_TIMEOUT_MS));
+    esp_err_t err = uart_wait_tx_done(uartNum, pdMS_TO_TICKS(TMC_UART_TIMEOUT_MS));
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "readRegister(0x%02X) TX wait failed", reg);
@@ -161,25 +156,30 @@ bool TmcUart::readRegister(uint8_t reg, uint32_t& value) const
     }
 
     vTaskDelay(pdMS_TO_TICKS(2));
+    return true;
+}
 
-    // Read 8-byte response: sync, register, 4-byte value, 2-byte CRC
-    uint8_t resp[8];
-    int n = uart_read_bytes(static_cast<uart_port_t>(uartNum_), resp, 8,
+bool receiveResponse(uart_port_t uartNum, uint8_t reg, uint8_t* resp, size_t respSize)
+{
+    int n = uart_read_bytes(uartNum, resp, static_cast<int>(respSize),
                             pdMS_TO_TICKS(TMC_UART_TIMEOUT_MS));
-    if (n < 8)
+    if (n < static_cast<int>(respSize))
     {
-        ESP_LOGW(TAG, "readRegister(0x%02X) read %d bytes (expected 8)", reg, n);
+        ESP_LOGW(TAG, "readRegister(0x%02X) read %d bytes (expected %zu)", reg, n, respSize);
         return false;
     }
+    return true;
+}
 
+bool validateResponse(uint8_t reg, const uint8_t* resp, uint32_t& value)
+{
     if (resp[0] != 0x05 || resp[1] != reg)
     {
         ESP_LOGW(TAG, "readRegister(0x%02X) bad header: 0x%02X 0x%02X", reg, resp[0], resp[1]);
         return false;
     }
 
-    // Validate CRC
-    uint8_t expectedCrc = computeCrc(resp, 6);
+    uint8_t expectedCrc = TmcUart::computeCrc(resp, 6);
     uint16_t receivedCrc = static_cast<uint16_t>(resp[6]) | (static_cast<uint16_t>(resp[7]) << 8);
     if (static_cast<uint16_t>(expectedCrc) != (receivedCrc & 0xFF))
     {
@@ -189,13 +189,30 @@ bool TmcUart::readRegister(uint8_t reg, uint32_t& value) const
 
     value = (static_cast<uint32_t>(resp[2]) << 24) | (static_cast<uint32_t>(resp[3]) << 16) |
             (static_cast<uint32_t>(resp[4]) << 8) | (static_cast<uint32_t>(resp[5]));
-
     return true;
 }
 
+} // anonymous namespace
+
+bool TmcUart::readRegister(uint8_t reg, uint32_t& value) const
+{
+    if (!initialized_)
+        return false;
+
+    auto uartNum = static_cast<uart_port_t>(uartNum_);
+
+    if (!sendReadRequest(uartNum, reg))
+        return false;
+
+    uint8_t resp[8];
+    if (!receiveResponse(uartNum, reg, resp, sizeof(resp)))
+        return false;
+
+    return validateResponse(reg, resp, value);
+}
+
 bool TmcUart::testConnection() const
-{ // NOLINT(readability-function-cognitive-complexity) // reason: IOIN register sanity check with
-  // error recovery
+{
     uint32_t ioin = 0;
     if (!readRegister(TMC_REG_IOIN, ioin))
     {

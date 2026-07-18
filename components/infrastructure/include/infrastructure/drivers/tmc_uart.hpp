@@ -26,8 +26,10 @@ public:
     [[nodiscard]] bool readRegister(uint8_t reg, uint32_t& value) const;
     [[nodiscard]] bool testConnection() const;
 
-private:
+    // Pure CRC utility — public so helper functions in readRegister can use it
     static uint8_t computeCrc(const uint8_t* data, size_t len);
+
+private:
 
     gpio_num_t txPin_{GPIO_NUM_NC};
     gpio_num_t rxPin_{GPIO_NUM_NC};

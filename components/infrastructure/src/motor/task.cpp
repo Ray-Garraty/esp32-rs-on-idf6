@@ -46,9 +46,213 @@ static constexpr uint32_t HOME_SPEED_HZ = 1500;
 static constexpr uint32_t HOME_INTERVAL_US = 1'000'000 / HOME_SPEED_HZ;
 void assert_rmt_preconditions() {}
 
+namespace
+{
+
+bool createMotorQueues()
+{
+    auto largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    ESP_LOGI(TAG, "motor task DRAM before queue: largest_free=%lu", (unsigned long)largest);
+    if (largest < config::MOTOR_MIN_DRAM)
+    {
+        ESP_LOGW(TAG, "Low DRAM for motor queue! largest_free=%lu", (unsigned long)largest);
+    }
+
+    gMotorCmdQueue = xQueueCreate(config::MOTOR_CMD_QUEUE_LEN, sizeof(MotorCommand));
+    if (gMotorCmdQueue == nullptr)
+    {
+        ESP_LOGE(TAG, "Failed to create motor command queue");
+        return false;
+    }
+    puts("DBG: motor queue created");
+    fflush(stdout);
+    gSmResultQueue = xQueueCreate(1, sizeof(SmResult));
+    esp_task_wdt_add(NULL);
+    return true;
+}
+
+void configureTmcUart()
+{
+    bool tmcOk =
+        gTmcUart.init(config::PIN_TMC_UART_TX, config::PIN_TMC_UART_RX, config::TMC_UART_BAUD);
+    if (tmcOk && gTmcUart.testConnection())
+    {
+        ESP_LOGI(TAG, "TMC2209 UART connected — configuring registers");
+
+        std::ignore = gTmcUart.writeRegister(drivers::TMC_REG_GCONF, 0x00000041);
+        std::ignore = gTmcUart.writeRegister(drivers::TMC_REG_CHOPCONF, 0x00002104);
+        std::ignore = gTmcUart.writeRegister(drivers::TMC_REG_COOLCONF, 0x00002205);
+        std::ignore = gTmcUart.writeRegister(drivers::TMC_REG_TCOOLTHRS, 0x000FFFFF);
+        std::ignore = gTmcUart.writeRegister(drivers::TMC_REG_PWMCONF, 0x00010014);
+
+        uint8_t sg = domain::gStallGuardThreshold.load(std::memory_order_acquire);
+        std::ignore = gTmcUart.writeRegister(drivers::TMC_REG_SGTHRS, sg);
+    }
+    else
+    {
+        ESP_LOGW(TAG, "TMC2209 UART not connected, running without register config");
+    }
+}
+
+void handleMoveSteps(StepperMotor& stepper, const MotorCommand& cmd)
+{
+    int32_t stepsBefore = stepper.position().value;
+    execute_move_steps(stepper, cmd.steps);
+    int32_t stepsTaken = static_cast<int32_t>(stepper.position().value) - stepsBefore;
+    if (stepsTaken < 0)
+        stepsTaken = -stepsTaken;
+    store_result(SmResult::Type::None, stepsTaken);
+}
+
+void handleStop()
+{
+    ESP_LOGI(TAG, "Stop requested");
+    domain::gBuretteState.store(BuretteState::Stopping, std::memory_order_release);
+    domain::gStopFull.store(true, std::memory_order_release);
+    vTaskDelay(pdMS_TO_TICKS(config::STOP_SETTLE_MS));
+    domain::gStopFull.store(false, std::memory_order_release);
+    domain::gBuretteState.store(BuretteState::Idle, std::memory_order_release);
+}
+
+void handleEmergencyStop()
+{
+    ESP_LOGW(TAG, "EMERGENCY STOP");
+    domain::gStopFull.store(true, std::memory_order_release);
+    domain::gStopEmpty.store(true, std::memory_order_release);
+    domain::gBuretteState.store(BuretteState::Error, std::memory_order_release);
+    diag::StateTracer::logBuretteTransition(
+        domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)), "error");
+}
+
+void handleHome(StepperMotor& stepper, LimitSwitch& sw)
+{
+    run_homing(stepper, sw);
+}
+
+void handleSetDirection(const MotorCommand& cmd)
+{
+    auto dir = cmd.direction;
+    domain::gDirection.store(dir, std::memory_order_release);
+    gpio_set_level(config::PIN_DIR, (dir == Direction::LiqIn) ? 1 : 0);
+}
+
+void handleSetSpeed(const MotorCommand& cmd)
+{
+    if (cmd.speedHz >= config::STEP_FREQ_MIN_HZ && cmd.speedHz <= config::STEP_FREQ_MAX_HZ)
+    {
+        domain::gSpeed.store(cmd.speedHz, std::memory_order_release);
+    }
+}
+
+void handleSetAccel(const MotorCommand& cmd)
+{
+    domain::gAccel.store(cmd.accelHzPerS, std::memory_order_release);
+}
+
+void handleSetStallThreshold(const MotorCommand& cmd)
+{
+    domain::gStallGuardThreshold.store(cmd.stallThreshold, std::memory_order_release);
+    std::ignore = gTmcUart.writeRegister(drivers::TMC_REG_SGTHRS, cmd.stallThreshold);
+    ESP_LOGI(TAG, "StallGuard threshold set to %u",
+             static_cast<unsigned>(cmd.stallThreshold));
+}
+
+void handleStartRinse(StepperMotor& stepper, const MotorCommand& cmd)
+{
+    auto p = cmd.startRinse;
+    ESP_LOGI(TAG, "StartRinse: %u cycles", p.cycles);
+    domain::gBuretteState.store(BuretteState::Rinsing, std::memory_order_release);
+    auto cal = domain::CalibrationData{};
+    float nominalVol = cal.nominalVolumeMl;
+    float curVol = domain::gVolumeMl.load(std::memory_order_acquire);
+    run_rinse_sm(stepper, p.speedMlMin, p.cycles, curVol, nominalVol);
+}
+
+void handleStartCalDose(StepperMotor& stepper, const MotorCommand& cmd)
+{
+    auto p = cmd.startCalDose;
+    ESP_LOGI(TAG, "StartCalDose");
+    domain::gBuretteState.store(BuretteState::Dosing, std::memory_order_release);
+    auto cal = domain::CalibrationData{};
+    float nominalVol = cal.nominalVolumeMl;
+    float curVol = domain::gVolumeMl.load(std::memory_order_acquire);
+    run_cal_dose_sm(stepper, p.speedMlMin, curVol, nominalVol);
+}
+
+void handleStartCalSpeed(StepperMotor& stepper, const MotorCommand& cmd)
+{
+    auto p = cmd.startCalSpeed;
+    ESP_LOGI(TAG, "StartCalSpeed: freq=%u Hz", static_cast<unsigned>(p.testFreqHz));
+    domain::gBuretteState.store(BuretteState::Dosing, std::memory_order_release);
+    auto cal = domain::CalibrationData{};
+    float nominalVol = cal.nominalVolumeMl;
+    float curVol = domain::gVolumeMl.load(std::memory_order_acquire);
+    run_cal_speed_sm(stepper, p.speedMlMin, p.testFreqHz, curVol, nominalVol);
+}
+
+void handleStartCalSpeedSeq(StepperMotor& stepper, const MotorCommand& cmd)
+{
+    auto p = cmd.startCalSpeedSeq;
+    ESP_LOGI(TAG, "StartCalSpeedSeq");
+    domain::gBuretteState.store(BuretteState::Dosing, std::memory_order_release);
+    auto cal = domain::CalibrationData{};
+    float nominalVol = cal.nominalVolumeMl;
+    float curVol = domain::gVolumeMl.load(std::memory_order_acquire);
+    run_cal_speed_seq_sm(stepper, p.freqs, p.fillSpeedMlMin, curVol, nominalVol);
+}
+
+void handleSetValvePosition(const MotorCommand& cmd)
+{
+    ESP_LOGI(TAG, "valve settle: %s",
+             (cmd.valvePosition == domain::ValvePosition::Input) ? "input" : "output");
+    vTaskDelay(pdMS_TO_TICKS(config::VALVE_SETTLE_MS));
+    const char* posStr =
+        (cmd.valvePosition == domain::ValvePosition::Input) ? "input" : "output";
+    // Push WS broadcast with settled position (non-blocking, best-effort)
+    if (gWsBroadcastQueue)
+    {
+        static struct
+        {
+            char data[domain::memory::MAX_RSP_SIZE];
+            size_t len;
+        } entry;
+        int n = std::snprintf(entry.data, sizeof(entry.data),
+                              R"({"event":"valve_settled","position":"%s"})", posStr);
+        if (n > 0 && static_cast<size_t>(n) < sizeof(entry.data))
+        {
+            entry.len = static_cast<size_t>(n);
+            xQueueSend(gWsBroadcastQueue, &entry, 0);
+        }
+    }
+}
+
+void handleReadTmcRegister(const MotorCommand& cmd)
+{
+    uint32_t regValue = 0;
+    bool ok = gTmcUart.readRegister(cmd.readTmcReg.reg, regValue);
+    if (ok && gWsBroadcastQueue)
+    {
+        static struct
+        {
+            char data[domain::memory::MAX_RSP_SIZE];
+            size_t len;
+        } entry;
+        int n = std::snprintf(entry.data, sizeof(entry.data),
+                              R"({"event":"stallguard_result","reg":%u,"value":%lu})",
+                              static_cast<unsigned>(cmd.readTmcReg.reg),
+                              static_cast<unsigned long>(regValue));
+        if (n > 0 && static_cast<size_t>(n) < sizeof(entry.data))
+        {
+            entry.len = static_cast<size_t>(n);
+            xQueueSend(gWsBroadcastQueue, &entry, 0);
+        }
+    }
+}
+
+} // anonymous namespace
+
 extern "C" void motorTaskEntry(void* pvParameters)
-{ // NOLINT(readability-function-cognitive-complexity) // reason: motor command dispatch, 11 command
-  // types
+{
     (void)pvParameters;
 
     puts("DBG: motorEntry START");
@@ -56,26 +260,11 @@ extern "C" void motorTaskEntry(void* pvParameters)
 
     diag::StackMonitor::instance().registerThread("motor", domain::MOTOR_THREAD_STACK);
 
+    if (!createMotorQueues())
     {
-        auto largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-        ESP_LOGI(TAG, "motor task DRAM before queue: largest_free=%lu", (unsigned long)largest);
-        if (largest < config::MOTOR_MIN_DRAM)
-        {
-            ESP_LOGW(TAG, "Low DRAM for motor queue! largest_free=%lu", (unsigned long)largest);
-        }
-    }
-
-    gMotorCmdQueue = xQueueCreate(config::MOTOR_CMD_QUEUE_LEN, sizeof(MotorCommand));
-    if (gMotorCmdQueue == nullptr)
-    {
-        ESP_LOGE(TAG, "Failed to create motor command queue");
         vTaskDelete(nullptr);
         return;
     }
-    puts("DBG: motor queue created");
-    fflush(stdout);
-    gSmResultQueue = xQueueCreate(1, sizeof(SmResult));
-    esp_task_wdt_add(NULL);
 
     puts("DBG: before StepperMotor ctor (gpio 21,13)");
     fflush(stdout);
@@ -98,25 +287,7 @@ extern "C" void motorTaskEntry(void* pvParameters)
     // Initialize TMC2209 UART
     puts("DBG: before tmc uart init");
     fflush(stdout);
-    bool tmcOk =
-        gTmcUart.init(config::PIN_TMC_UART_TX, config::PIN_TMC_UART_RX, config::TMC_UART_BAUD);
-    if (tmcOk && gTmcUart.testConnection())
-    {
-        ESP_LOGI(TAG, "TMC2209 UART connected — configuring registers");
-
-        std::ignore = gTmcUart.writeRegister(drivers::TMC_REG_GCONF, 0x00000041);
-        std::ignore = gTmcUart.writeRegister(drivers::TMC_REG_CHOPCONF, 0x00002104);
-        std::ignore = gTmcUart.writeRegister(drivers::TMC_REG_COOLCONF, 0x00002205);
-        std::ignore = gTmcUart.writeRegister(drivers::TMC_REG_TCOOLTHRS, 0x000FFFFF);
-        std::ignore = gTmcUart.writeRegister(drivers::TMC_REG_PWMCONF, 0x00010014);
-
-        uint8_t sg = domain::gStallGuardThreshold.load(std::memory_order_acquire);
-        std::ignore = gTmcUart.writeRegister(drivers::TMC_REG_SGTHRS, sg);
-    }
-    else
-    {
-        ESP_LOGW(TAG, "TMC2209 UART not connected, running without register config");
-    }
+    configureTmcUart();
 
     puts("DBG: before run_homing");
     fflush(stdout);
@@ -132,158 +303,61 @@ extern "C" void motorTaskEntry(void* pvParameters)
             switch (cmd.type)
             {
 
-            case MotorCommandType::MoveSteps: {
-                int32_t stepsBefore = stepper.position().value;
-                execute_move_steps(stepper, cmd.steps);
-                int32_t stepsTaken = static_cast<int32_t>(stepper.position().value) - stepsBefore;
-                if (stepsTaken < 0)
-                    stepsTaken = -stepsTaken;
-                store_result(SmResult::Type::None, stepsTaken);
+            case MotorCommandType::MoveSteps:
+                handleMoveSteps(stepper, cmd);
                 break;
-            }
 
-            case MotorCommandType::Stop: {
-                ESP_LOGI(TAG, "Stop requested");
-                domain::gBuretteState.store(BuretteState::Stopping, std::memory_order_release);
-                domain::gStopFull.store(true, std::memory_order_release);
-                vTaskDelay(pdMS_TO_TICKS(config::STOP_SETTLE_MS));
-                domain::gStopFull.store(false, std::memory_order_release);
-                domain::gBuretteState.store(BuretteState::Idle, std::memory_order_release);
+            case MotorCommandType::Stop:
+                handleStop();
                 break;
-            }
 
-            case MotorCommandType::EmergencyStop: {
-                ESP_LOGW(TAG, "EMERGENCY STOP");
-                domain::gStopFull.store(true, std::memory_order_release);
-                domain::gStopEmpty.store(true, std::memory_order_release);
-                domain::gBuretteState.store(BuretteState::Error, std::memory_order_release);
-                diag::StateTracer::logBuretteTransition(
-                    domain::buretteStateStr(domain::gBuretteState.load(std::memory_order_acquire)),
-                    "error");
+            case MotorCommandType::EmergencyStop:
+                handleEmergencyStop();
                 break;
-            }
 
             case MotorCommandType::Home:
-                run_homing(stepper, emptySwitch);
+                handleHome(stepper, emptySwitch);
                 break;
 
-            case MotorCommandType::SetDirection: {
-                auto dir = cmd.direction;
-                domain::gDirection.store(dir, std::memory_order_release);
-                gpio_set_level(config::PIN_DIR, (dir == Direction::LiqIn) ? 1 : 0);
+            case MotorCommandType::SetDirection:
+                handleSetDirection(cmd);
                 break;
-            }
 
             case MotorCommandType::SetSpeed:
-                if (cmd.speedHz >= config::STEP_FREQ_MIN_HZ &&
-                    cmd.speedHz <= config::STEP_FREQ_MAX_HZ)
-                {
-                    domain::gSpeed.store(cmd.speedHz, std::memory_order_release);
-                }
+                handleSetSpeed(cmd);
                 break;
 
             case MotorCommandType::SetAccel:
-                domain::gAccel.store(cmd.accelHzPerS, std::memory_order_release);
+                handleSetAccel(cmd);
                 break;
 
             case MotorCommandType::SetStallThreshold:
-                domain::gStallGuardThreshold.store(cmd.stallThreshold, std::memory_order_release);
-                std::ignore = gTmcUart.writeRegister(drivers::TMC_REG_SGTHRS, cmd.stallThreshold);
-                ESP_LOGI(TAG, "StallGuard threshold set to %u",
-                         static_cast<unsigned>(cmd.stallThreshold));
+                handleSetStallThreshold(cmd);
                 break;
 
-            case MotorCommandType::StartRinse: {
-                auto p = cmd.startRinse;
-                ESP_LOGI(TAG, "StartRinse: %u cycles", p.cycles);
-                domain::gBuretteState.store(BuretteState::Rinsing, std::memory_order_release);
-                auto cal = domain::CalibrationData{};
-                float nominalVol = cal.nominalVolumeMl;
-                float curVol = domain::gVolumeMl.load(std::memory_order_acquire);
-                run_rinse_sm(stepper, p.speedMlMin, p.cycles, curVol, nominalVol);
+            case MotorCommandType::StartRinse:
+                handleStartRinse(stepper, cmd);
                 break;
-            }
 
-            case MotorCommandType::StartCalDose: {
-                auto p = cmd.startCalDose;
-                ESP_LOGI(TAG, "StartCalDose");
-                domain::gBuretteState.store(BuretteState::Dosing, std::memory_order_release);
-                auto cal = domain::CalibrationData{};
-                float nominalVol = cal.nominalVolumeMl;
-                float curVol = domain::gVolumeMl.load(std::memory_order_acquire);
-                run_cal_dose_sm(stepper, p.speedMlMin, curVol, nominalVol);
+            case MotorCommandType::StartCalDose:
+                handleStartCalDose(stepper, cmd);
                 break;
-            }
 
-            case MotorCommandType::StartCalSpeed: {
-                auto p = cmd.startCalSpeed;
-                ESP_LOGI(TAG, "StartCalSpeed: freq=%u Hz", static_cast<unsigned>(p.testFreqHz));
-                domain::gBuretteState.store(BuretteState::Dosing, std::memory_order_release);
-                auto cal = domain::CalibrationData{};
-                float nominalVol = cal.nominalVolumeMl;
-                float curVol = domain::gVolumeMl.load(std::memory_order_acquire);
-                run_cal_speed_sm(stepper, p.speedMlMin, p.testFreqHz, curVol, nominalVol);
+            case MotorCommandType::StartCalSpeed:
+                handleStartCalSpeed(stepper, cmd);
                 break;
-            }
 
-            case MotorCommandType::StartCalSpeedSeq: {
-                auto p = cmd.startCalSpeedSeq;
-                ESP_LOGI(TAG, "StartCalSpeedSeq");
-                domain::gBuretteState.store(BuretteState::Dosing, std::memory_order_release);
-                auto cal = domain::CalibrationData{};
-                float nominalVol = cal.nominalVolumeMl;
-                float curVol = domain::gVolumeMl.load(std::memory_order_acquire);
-                run_cal_speed_seq_sm(stepper, p.freqs, p.fillSpeedMlMin, curVol, nominalVol);
+            case MotorCommandType::StartCalSpeedSeq:
+                handleStartCalSpeedSeq(stepper, cmd);
                 break;
-            }
 
-            case MotorCommandType::SetValvePosition: {
-                ESP_LOGI(TAG, "valve settle: %s",
-                         (cmd.valvePosition == domain::ValvePosition::Input) ? "input" : "output");
-                vTaskDelay(pdMS_TO_TICKS(config::VALVE_SETTLE_MS));
-                const char* posStr =
-                    (cmd.valvePosition == domain::ValvePosition::Input) ? "input" : "output";
-                // Push WS broadcast with settled position (non-blocking, best-effort)
-                if (gWsBroadcastQueue)
-                {
-                    static struct
-                    {
-                        char data[domain::memory::MAX_RSP_SIZE];
-                        size_t len;
-                    } entry;
-                    int n = std::snprintf(entry.data, sizeof(entry.data),
-                                          R"({"event":"valve_settled","position":"%s"})", posStr);
-                    if (n > 0 && static_cast<size_t>(n) < sizeof(entry.data))
-                    {
-                        entry.len = static_cast<size_t>(n);
-                        xQueueSend(gWsBroadcastQueue, &entry, 0);
-                    }
-                }
+            case MotorCommandType::SetValvePosition:
+                handleSetValvePosition(cmd);
                 break;
-            }
 
-            case MotorCommandType::ReadTmcRegister: {
-                uint32_t regValue = 0;
-                bool ok = gTmcUart.readRegister(cmd.readTmcReg.reg, regValue);
-                if (ok && gWsBroadcastQueue)
-                {
-                    static struct
-                    {
-                        char data[domain::memory::MAX_RSP_SIZE];
-                        size_t len;
-                    } entry;
-                    int n = std::snprintf(entry.data, sizeof(entry.data),
-                                          R"({"event":"stallguard_result","reg":%u,"value":%lu})",
-                                          static_cast<unsigned>(cmd.readTmcReg.reg),
-                                          static_cast<unsigned long>(regValue));
-                    if (n > 0 && static_cast<size_t>(n) < sizeof(entry.data))
-                    {
-                        entry.len = static_cast<size_t>(n);
-                        xQueueSend(gWsBroadcastQueue, &entry, 0);
-                    }
-                }
+            case MotorCommandType::ReadTmcRegister:
+                handleReadTmcRegister(cmd);
                 break;
-            }
             }
         }
     }

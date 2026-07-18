@@ -94,8 +94,7 @@ uint32_t StackMonitor::watermarkMain() const noexcept
 }
 
 void StackMonitor::logAllWatermarks() const noexcept
-{ // NOLINT(readability-function-cognitive-complexity) // reason: aggregates watermarks across all
-  // registered tasks
+{
     for (size_t i = 0; i < count_; ++i)
     {
         UBaseType_t wm = uxTaskGetStackHighWaterMark(handles_[i]);

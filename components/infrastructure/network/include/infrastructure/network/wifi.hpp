@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "esp_netif.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 
@@ -51,6 +52,26 @@ public:
 private:
     static void eventHandler(void* arg, esp_event_base_t base, int32_t id, void* data);
     void handleEvent(esp_event_base_t base, int32_t id, void* data);
+    void handleWifiEvent(int32_t id, void* data);
+    void handleIpEvent(int32_t id, void* data);
+    void configureDhcp(esp_netif_t* netif);
+    wifi_config_t buildApConfig(const uint8_t* mac);
+    bool waitForStaConnection(uint32_t timeoutMs);
+    bool tryConnectSlot(uint8_t slot);
+    void stopWiFiAndRestoreAPSTA();
+    bool startWiFiInStaModeIfNeeded();
+    [[nodiscard]] esp_err_t ensureStaEventGroup();
+    [[nodiscard]] bool doStaConnectAndWait(const char* ssid, const char* password,
+                                           uint32_t timeoutMs);
+    [[nodiscard]] bool doStaConnectAndSave(uint32_t timeoutMs);
+
+    // Wifi event sub-handlers (extracted for cognitive-complexity)
+    void onStaStart() const;
+    void onStaConnected();
+    void onStaDisconnected();
+    void onApStaConnected() const;
+    void onApStaDisconnected() const;
+
     void stopDnsServer();
     void startMdns();
 

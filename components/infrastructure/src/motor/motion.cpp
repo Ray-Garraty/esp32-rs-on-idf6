@@ -135,8 +135,8 @@ void store_result(SmResult::Type type, int32_t stepsTaken, float measuredSpeed,
 }
 
 void execute_move_steps(StepperMotor& stepper, int32_t steps)
-{ // NOLINT(readability-function-cognitive-complexity) // reason: stepped move with stop flag + RMT
-  // error handling
+{
+    // error handling
     if (steps <= 0)
         return;
 

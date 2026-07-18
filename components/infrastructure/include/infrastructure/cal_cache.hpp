@@ -1,9 +1,9 @@
 #pragma once
 
+#include "domain/atomic_owner.hpp"
 #include "domain/calibration.hpp"
-#include <atomic>
 
 namespace ecotiter::infrastructure
 {
-inline std::atomic<domain::CalibrationData*> gCalCache{nullptr};
+inline domain::AtomicOwner<domain::CalibrationData> gCalCache{};
 } // namespace ecotiter::infrastructure
