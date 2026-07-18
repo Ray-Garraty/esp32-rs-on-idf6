@@ -8,18 +8,21 @@
 
 #include "domain/errors.hpp"
 
-namespace ecotiter::infrastructure::network {
+namespace ecotiter::infrastructure::network
+{
 
 class WifiManager; // forward decl
 
 static constexpr size_t WS_MAX_SESSIONS = 4;
 static constexpr int WS_FD_INVALID = -1;
 
-struct WsSession {
+struct WsSession
+{
     int fd{WS_FD_INVALID};
 };
 
-class HttpServer {
+class HttpServer
+{
 public:
     HttpServer();
     ~HttpServer();

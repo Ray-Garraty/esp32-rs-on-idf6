@@ -90,14 +90,6 @@ echo "=== 5. Host unit tests ==="
 echo "  ✅ All unit tests pass"
 
 # ============================================================
-echo "=== 5.5 Stack watermark check ==="
-if ls "$PROJECT_DIR"/logs/serial_*.log >/dev/null 2>&1; then
-    python3 "$SCRIPT_DIR/check_watermarks.py"
-else
-    echo "  ⏭️  No serial log found — skipping watermark check"
-fi
-
-# ============================================================
 echo "=== 6. Docs OKF validation ==="
 python "$PROJECT_DIR/docs/validate_okf.py"
 echo "  ✅ All docs valid"
@@ -130,7 +122,14 @@ if [ "$fast_mode" = false ]; then
   "$SCRIPT_DIR/idf.sh" smoke
   echo "  ✅ Smoke test passed"
 
-  echo "=== 9. clang-tidy ==="
+  echo "=== 9. Stack watermark check ==="
+  if ls "$PROJECT_DIR"/logs/serial_*.log >/dev/null 2>&1; then
+      python3 "$SCRIPT_DIR/check_watermarks.py"
+  else
+      echo "  ⏭️  No serial log found — skipping watermark check"
+  fi
+
+  echo "=== 10. clang-tidy ==="
   if [[ ! -f "$PROJECT_DIR/build/compile_commands.json" ]]; then
     echo "  ❌ FAIL: build/compile_commands.json not found"
     echo "  Run build first or check build output."
@@ -139,7 +138,7 @@ if [ "$fast_mode" = false ]; then
   "$SCRIPT_DIR/idf.sh" tidy
   echo "  ✅ clang-tidy clean"
 
-  echo "=== 10. Serial API hardware test ==="
+  echo "=== 11. Serial API hardware test ==="
   if [[ -x "$PROJECT_DIR/scripts/testing/serial_api_test.py" ]]; then
     timeout 60 python3 "$PROJECT_DIR/scripts/testing/serial_api_test.py" || true
   fi

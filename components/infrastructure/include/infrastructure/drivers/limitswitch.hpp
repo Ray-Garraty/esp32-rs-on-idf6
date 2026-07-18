@@ -8,12 +8,14 @@
 
 #include "domain/errors.hpp"
 
-namespace ecotiter::infrastructure::drivers {
+namespace ecotiter::infrastructure::drivers
+{
 
 inline std::atomic<bool> gStopFull{false};
 inline std::atomic<bool> gStopEmpty{false};
 
-class LimitSwitch {
+class LimitSwitch
+{
 public:
     LimitSwitch(gpio_num_t pin, std::atomic<bool>& flag, bool pullDown);
     ~LimitSwitch();

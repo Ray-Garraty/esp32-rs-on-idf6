@@ -6,10 +6,12 @@
 
 static constexpr auto TAG = "onewire";
 
-namespace ecotiter::infrastructure::drivers {
+namespace ecotiter::infrastructure::drivers
+{
 
 OneWireBus::OneWireBus(gpio_num_t pin)
-    : pin_(pin) {
+    : pin_(pin)
+{
     gpio_set_level(pin_, 1);
 }
 
@@ -17,7 +19,8 @@ OneWireBus::OneWireBus(gpio_num_t pin)
 // derived from the DS18B20 datasheet and are tolerant of 1-10 us variance.
 // No blocking calls other than the busy-wait delay_us spinloops.
 
-bool OneWireBus::reset() {
+bool OneWireBus::reset()
+{
     gpio_set_level(pin_, 0);
     esp_rom_delay_us(480);
     gpio_set_level(pin_, 1);
@@ -27,41 +30,52 @@ bool OneWireBus::reset() {
     return present;
 }
 
-void OneWireBus::writeByte(uint8_t byte) {
-    for (int i = 0; i < 8; ++i) {
-        if ((byte >> i) & 1) {
+void OneWireBus::writeByte(uint8_t byte)
+{
+    for (int i = 0; i < 8; ++i)
+    {
+        if ((byte >> i) & 1)
+        {
             writeBit1();
-        } else {
+        }
+        else
+        {
             writeBit0();
         }
     }
 }
 
-void OneWireBus::writeBit1() {
+void OneWireBus::writeBit1()
+{
     gpio_set_level(pin_, 0);
     esp_rom_delay_us(6);
     gpio_set_level(pin_, 1);
     esp_rom_delay_us(64);
 }
 
-void OneWireBus::writeBit0() {
+void OneWireBus::writeBit0()
+{
     gpio_set_level(pin_, 0);
     esp_rom_delay_us(60);
     gpio_set_level(pin_, 1);
     esp_rom_delay_us(10);
 }
 
-uint8_t OneWireBus::readByte() {
+uint8_t OneWireBus::readByte()
+{
     uint8_t byte = 0;
-    for (int i = 0; i < 8; ++i) {
-        if (readBit()) {
+    for (int i = 0; i < 8; ++i)
+    {
+        if (readBit())
+        {
             byte |= static_cast<uint8_t>(1 << i);
         }
     }
     return byte;
 }
 
-bool OneWireBus::readBit() {
+bool OneWireBus::readBit()
+{
     gpio_set_level(pin_, 0);
     esp_rom_delay_us(3);
     gpio_set_level(pin_, 1);
@@ -71,25 +85,32 @@ bool OneWireBus::readBit() {
     return bit;
 }
 
-void OneWireBus::skipRom() {
+void OneWireBus::skipRom()
+{
     writeByte(0xCC);
 }
 
-void OneWireBus::convertT() {
+void OneWireBus::convertT()
+{
     writeByte(0x44);
 }
 
-std::array<uint8_t, 9> OneWireBus::readScratchpad() {
+std::array<uint8_t, 9> OneWireBus::readScratchpad()
+{
     writeByte(0xBE);
     std::array<uint8_t, 9> buf{};
-    for (auto& b : buf) {
+    for (auto& b : buf)
+    {
         b = readByte();
     }
     return buf;
 }
 
-std::optional<float> readSensor(OneWireBus& bus) { // NOLINT(readability-function-cognitive-complexity) // reason: DS18B20 protocol: reset -> convert -> read scratchpad
-    if (!bus.reset()) {
+std::optional<float> readSensor(OneWireBus& bus)
+{ // NOLINT(readability-function-cognitive-complexity) // reason: DS18B20 protocol: reset -> convert
+  // -> read scratchpad
+    if (!bus.reset())
+    {
         ESP_LOGD(TAG, "DS18B20 not detected (no presence pulse)");
         return std::nullopt;
     }
@@ -99,7 +120,8 @@ std::optional<float> readSensor(OneWireBus& bus) { // NOLINT(readability-functio
 
     vTaskDelay(pdMS_TO_TICKS(800));
 
-    if (!bus.reset()) {
+    if (!bus.reset())
+    {
         ESP_LOGW(TAG, "DS18B20 lost during conversion");
         return std::nullopt;
     }
@@ -111,7 +133,8 @@ std::optional<float> readSensor(OneWireBus& bus) { // NOLINT(readability-functio
     int16_t tempRaw = static_cast<int16_t>(raw);
     float temp = static_cast<float>(tempRaw) / 16.0f;
 
-    if (temp < -55.0f || temp > 125.0f) {
+    if (temp < -55.0f || temp > 125.0f)
+    {
         ESP_LOGW(TAG, "DS18B20 out of range: %.2f C", static_cast<double>(temp));
         return std::nullopt;
     }

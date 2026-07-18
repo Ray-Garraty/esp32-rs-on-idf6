@@ -1,7 +1,7 @@
 #pragma once
 
-#include <atomic>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <expected>
@@ -15,9 +15,11 @@
 
 #include "domain/memory.hpp"
 
-namespace ecotiter::interface {
+namespace ecotiter::interface
+{
 
-enum class SerialError : uint8_t {
+enum class SerialError : uint8_t
+{
     InitFailed,
     WriteFailed
 };
@@ -25,7 +27,8 @@ enum class SerialError : uint8_t {
 template <typename T>
 using Result = std::expected<T, SerialError>;
 
-class SerialReader {
+class SerialReader
+{
 public:
     SerialReader() = default;
 #ifdef ESP_PLATFORM
@@ -47,7 +50,8 @@ public:
 
     // Overload for testing: process inline data through the same splitting logic.
     // Does NOT read from fd_.
-    std::optional<std::string_view> process(std::string_view data) noexcept {
+    std::optional<std::string_view> process(std::string_view data) noexcept
+    {
         return splitBuffer(data);
     }
 
@@ -55,13 +59,16 @@ public:
     void setSilent(bool s) noexcept { silent_.store(s, std::memory_order_release); }
     [[nodiscard]] bool isSilent() const noexcept { return silent_.load(std::memory_order_acquire); }
     [[nodiscard]] bool isInitialized() const noexcept { return fd_ >= 0; }
-    [[nodiscard]] bool hasHeartbeat(uint32_t nowTick, uint32_t timeoutMs) const noexcept {
+    [[nodiscard]] bool hasHeartbeat(uint32_t nowTick, uint32_t timeoutMs) const noexcept
+    {
 #ifdef ESP_PLATFORM
         uint32_t last = lastDataTick_.load(std::memory_order_acquire);
-        if (last == 0) return false;
+        if (last == 0)
+            return false;
         return (nowTick - last) * portTICK_PERIOD_MS < timeoutMs;
 #else
-        (void)nowTick; (void)timeoutMs;
+        (void)nowTick;
+        (void)timeoutMs;
         return true;
 #endif
     }
@@ -76,42 +83,52 @@ private:
     // Returns a view into lineBuf_ for the first complete line found,
     // or nullopt if no complete line is available yet.
     // WARNING: returned view is valid only until the next process() call.
-    std::optional<std::string_view> splitBuffer(std::string_view data) noexcept {
+    std::optional<std::string_view> splitBuffer(std::string_view data) noexcept
+    {
 #ifdef ESP_PLATFORM
-        if (!data.empty()) {
+        if (!data.empty())
+        {
             lastDataTick_.store(xTaskGetTickCount(), std::memory_order_release);
         }
 #endif
         // Compact consumed data at start of buffer
-        if (readPos_ > 0) {
-            if (readPos_ < linePos_) {
+        if (readPos_ > 0)
+        {
+            if (readPos_ < linePos_)
+            {
                 size_t remaining = linePos_ - readPos_;
-                std::memmove(lineBuf_.data(),
-                             lineBuf_.data() + readPos_, remaining);
+                std::memmove(lineBuf_.data(), lineBuf_.data() + readPos_, remaining);
                 linePos_ = remaining;
-            } else {
+            }
+            else
+            {
                 linePos_ = 0;
             }
             readPos_ = 0;
         }
 
         // Append all incoming data to the buffer
-        for (size_t i = 0; i < data.size(); ++i) {
+        for (size_t i = 0; i < data.size(); ++i)
+        {
             char c = data[i];
 
-            if (c == '\r') {
+            if (c == '\r')
+            {
                 continue;
             }
 
-            if (c == '\n') {
-                if (linePos_ == readPos_) {
+            if (c == '\n')
+            {
+                if (linePos_ == readPos_)
+                {
                     continue;
                 }
                 lineBuf_[linePos_++] = '\n';
                 continue;
             }
 
-            if (linePos_ >= domain::memory::MAX_CMD_SIZE) {
+            if (linePos_ >= domain::memory::MAX_CMD_SIZE)
+            {
                 linePos_ = 0;
                 readPos_ = 0;
                 break;
@@ -121,10 +138,11 @@ private:
         }
 
         // Scan for first complete line
-        for (size_t i = readPos_; i < linePos_; ++i) {
-            if (lineBuf_[i] == '\n') {
-                auto result = std::string_view(lineBuf_.data() + readPos_,
-                                                i - readPos_);
+        for (size_t i = readPos_; i < linePos_; ++i)
+        {
+            if (lineBuf_[i] == '\n')
+            {
+                auto result = std::string_view(lineBuf_.data() + readPos_, i - readPos_);
                 readPos_ = i + 1;
                 return result;
             }

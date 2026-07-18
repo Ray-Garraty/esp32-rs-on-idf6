@@ -10,7 +10,8 @@
 
 extern "C" void motorTaskEntry(void* pvParameters);
 
-namespace ecotiter::infrastructure {
+namespace ecotiter::infrastructure
+{
 
 // Backward-compatible alias — SmResult moved to domain layer for SRP.
 // Remove this alias once all downstream code is migrated to domain::SmResult.

@@ -3,9 +3,11 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace ecotiter::diag {
+namespace ecotiter::diag
+{
 
-class HeapSnapshot {
+class HeapSnapshot
+{
 public:
     // Check if a contiguous allocation of `size` bytes is possible
     [[nodiscard]] static bool canAllocate(size_t size) noexcept;

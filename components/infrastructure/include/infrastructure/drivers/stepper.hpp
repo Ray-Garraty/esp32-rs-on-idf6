@@ -12,10 +12,12 @@
 #include "domain/types.hpp"
 #include "infrastructure/config.hpp"
 
-namespace ecotiter::infrastructure::drivers {
+namespace ecotiter::infrastructure::drivers
+{
 
 // RAII wrapper for RMT TX channel
-class RmtChannel {
+class RmtChannel
+{
 public:
     explicit RmtChannel(gpio_num_t stepPin);
     ~RmtChannel();
@@ -33,7 +35,8 @@ private:
 };
 
 // RAII wrapper for RMT copy encoder
-class RmtEncoder {
+class RmtEncoder
+{
 public:
     explicit RmtEncoder();
     ~RmtEncoder();
@@ -51,7 +54,8 @@ private:
 };
 
 // Concrete stepper motor driver (TMC2209 via RMT)
-class StepperMotor {
+class StepperMotor
+{
 public:
     StepperMotor(gpio_num_t stepPin, gpio_num_t enPin);
     ~StepperMotor();
@@ -60,19 +64,20 @@ public:
     StepperMotor& operator=(const StepperMotor&) = delete;
 
     // GR-2: stop_flag is MANDATORY
-    [[nodiscard]] domain::Result<void, domain::StepperError> moveStepsIntervals(
-        std::span<const uint32_t> intervals,
-        std::atomic<bool>* stopFlag = nullptr);
+    [[nodiscard]] domain::Result<void, domain::StepperError>
+    moveStepsIntervals(std::span<const uint32_t> intervals, std::atomic<bool>* stopFlag = nullptr);
 
     [[nodiscard]] domain::Result<void, domain::StepperError> emergencyStop();
     [[nodiscard]] domain::Result<void, domain::StepperError> enable();
     [[nodiscard]] domain::Result<void, domain::StepperError> disable();
 
-    [[nodiscard]] domain::Steps position() const noexcept {
+    [[nodiscard]] domain::Steps position() const noexcept
+    {
         return domain::Steps{position_.load(std::memory_order_acquire)};
     }
 
-    void setCurrentPosition(domain::Steps pos) noexcept {
+    void setCurrentPosition(domain::Steps pos) noexcept
+    {
         position_.store(pos.value, std::memory_order_release);
     }
 

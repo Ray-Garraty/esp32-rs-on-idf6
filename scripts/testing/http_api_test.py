@@ -373,8 +373,8 @@ def validate_http_status(body: str) -> bool:
 # ── Broadcast interval diagnostics ───────────────────────────────────
 
 SPEC_INTERVAL_MS = 300
-FIRMWARE_INTERVAL_MS = 2000
-OUTLIER_MS = 4000
+FIRMWARE_INTERVAL_MS = 300
+OUTLIER_MS = 1000
 
 
 def diagnose_broadcast_intervals(
@@ -513,18 +513,25 @@ def _check_ws_broadcast(obj: dict) -> list[str]:
         return ["not an object"]
 
     if "event" in obj:
-        # Log event: {"event":"log","data":{"level":"...","msg":"..."}}
-        if obj["event"] != "log":
-            issues.append(f"unexpected event type: {obj['event']}")
+        # Known event types
+        event = obj["event"]
+        if event == "log":
+            d = obj.get("data", {})
+            if not isinstance(d, dict):
+                issues.append("log event data is not an object")
+            else:
+                if "level" not in d:
+                    issues.append("log event missing level")
+                if "msg" not in d:
+                    issues.append("log event missing msg")
             return issues
-        d = obj.get("data", {})
-        if not isinstance(d, dict):
-            issues.append("log event data is not an object")
-        else:
-            if "level" not in d:
-                issues.append("log event missing level")
-            if "msg" not in d:
-                issues.append("log event missing msg")
+        if event == "motor_complete":
+            if "type" not in obj:
+                issues.append("motor_complete event missing type")
+            if "steps" not in obj:
+                issues.append("motor_complete event missing steps")
+            return issues
+        issues.append(f"unexpected event type: {event}")
         return issues
 
     # Status broadcast: extended format with compact keys + optional extras

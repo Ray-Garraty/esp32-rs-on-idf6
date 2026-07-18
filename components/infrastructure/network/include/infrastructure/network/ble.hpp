@@ -1,11 +1,11 @@
 #pragma once
 
+#include <array>
 #include <atomic>
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <string_view>
-#include <array>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -16,22 +16,26 @@
 struct ble_gap_event;
 struct ble_gatt_access_ctxt;
 
-namespace ecotiter::infrastructure::network {
+namespace ecotiter::infrastructure::network
+{
 
 static constexpr size_t BLE_CMD_QUEUE_SIZE = 8;
 static constexpr size_t BLE_NOTIFY_QUEUE_SIZE = 4;
 static constexpr size_t BLE_NOTIFY_BUF_SIZE = domain::memory::MAX_RSP_SIZE;
 
-struct BleCmdItem {
+struct BleCmdItem
+{
     char data[domain::memory::MAX_CMD_SIZE];
 };
 
-struct BleNotifyItem {
+struct BleNotifyItem
+{
     char data[BLE_NOTIFY_BUF_SIZE];
     size_t len;
 };
 
-class BleManager {
+class BleManager
+{
 public:
     BleManager();
     ~BleManager();

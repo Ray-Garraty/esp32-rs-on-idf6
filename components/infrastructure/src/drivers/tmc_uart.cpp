@@ -2,29 +2,37 @@
 
 #include <cstdio>
 #include <cstring>
-#include "esp_log.h"
 #include "driver/uart.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 static constexpr auto TAG = "tmc_uart";
 
-namespace ecotiter::infrastructure::drivers {
+namespace ecotiter::infrastructure::drivers
+{
 
-TmcUart::~TmcUart() {
+TmcUart::~TmcUart()
+{
     deinit();
 }
 
 static constexpr uint32_t TMC_UART_TIMEOUT_MS = 50;
 
-uint8_t TmcUart::computeCrc(const uint8_t* data, size_t len) {
+uint8_t TmcUart::computeCrc(const uint8_t* data, size_t len)
+{
     uint8_t crc = 0;
-    for (size_t i = 0; i < len; ++i) {
+    for (size_t i = 0; i < len; ++i)
+    {
         crc ^= data[i];
-        for (int j = 0; j < 8; ++j) {
-            if (crc & 0x80) {
+        for (int j = 0; j < 8; ++j)
+        {
+            if (crc & 0x80)
+            {
                 crc = static_cast<uint8_t>((crc << 1) ^ 0x07);
-            } else {
+            }
+            else
+            {
                 crc = static_cast<uint8_t>(crc << 1);
             }
         }
@@ -32,8 +40,11 @@ uint8_t TmcUart::computeCrc(const uint8_t* data, size_t len) {
     return crc;
 }
 
-bool TmcUart::init(gpio_num_t txPin, gpio_num_t rxPin, uint32_t baud) { // NOLINT(readability-function-cognitive-complexity) // reason: UART init with TMC2209 register configuration
-    if (initialized_) deinit();
+bool TmcUart::init(gpio_num_t txPin, gpio_num_t rxPin, uint32_t baud)
+{ // NOLINT(readability-function-cognitive-complexity) // reason: UART init with TMC2209 register
+  // configuration
+    if (initialized_)
+        deinit();
 
     txPin_ = txPin;
     rxPin_ = rxPin;
@@ -50,23 +61,24 @@ bool TmcUart::init(gpio_num_t txPin, gpio_num_t rxPin, uint32_t baud) { // NOLIN
         .flags = {.allow_pd = 0, .backup_before_sleep = 0},
     };
 
-    esp_err_t err = uart_driver_install(static_cast<uart_port_t>(uartNum_),
-                                        256, 0, 0, nullptr, 0);
-    if (err != ESP_OK) {
+    esp_err_t err = uart_driver_install(static_cast<uart_port_t>(uartNum_), 256, 0, 0, nullptr, 0);
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "uart_driver_install failed: %s", esp_err_to_name(err));
         return false;
     }
 
     err = uart_param_config(static_cast<uart_port_t>(uartNum_), &uartConfig);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "uart_param_config failed: %s", esp_err_to_name(err));
         uart_driver_delete(static_cast<uart_port_t>(uartNum_));
         return false;
     }
 
-    err = uart_set_pin(static_cast<uart_port_t>(uartNum_),
-                       txPin, rxPin, -1, -1);
-    if (err != ESP_OK) {
+    err = uart_set_pin(static_cast<uart_port_t>(uartNum_), txPin, rxPin, -1, -1);
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "uart_set_pin failed: %s", esp_err_to_name(err));
         uart_driver_delete(static_cast<uart_port_t>(uartNum_));
         return false;
@@ -74,20 +86,24 @@ bool TmcUart::init(gpio_num_t txPin, gpio_num_t rxPin, uint32_t baud) { // NOLIN
 
     vTaskDelay(pdMS_TO_TICKS(10));
     initialized_ = true;
-    ESP_LOGI(TAG, "TMC UART initialized on UART_NUM_2 (%d TX, %d RX)",
-             txPin, rxPin);
+    ESP_LOGI(TAG, "TMC UART initialized on UART_NUM_2 (%d TX, %d RX)", txPin, rxPin);
     return true;
 }
 
-void TmcUart::deinit() {
-    if (initialized_) {
+void TmcUart::deinit()
+{
+    if (initialized_)
+    {
         uart_driver_delete(static_cast<uart_port_t>(uartNum_));
         initialized_ = false;
     }
 }
 
-bool TmcUart::writeRegister(uint8_t reg, uint32_t value) const { // NOLINT(readability-function-cognitive-complexity) // reason: half-duplex UART write with sync + CRC
-    if (!initialized_) return false;
+bool TmcUart::writeRegister(uint8_t reg, uint32_t value) const
+{ // NOLINT(readability-function-cognitive-complexity) // reason: half-duplex UART write with sync +
+  // CRC
+    if (!initialized_)
+        return false;
 
     uint8_t buf[8];
     buf[0] = 0x05;
@@ -100,15 +116,16 @@ bool TmcUart::writeRegister(uint8_t reg, uint32_t value) const { // NOLINT(reada
     buf[6] = crc;
     buf[7] = crc;
 
-    int written = uart_write_bytes(static_cast<uart_port_t>(uartNum_),
-                                   buf, 8);
-    if (written != 8) {
+    int written = uart_write_bytes(static_cast<uart_port_t>(uartNum_), buf, 8);
+    if (written != 8)
+    {
         ESP_LOGE(TAG, "writeRegister(0x%02X) wrote %d bytes", reg, written);
         return false;
     }
-    esp_err_t err = uart_wait_tx_done(
-        static_cast<uart_port_t>(uartNum_), pdMS_TO_TICKS(TMC_UART_TIMEOUT_MS));
-    if (err != ESP_OK) {
+    esp_err_t err =
+        uart_wait_tx_done(static_cast<uart_port_t>(uartNum_), pdMS_TO_TICKS(TMC_UART_TIMEOUT_MS));
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "writeRegister(0x%02X) TX wait failed", reg);
         return false;
     }
@@ -116,8 +133,11 @@ bool TmcUart::writeRegister(uint8_t reg, uint32_t value) const { // NOLINT(reada
     return true;
 }
 
-bool TmcUart::readRegister(uint8_t reg, uint32_t& value) const { // NOLINT(readability-function-cognitive-complexity) // reason: half-duplex UART read with retry + CRC validate
-    if (!initialized_) return false;
+bool TmcUart::readRegister(uint8_t reg, uint32_t& value) const
+{ // NOLINT(readability-function-cognitive-complexity) // reason: half-duplex UART read with retry +
+  // CRC validate
+    if (!initialized_)
+        return false;
 
     // Send read request: sync 0x07, register, CRC
     uint8_t req[3];
@@ -125,16 +145,17 @@ bool TmcUart::readRegister(uint8_t reg, uint32_t& value) const { // NOLINT(reada
     req[1] = reg;
     req[2] = computeCrc(req, 2);
 
-    int written = uart_write_bytes(static_cast<uart_port_t>(uartNum_),
-                                   req, 3);
-    if (written != 3) {
+    int written = uart_write_bytes(static_cast<uart_port_t>(uartNum_), req, 3);
+    if (written != 3)
+    {
         ESP_LOGE(TAG, "readRegister(0x%02X) wrote %d bytes", reg, written);
         return false;
     }
 
-    esp_err_t err = uart_wait_tx_done(
-        static_cast<uart_port_t>(uartNum_), pdMS_TO_TICKS(TMC_UART_TIMEOUT_MS));
-    if (err != ESP_OK) {
+    esp_err_t err =
+        uart_wait_tx_done(static_cast<uart_port_t>(uartNum_), pdMS_TO_TICKS(TMC_UART_TIMEOUT_MS));
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "readRegister(0x%02X) TX wait failed", reg);
         return false;
     }
@@ -143,46 +164,48 @@ bool TmcUart::readRegister(uint8_t reg, uint32_t& value) const { // NOLINT(reada
 
     // Read 8-byte response: sync, register, 4-byte value, 2-byte CRC
     uint8_t resp[8];
-    int n = uart_read_bytes(static_cast<uart_port_t>(uartNum_),
-                            resp, 8, pdMS_TO_TICKS(TMC_UART_TIMEOUT_MS));
-    if (n < 8) {
+    int n = uart_read_bytes(static_cast<uart_port_t>(uartNum_), resp, 8,
+                            pdMS_TO_TICKS(TMC_UART_TIMEOUT_MS));
+    if (n < 8)
+    {
         ESP_LOGW(TAG, "readRegister(0x%02X) read %d bytes (expected 8)", reg, n);
         return false;
     }
 
-    if (resp[0] != 0x05 || resp[1] != reg) {
-        ESP_LOGW(TAG, "readRegister(0x%02X) bad header: 0x%02X 0x%02X",
-                 reg, resp[0], resp[1]);
+    if (resp[0] != 0x05 || resp[1] != reg)
+    {
+        ESP_LOGW(TAG, "readRegister(0x%02X) bad header: 0x%02X 0x%02X", reg, resp[0], resp[1]);
         return false;
     }
 
     // Validate CRC
     uint8_t expectedCrc = computeCrc(resp, 6);
-    uint16_t receivedCrc = static_cast<uint16_t>(resp[6]) |
-                           (static_cast<uint16_t>(resp[7]) << 8);
-    if (static_cast<uint16_t>(expectedCrc) != (receivedCrc & 0xFF)) {
+    uint16_t receivedCrc = static_cast<uint16_t>(resp[6]) | (static_cast<uint16_t>(resp[7]) << 8);
+    if (static_cast<uint16_t>(expectedCrc) != (receivedCrc & 0xFF))
+    {
         ESP_LOGW(TAG, "readRegister(0x%02X) CRC mismatch", reg);
         return false;
     }
 
-    value = (static_cast<uint32_t>(resp[2]) << 24) |
-            (static_cast<uint32_t>(resp[3]) << 16) |
-            (static_cast<uint32_t>(resp[4]) << 8) |
-            (static_cast<uint32_t>(resp[5]));
+    value = (static_cast<uint32_t>(resp[2]) << 24) | (static_cast<uint32_t>(resp[3]) << 16) |
+            (static_cast<uint32_t>(resp[4]) << 8) | (static_cast<uint32_t>(resp[5]));
 
     return true;
 }
 
-bool TmcUart::testConnection() const { // NOLINT(readability-function-cognitive-complexity) // reason: IOIN register sanity check with error recovery
+bool TmcUart::testConnection() const
+{ // NOLINT(readability-function-cognitive-complexity) // reason: IOIN register sanity check with
+  // error recovery
     uint32_t ioin = 0;
-    if (!readRegister(TMC_REG_IOIN, ioin)) {
+    if (!readRegister(TMC_REG_IOIN, ioin))
+    {
         ESP_LOGE(TAG, "testConnection: failed to read IOIN");
         return false;
     }
     // IOIN should be non-zero for a connected TMC2209
     bool ok = (ioin != 0 && ioin != 0xFFFFFFFF);
-    ESP_LOGI(TAG, "testConnection: IOIN=0x%08lX %s",
-             static_cast<unsigned long>(ioin), ok ? "OK" : "FAIL");
+    ESP_LOGI(TAG, "testConnection: IOIN=0x%08lX %s", static_cast<unsigned long>(ioin),
+             ok ? "OK" : "FAIL");
     return ok;
 }
 

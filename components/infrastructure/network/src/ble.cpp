@@ -1,67 +1,57 @@
 #include "infrastructure/network/ble.hpp"
 
-#include <cstdio>
-#include <cstring>
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
-#include "esp_log.h"
+#include <cstring>
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include "nimble/nimble_port.h"
-#include "nimble/nimble_port_freertos.h"
-#include "host/ble_hs.h"
 #include "host/ble_att.h"
-#include "host/ble_uuid.h"
 #include "host/ble_gap.h"
 #include "host/ble_gatt.h"
+#include "host/ble_hs.h"
 #include "host/ble_store.h"
+#include "host/ble_uuid.h"
 #include "host/util/util.h"
+#include "nimble/nimble_port.h"
+#include "nimble/nimble_port_freertos.h"
 #include "os/os_mbuf.h"
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 
-#include "domain/types.hpp"
 #include "diag/ffi_guard.hpp"
 #include "diag/heap_snapshot.hpp"
-#include "esp_coexist.h"
+#include "domain/types.hpp"
 #include "infrastructure/config.hpp"
+#include "esp_coexist.h"
 
 static constexpr auto TAG = "ble";
 
 extern "C" void ble_store_config_init(void);
 
-namespace ecotiter::infrastructure::network {
+namespace ecotiter::infrastructure::network
+{
 
 // NUS UUIDs — 6e400001/2/3-b5a3-f393-e0a9-e50e24dc0000
 // Stored in little-endian byte order per NimBLE convention
-namespace {
+namespace
+{
 
-const ble_uuid128_t NUS_SVC_UUID = {
-    .u = { .type = BLE_UUID_TYPE_128 },
-    .value = {
-        0x00, 0x00, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0,
-        0x93, 0xf3, 0xa3, 0xb5, 0x01, 0x00, 0x40, 0x6e
-    }
-};
+const ble_uuid128_t NUS_SVC_UUID = {.u = {.type = BLE_UUID_TYPE_128},
+                                    .value = {0x00, 0x00, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0, 0x93,
+                                              0xf3, 0xa3, 0xb5, 0x01, 0x00, 0x40, 0x6e}};
 
-const ble_uuid128_t NUS_RX_UUID = {
-    .u = { .type = BLE_UUID_TYPE_128 },
-    .value = {
-        0x00, 0x00, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0,
-        0x93, 0xf3, 0xa3, 0xb5, 0x02, 0x00, 0x40, 0x6e
-    }
-};
+const ble_uuid128_t NUS_RX_UUID = {.u = {.type = BLE_UUID_TYPE_128},
+                                   .value = {0x00, 0x00, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0, 0x93,
+                                             0xf3, 0xa3, 0xb5, 0x02, 0x00, 0x40, 0x6e}};
 
-const ble_uuid128_t NUS_TX_UUID = {
-    .u = { .type = BLE_UUID_TYPE_128 },
-    .value = {
-        0x00, 0x00, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0,
-        0x93, 0xf3, 0xa3, 0xb5, 0x03, 0x00, 0x40, 0x6e
-    }
-};
+const ble_uuid128_t NUS_TX_UUID = {.u = {.type = BLE_UUID_TYPE_128},
+                                   .value = {0x00, 0x00, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0, 0x93,
+                                             0xf3, 0xa3, 0xb5, 0x03, 0x00, 0x40, 0x6e}};
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
@@ -82,7 +72,7 @@ const ble_gatt_chr_def NUS_CHRS[] = {
         .access_cb = BleManager::gattEventCallback,
         .flags = BLE_GATT_CHR_F_NOTIFY,
     },
-    { 0 },
+    {0},
 };
 
 const ble_gatt_svc_def GATT_SVCS[] = {
@@ -91,7 +81,7 @@ const ble_gatt_svc_def GATT_SVCS[] = {
         .uuid = &NUS_SVC_UUID.u,
         .characteristics = NUS_CHRS,
     },
-    { 0 },
+    {0},
 };
 
 #pragma GCC diagnostic pop
@@ -100,16 +90,20 @@ const ble_gatt_svc_def GATT_SVCS[] = {
 
 BleManager* BleManager::s_instance = nullptr;
 
-BleManager::BleManager() {
+BleManager::BleManager()
+{
     s_instance = this;
 }
 
-BleManager::~BleManager() {
-    if (cmdQueue_ != nullptr) {
+BleManager::~BleManager()
+{
+    if (cmdQueue_ != nullptr)
+    {
         vQueueDelete(cmdQueue_);
         cmdQueue_ = nullptr;
     }
-    if (notifyQueue_ != nullptr) {
+    if (notifyQueue_ != nullptr)
+    {
         vQueueDelete(notifyQueue_);
         notifyQueue_ = nullptr;
     }
@@ -117,27 +111,34 @@ BleManager::~BleManager() {
     s_instance = nullptr;
 }
 
-std::expected<void, domain::AppError> BleManager::init() { // NOLINT(readability-function-cognitive-complexity) // reason: BLE stack init with GATT services
-    puts("DBG: BLE init ENTER"); fflush(stdout);
-    if (initialized_) return {};
+std::expected<void, domain::AppError> BleManager::init()
+{ // NOLINT(readability-function-cognitive-complexity) // reason: BLE stack init with GATT services
+    puts("DBG: BLE init ENTER");
+    fflush(stdout);
+    if (initialized_)
+        return {};
 
     size_t freeHeap = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-    if (freeHeap < 30 * 1024) {
+    if (freeHeap < 30 * 1024)
+    {
         ESP_LOGW(TAG, "Insufficient DRAM for BLE: %zu bytes < 30 KB", freeHeap);
         return std::unexpected(domain::AppError::Resource);
     }
 
     cmdQueue_ = xQueueCreate(BLE_CMD_QUEUE_SIZE, sizeof(BleCmdItem));
-    if (cmdQueue_ == nullptr) {
+    if (cmdQueue_ == nullptr)
+    {
         ESP_LOGE(TAG, "Failed to create command queue");
         return std::unexpected(domain::AppError::Resource);
     }
 
-    if (!diag::HeapSnapshot::assertCanAllocate(BLE_NOTIFY_QUEUE_SIZE * sizeof(BleNotifyItem))) {
+    if (!diag::HeapSnapshot::assertCanAllocate(BLE_NOTIFY_QUEUE_SIZE * sizeof(BleNotifyItem)))
+    {
         ESP_LOGW(TAG, "Low DRAM before BLE notify queue creation");
     }
     notifyQueue_ = xQueueCreate(BLE_NOTIFY_QUEUE_SIZE, sizeof(BleNotifyItem));
-    if (notifyQueue_ == nullptr) {
+    if (notifyQueue_ == nullptr)
+    {
         ESP_LOGE(TAG, "Failed to create notify queue");
         vQueueDelete(cmdQueue_);
         cmdQueue_ = nullptr;
@@ -146,14 +147,17 @@ std::expected<void, domain::AppError> BleManager::init() { // NOLINT(readability
 
     // Fix 3: Diagnostic markers around PHY-calibration-triggering call
     {
-        puts("DBG: BLE - nimble_port_init (triggers async PHY calibration)"); fflush(stdout);
+        puts("DBG: BLE - nimble_port_init (triggers async PHY calibration)");
+        fflush(stdout);
         diag::FfiGuard guard(60);
         int rc = nimble_port_init();
-        if (rc != 0) {
+        if (rc != 0)
+        {
             ESP_LOGE(TAG, "nimble_port_init failed: %d", rc);
             return std::unexpected(domain::AppError::Resource);
         }
-        puts("DBG: BLE - nimble_port_init done"); fflush(stdout);
+        puts("DBG: BLE - nimble_port_init done");
+        fflush(stdout);
     }
 
     ble_att_set_preferred_mtu(config::BLE_PREFERRED_MTU);
@@ -170,12 +174,14 @@ std::expected<void, domain::AppError> BleManager::init() { // NOLINT(readability
     {
         diag::FfiGuard guard(61);
         int rc = ble_gatts_count_cfg(GATT_SVCS);
-        if (rc != 0) {
+        if (rc != 0)
+        {
             ESP_LOGE(TAG, "ble_gatts_count_cfg failed: %d", rc);
             return std::unexpected(domain::AppError::Resource);
         }
         rc = ble_gatts_add_svcs(GATT_SVCS);
-        if (rc != 0) {
+        if (rc != 0)
+        {
             ESP_LOGE(TAG, "ble_gatts_add_svcs failed: %d", rc);
             return std::unexpected(domain::AppError::Resource);
         }
@@ -193,30 +199,36 @@ std::expected<void, domain::AppError> BleManager::init() { // NOLINT(readability
     return {};
 }
 
-void BleManager::process() { // NOLINT(readability-function-cognitive-complexity) // reason: BLE event dispatch, command queue drain
-    if (!initialized_) return;
+void BleManager::process()
+{ // NOLINT(readability-function-cognitive-complexity) // reason: BLE event dispatch, command queue
+  // drain
+    if (!initialized_)
+        return;
 
     {
         diag::FfiGuard guard(64);
 
-        if (connected_) {
+        if (connected_)
+        {
             int64_t now = esp_timer_get_time();
             int64_t elapsed = now - connectUs_;
             struct ble_gap_conn_desc desc;
             int rc = ble_gap_conn_find(connHandle_, &desc);
-            if (rc != 0 && elapsed > 500000) {
+            if (rc != 0 && elapsed > 500000)
+            {
                 ESP_LOGW(TAG, "Zombie connection detected (L2)");
                 connected_ = false;
                 connHandle_ = 0;
                 consecutiveFailures_ = 0;
                 // Restart advertising so device becomes visible again
-                ble_gap_adv_start(ownAddrType_, nullptr, BLE_HS_FOREVER,
-                                  &ADV_PARAMS, gapEventCallback, nullptr);
+                ble_gap_adv_start(ownAddrType_, nullptr, BLE_HS_FOREVER, &ADV_PARAMS,
+                                  gapEventCallback, nullptr);
                 domain::gBleError.store(false, std::memory_order_release);
             }
         }
 
-        if (connected_ && consecutiveFailures_ >= 5) {
+        if (connected_ && consecutiveFailures_ >= 5)
+        {
             ESP_LOGW(TAG, "Too many notify failures (L1), disconnecting");
             ble_gap_terminate(connHandle_, BLE_ERR_REM_USER_CONN_TERM);
             connected_ = false;
@@ -227,37 +239,44 @@ void BleManager::process() { // NOLINT(readability-function-cognitive-complexity
     }
 }
 
-bool BleManager::isConnected() const noexcept {
+bool BleManager::isConnected() const noexcept
+{
     return initialized_ && connected_;
 }
 
-bool BleManager::isInitialized() const noexcept {
+bool BleManager::isInitialized() const noexcept
+{
     return initialized_;
 }
 
-bool BleManager::sendNotification(std::string_view data) {
-    if (!initialized_ || !connected_) return false;
+bool BleManager::sendNotification(std::string_view data)
+{
+    if (!initialized_ || !connected_)
+        return false;
 
     {
         diag::FfiGuard guard(63);
 
         {
             struct ble_gap_conn_desc desc;
-            if (ble_gap_conn_find(connHandle_, &desc) != 0) {
+            if (ble_gap_conn_find(connHandle_, &desc) != 0)
+            {
                 return false;
             }
         }
 
-        struct os_mbuf* om = ble_hs_mbuf_from_flat(
-            reinterpret_cast<const uint8_t*>(data.data()), data.size());
-        if (om == nullptr) {
+        struct os_mbuf* om =
+            ble_hs_mbuf_from_flat(reinterpret_cast<const uint8_t*>(data.data()), data.size());
+        if (om == nullptr)
+        {
             ESP_LOGW(TAG, "Failed to allocate mbuf for notify");
             consecutiveFailures_++;
             return false;
         }
 
         int rc = ble_gatts_notify_custom(connHandle_, txAttrHandle_, om);
-        if (rc != 0) {
+        if (rc != 0)
+        {
             os_mbuf_free_chain(om);
             consecutiveFailures_++;
             return false;
@@ -268,29 +287,35 @@ bool BleManager::sendNotification(std::string_view data) {
     return true;
 }
 
-void BleManager::onHostSync() { // NOLINT(readability-function-cognitive-complexity) // reason: BLE host state machine, 10+ sync events
-    if (s_instance == nullptr) return;
+void BleManager::onHostSync()
+{ // NOLINT(readability-function-cognitive-complexity) // reason: BLE host state machine, 10+ sync
+  // events
+    if (s_instance == nullptr)
+        return;
 
     {
         diag::FfiGuard guard(65);
 
-        int rc = ble_gatts_find_chr(
-            &NUS_SVC_UUID.u, &NUS_TX_UUID.u, nullptr, &s_instance->txAttrHandle_);
-        if (rc != 0) {
+        int rc = ble_gatts_find_chr(&NUS_SVC_UUID.u, &NUS_TX_UUID.u, nullptr,
+                                    &s_instance->txAttrHandle_);
+        if (rc != 0)
+        {
             ESP_LOGE(TAG, "find TX chr failed: %d", rc);
             return;
         }
         ESP_LOGI(TAG, "TX attr handle=%d", s_instance->txAttrHandle_);
 
         rc = ble_hs_util_ensure_addr(0);
-        if (rc != 0) {
+        if (rc != 0)
+        {
             ESP_LOGE(TAG, "ensure addr failed: %d", rc);
             return;
         }
 
         uint8_t ownAddrType;
         rc = ble_hs_id_infer_auto(0, &ownAddrType);
-        if (rc != 0) {
+        if (rc != 0)
+        {
             ESP_LOGE(TAG, "infer addr failed: %d", rc);
             return;
         }
@@ -298,20 +323,20 @@ void BleManager::onHostSync() { // NOLINT(readability-function-cognitive-complex
 
         uint8_t addrVal[6] = {};
         rc = ble_hs_id_copy_addr(ownAddrType, addrVal, nullptr);
-        if (rc != 0) {
+        if (rc != 0)
+        {
             ESP_LOGE(TAG, "copy addr failed: %d", rc);
             return;
         }
 
         char deviceName[20];
-        int nameLen = std::snprintf(deviceName, sizeof(deviceName),
-                                    "EcoTiter-%02X%02X",
-                                    addrVal[1], addrVal[0]);
-        if (nameLen < 0) return;
+        int nameLen = std::snprintf(deviceName, sizeof(deviceName), "EcoTiter-%02X%02X", addrVal[1],
+                                    addrVal[0]);
+        if (nameLen < 0)
+            return;
 
-        ESP_LOGI(TAG, "Device Address: %02X:%02X:%02X:%02X:%02X:%02X",
-                 addrVal[5], addrVal[4], addrVal[3],
-                 addrVal[2], addrVal[1], addrVal[0]);
+        ESP_LOGI(TAG, "Device Address: %02X:%02X:%02X:%02X:%02X:%02X", addrVal[5], addrVal[4],
+                 addrVal[3], addrVal[2], addrVal[1], addrVal[0]);
 
         {
             struct ble_hs_adv_fields fields;
@@ -324,7 +349,8 @@ void BleManager::onHostSync() { // NOLINT(readability-function-cognitive-complex
             fields.name_is_complete = 1;
 
             rc = ble_gap_adv_set_fields(&fields);
-            if (rc != 0) {
+            if (rc != 0)
+            {
                 ESP_LOGE(TAG, "adv set fields failed: %d", rc);
                 return;
             }
@@ -339,15 +365,17 @@ void BleManager::onHostSync() { // NOLINT(readability-function-cognitive-complex
             rsp_fields.num_uuids128 = 1;
             rsp_fields.uuids128_is_complete = 1;
             rc = ble_gap_adv_rsp_set_fields(&rsp_fields);
-            if (rc != 0) {
+            if (rc != 0)
+            {
                 ESP_LOGE(TAG, "adv rsp set fields failed: %d", rc);
                 return;
             }
         }
 
-        rc = ble_gap_adv_start(ownAddrType, nullptr, BLE_HS_FOREVER,
-                               &ADV_PARAMS, gapEventCallback, nullptr);
-        if (rc != 0) {
+        rc = ble_gap_adv_start(ownAddrType, nullptr, BLE_HS_FOREVER, &ADV_PARAMS, gapEventCallback,
+                               nullptr);
+        if (rc != 0)
+        {
             ESP_LOGE(TAG, "adv start failed: %d", rc);
             return;
         }
@@ -357,36 +385,46 @@ void BleManager::onHostSync() { // NOLINT(readability-function-cognitive-complex
     }
 }
 
-void BleManager::onHostReset(int reason) {
+void BleManager::onHostReset(int reason)
+{
     ESP_LOGW(TAG, "Host reset, reason=%d", reason);
 }
 
-void BleManager::hostTaskEntry(void* param) {
+void BleManager::hostTaskEntry(void* param)
+{
     (void)param;
     ESP_LOGI(TAG, "BLE Host Task Started");
     nimble_port_run();
     nimble_port_freertos_deinit();
 }
 
-int BleManager::gapEventCallback(struct ble_gap_event* event, void* arg) {
+int BleManager::gapEventCallback(struct ble_gap_event* event, void* arg)
+{
     (void)arg;
-    if (s_instance == nullptr) return 0;
+    if (s_instance == nullptr)
+        return 0;
 
-    switch (event->type) {
+    switch (event->type)
+    {
     case BLE_GAP_EVENT_CONNECT: {
-        if (event->connect.status == 0) {
+        if (event->connect.status == 0)
+        {
             s_instance->connected_ = true;
             s_instance->connHandle_ = event->connect.conn_handle;
             s_instance->consecutiveFailures_ = 0;
             s_instance->connectUs_ = esp_timer_get_time();
             domain::gBleError.store(false, std::memory_order_release);
-            puts("DBG: BLE CONNECTED"); fflush(stdout);
+            puts("DBG: BLE CONNECTED");
+            fflush(stdout);
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
             esp_coex_preference_set(ESP_COEX_PREFER_BT);
 #pragma GCC diagnostic pop
-        } else {
-            puts("DBG: BLE CONNECT FAILED"); fflush(stdout);
+        }
+        else
+        {
+            puts("DBG: BLE CONNECT FAILED");
+            fflush(stdout);
         }
         return 0;
     }
@@ -396,15 +434,16 @@ int BleManager::gapEventCallback(struct ble_gap_event* event, void* arg) {
         s_instance->connHandle_ = 0;
         s_instance->consecutiveFailures_ = 0;
         domain::gBleError.store(false, std::memory_order_release);
-        puts("DBG: BLE DISCONNECTED"); fflush(stdout);
+        puts("DBG: BLE DISCONNECTED");
+        fflush(stdout);
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
         esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
 #pragma GCC diagnostic pop
 
         diag::FfiGuard guard(65);
-        ble_gap_adv_start(s_instance->ownAddrType_, nullptr, BLE_HS_FOREVER,
-                          &ADV_PARAMS, gapEventCallback, nullptr);
+        ble_gap_adv_start(s_instance->ownAddrType_, nullptr, BLE_HS_FOREVER, &ADV_PARAMS,
+                          gapEventCallback, nullptr);
         return 0;
     }
 
@@ -414,20 +453,24 @@ int BleManager::gapEventCallback(struct ble_gap_event* event, void* arg) {
 }
 
 int BleManager::gattEventCallback(uint16_t conn_handle, uint16_t attr_handle,
-                                   struct ble_gatt_access_ctxt* ctxt, void* arg) {
+                                  struct ble_gatt_access_ctxt* ctxt, void* arg)
+{
     (void)conn_handle;
     (void)attr_handle;
     (void)arg;
-    if (s_instance == nullptr) return 0;
+    if (s_instance == nullptr)
+        return 0;
 
-    if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
+    if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR)
+    {
         uint16_t len = 0;
         BleCmdItem item{};
-        int rc = ble_hs_mbuf_to_flat(
-            ctxt->om, item.data, sizeof(item.data) - 1, &len);
-        if (rc == 0 && len > 0) {
+        int rc = ble_hs_mbuf_to_flat(ctxt->om, item.data, sizeof(item.data) - 1, &len);
+        if (rc == 0 && len > 0)
+        {
             item.data[len] = '\0';
-            if (xQueueSend(s_instance->cmdQueue_, &item, 0) != pdTRUE) {
+            if (xQueueSend(s_instance->cmdQueue_, &item, 0) != pdTRUE)
+            {
                 ESP_LOGW(TAG, "Command queue full, dropping BLE write");
             }
         }

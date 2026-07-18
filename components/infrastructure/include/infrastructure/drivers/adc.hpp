@@ -1,7 +1,7 @@
 #pragma once
 
-#include <atomic>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <expected>
 
@@ -9,7 +9,8 @@
 
 #include "domain/errors.hpp"
 
-namespace ecotiter::infrastructure::drivers {
+namespace ecotiter::infrastructure::drivers
+{
 
 class AdcDriver; // forward decl for gAdcDriver
 
@@ -19,7 +20,8 @@ inline AdcDriver* gAdcDriver{nullptr};
 
 [[nodiscard]] int16_t calibratedFromRaw(uint16_t raw);
 
-class AdcDriver {
+class AdcDriver
+{
 public:
     explicit AdcDriver(adc_unit_t unit, adc_channel_t channel);
     ~AdcDriver();

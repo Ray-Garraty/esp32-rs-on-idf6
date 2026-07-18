@@ -37,6 +37,8 @@ public:
     /// Blocking wait for a state-machine result with timeout.
     /// @param timeoutMs  maximum time to wait in milliseconds.
     /// @return SmResult if received within timeout, std::nullopt on timeout.
+    // NOTE: Deprecated for HTTP handlers — use WS broadcast for async completion.
+    // Still used internally by serial/console path with timeout=0 (non-blocking peek).
     virtual std::optional<domain::SmResult> waitResult(uint32_t timeoutMs) = 0;
 };
 

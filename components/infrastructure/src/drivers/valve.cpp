@@ -1,29 +1,34 @@
 #include "infrastructure/drivers/valve.hpp"
 #include "infrastructure/config.hpp"
 
-namespace ecotiter::infrastructure::drivers {
+namespace ecotiter::infrastructure::drivers
+{
 
 Valve gValve(config::PIN_VALVE);
 
 Valve::Valve(gpio_num_t pin)
-    : pin_(pin) {
+    : pin_(pin)
+{
     gpio_set_direction(pin_, GPIO_MODE_OUTPUT);
     gpio_set_level(pin_, 0); // Input position (LOW)
 }
 
-void Valve::setPosition(domain::ValvePosition position) {
-    switch (position) {
-        case domain::ValvePosition::Input:
-            gpio_set_level(pin_, 0);
-            break;
-        case domain::ValvePosition::Output:
-            gpio_set_level(pin_, 1);
-            break;
+void Valve::setPosition(domain::ValvePosition position)
+{
+    switch (position)
+    {
+    case domain::ValvePosition::Input:
+        gpio_set_level(pin_, 0);
+        break;
+    case domain::ValvePosition::Output:
+        gpio_set_level(pin_, 1);
+        break;
     }
     position_ = position;
 }
 
-domain::ValvePosition Valve::getPosition() const noexcept {
+domain::ValvePosition Valve::getPosition() const noexcept
+{
     return position_;
 }
 

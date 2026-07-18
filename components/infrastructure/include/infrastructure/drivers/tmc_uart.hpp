@@ -5,11 +5,13 @@
 
 #include "driver/gpio.h"
 
-namespace ecotiter::infrastructure::drivers {
+namespace ecotiter::infrastructure::drivers
+{
 
 // TMC2209 single-wire UART communication (half-duplex via PDN_UART).
 // TX and RX pins must be externally connected through a 1 kΩ resistor.
-class TmcUart {
+class TmcUart
+{
 public:
     TmcUart() = default;
     ~TmcUart();
@@ -34,14 +36,14 @@ private:
 };
 
 // TMC2209 register addresses
-inline constexpr uint8_t TMC_REG_GCONF      = 0x00;
-inline constexpr uint8_t TMC_REG_IOIN       = 0x08;
-inline constexpr uint8_t TMC_REG_TCOOLTHRS  = 0x14;
-inline constexpr uint8_t TMC_REG_SGTHRS     = 0x40;
-inline constexpr uint8_t TMC_REG_SG_RESULT  = 0x41;
-inline constexpr uint8_t TMC_REG_COOLCONF   = 0x42;
-inline constexpr uint8_t TMC_REG_CHOPCONF   = 0x6C;
+inline constexpr uint8_t TMC_REG_GCONF = 0x00;
+inline constexpr uint8_t TMC_REG_IOIN = 0x08;
+inline constexpr uint8_t TMC_REG_TCOOLTHRS = 0x14;
+inline constexpr uint8_t TMC_REG_SGTHRS = 0x40;
+inline constexpr uint8_t TMC_REG_SG_RESULT = 0x41;
+inline constexpr uint8_t TMC_REG_COOLCONF = 0x42;
+inline constexpr uint8_t TMC_REG_CHOPCONF = 0x6C;
 inline constexpr uint8_t TMC_REG_DRV_STATUS = 0x6F;
-inline constexpr uint8_t TMC_REG_PWMCONF    = 0x70;
+inline constexpr uint8_t TMC_REG_PWMCONF = 0x70;
 
 } // namespace ecotiter::infrastructure::drivers

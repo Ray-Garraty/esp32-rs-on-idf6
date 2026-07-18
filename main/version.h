@@ -1,6 +1,7 @@
 #pragma once
 
-namespace ecotiter {
+namespace ecotiter
+{
 
 extern const char* build_date;
 extern const char* git_hash;

@@ -6,11 +6,11 @@
 
 #include "domain/types.hpp"
 
-namespace ecotiter::infrastructure::drivers {
+namespace ecotiter::infrastructure::drivers
+{
 
-
-
-class Valve {
+class Valve
+{
 public:
     explicit Valve(gpio_num_t pin);
 

@@ -1,25 +1,31 @@
 #include "domain/log_buffer.hpp"
 
+#include "diag/stack_monitor.hpp"
 #include <cstring>
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
-#include "diag/stack_monitor.hpp"
 
-namespace ecotiter::domain {
+namespace ecotiter::domain
+{
 
-namespace {
-    QueueHandle_t ensureQueue(QueueHandle_t& queueSlot) {
-        if (queueSlot == nullptr) {
-            queueSlot = xQueueCreate(LogBuffer::LOG_QUEUE_LENGTH, sizeof(size_t));
-        }
-        return queueSlot;
+namespace
+{
+QueueHandle_t ensureQueue(QueueHandle_t& queueSlot)
+{
+    if (queueSlot == nullptr)
+    {
+        queueSlot = xQueueCreate(LogBuffer::LOG_QUEUE_LENGTH, sizeof(size_t));
     }
+    return queueSlot;
 }
+} // namespace
 
-void LogBuffer::init(size_t capacity, std::pmr::memory_resource* res) {
+void LogBuffer::init(size_t capacity, std::pmr::memory_resource* res)
+{
     auto& self = instance();
-    if (self.initialized_.load(std::memory_order_acquire)) return;
+    if (self.initialized_.load(std::memory_order_acquire))
+        return;
 
     // Replace default-allocated vector with PSRAM-allocated one
     self.slots_.~vector();
@@ -30,14 +36,18 @@ void LogBuffer::init(size_t capacity, std::pmr::memory_resource* res) {
     self.initialized_.store(true, std::memory_order_release);
 }
 
-LogBuffer& LogBuffer::instance() {
+LogBuffer& LogBuffer::instance()
+{
     static LogBuffer buf;
     return buf;
 }
 
-void LogBuffer::push(uint32_t timestampMs, const char* level, const char* message) {
-    if (!initialized_.load(std::memory_order_acquire)) return;
-    if (pushing_.load(std::memory_order_relaxed)) return;
+void LogBuffer::push(uint32_t timestampMs, const char* level, const char* message)
+{
+    if (!initialized_.load(std::memory_order_acquire))
+        return;
+    if (pushing_.load(std::memory_order_relaxed))
+        return;
     pushing_.store(true, std::memory_order_relaxed);
 
     size_t idx = head_.fetch_add(1, std::memory_order_acq_rel) % capacity_;
@@ -52,28 +62,34 @@ void LogBuffer::push(uint32_t timestampMs, const char* level, const char* messag
     slot.timestampMs.store(timestampMs, std::memory_order_release);
 
     auto q = ensureQueue(queue_);
-    if (q) {
+    if (q)
+    {
         xQueueSend(q, &idx, 0);
     }
 
     pushing_.store(false, std::memory_order_relaxed);
 }
 
-void LogBuffer::workerTaskEntry(void* pvParameters) {
+void LogBuffer::workerTaskEntry(void* pvParameters)
+{
     auto& self = instance();
     auto q = self.queue_;
-    if (q == nullptr) {
+    if (q == nullptr)
+    {
         return;
     }
 
     LogEntry entry;
     TickType_t lastWmLog = xTaskGetTickCount();
-    while (true) {
+    while (true)
+    {
         size_t idx;
-        if (xQueueReceive(q, &idx, pdMS_TO_TICKS(60000)) == pdTRUE) {
+        if (xQueueReceive(q, &idx, pdMS_TO_TICKS(60000)) == pdTRUE)
+        {
             auto& slot = self.slots_[idx];
             uint32_t ts = slot.timestampMs.load(std::memory_order_acquire);
-            if (ts == 0) continue;
+            if (ts == 0)
+                continue;
 
             entry.timestampMs = ts;
             std::strncpy(entry.level, slot.level, sizeof(entry.level) - 1);
@@ -81,21 +97,26 @@ void LogBuffer::workerTaskEntry(void* pvParameters) {
             std::strncpy(entry.message, slot.message, sizeof(entry.message) - 1);
             entry.message[sizeof(entry.message) - 1] = '\0';
 
-            if (self.callback_) {
+            if (self.callback_)
+            {
                 self.callback_(entry);
             }
         }
 
-        if ((xTaskGetTickCount() - lastWmLog) >= pdMS_TO_TICKS(60000)) {
+        if ((xTaskGetTickCount() - lastWmLog) >= pdMS_TO_TICKS(60000))
+        {
             ecotiter::diag::StackMonitor::instance().logAllWatermarks();
             lastWmLog = xTaskGetTickCount();
         }
     }
 }
 
-void LogBuffer::clear() {
-    if (!initialized_.load(std::memory_order_acquire)) return;
-    for (auto& slot : slots_) {
+void LogBuffer::clear()
+{
+    if (!initialized_.load(std::memory_order_acquire))
+        return;
+    for (auto& slot : slots_)
+    {
         slot.timestampMs.store(0, std::memory_order_release);
         slot.level[0] = '\0';
         slot.message[0] = '\0';
@@ -103,26 +124,31 @@ void LogBuffer::clear() {
     head_.store(0, std::memory_order_release);
 }
 
-void LogBuffer::setCallback(Callback cb) {
+void LogBuffer::setCallback(Callback cb)
+{
     callback_ = cb;
 }
 
-size_t LogBuffer::fetch(LogEntry* out, size_t maxCount,
-                         const char* levelFilter) const {
-    if (!initialized_.load(std::memory_order_acquire)) return 0;
+size_t LogBuffer::fetch(LogEntry* out, size_t maxCount, const char* levelFilter) const
+{
+    if (!initialized_.load(std::memory_order_acquire))
+        return 0;
     size_t currentHead = head_.load(std::memory_order_acquire);
     size_t written = 0;
 
-    for (size_t offset = 1; offset <= capacity_ && written < maxCount; ++offset) {
-        size_t idx = (currentHead >= offset)
-            ? (currentHead - offset) % capacity_
-            : (capacity_ + currentHead - offset) % capacity_;
+    for (size_t offset = 1; offset <= capacity_ && written < maxCount; ++offset)
+    {
+        size_t idx = (currentHead >= offset) ? (currentHead - offset) % capacity_
+                                             : (capacity_ + currentHead - offset) % capacity_;
 
         uint32_t ts = slots_[idx].timestampMs.load(std::memory_order_acquire);
-        if (ts == 0) continue;
+        if (ts == 0)
+            continue;
 
-        if (levelFilter && levelFilter[0] != '\0') {
-            if (std::strcmp(slots_[idx].level, levelFilter) != 0) continue;
+        if (levelFilter && levelFilter[0] != '\0')
+        {
+            if (std::strcmp(slots_[idx].level, levelFilter) != 0)
+                continue;
         }
 
         auto& e = out[written];

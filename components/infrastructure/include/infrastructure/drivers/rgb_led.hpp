@@ -7,9 +7,11 @@
 
 #include "domain/types.hpp"
 
-namespace ecotiter::infrastructure::drivers {
+namespace ecotiter::infrastructure::drivers
+{
 
-struct RmtTxChannel {
+struct RmtTxChannel
+{
     rmt_channel_handle_t handle{nullptr};
     explicit RmtTxChannel(gpio_num_t pin, uint32_t resolution_hz);
     ~RmtTxChannel();
@@ -19,7 +21,8 @@ struct RmtTxChannel {
     RmtTxChannel& operator=(RmtTxChannel&&) = delete;
 };
 
-struct RmtCopyEncoder {
+struct RmtCopyEncoder
+{
     rmt_encoder_handle_t handle{nullptr};
     RmtCopyEncoder();
     ~RmtCopyEncoder();
@@ -29,7 +32,8 @@ struct RmtCopyEncoder {
     RmtCopyEncoder& operator=(RmtCopyEncoder&&) = delete;
 };
 
-class RgbLed {
+class RgbLed
+{
 public:
     explicit RgbLed(gpio_num_t pin);
     ~RgbLed();
@@ -54,11 +58,12 @@ private:
     bool initialized_{false};
 };
 
-namespace color {
-    inline constexpr uint8_t RED_R = 255, RED_G = 0, RED_B = 0;
-    inline constexpr uint8_t OFF_R = 0, OFF_G = 0, OFF_B = 0;
-    inline constexpr uint8_t BLUE_R = 0, BLUE_G = 0, BLUE_B = 255;
-    inline constexpr uint8_t GREEN_R = 0, GREEN_G = 255, GREEN_B = 0;
-}
+namespace color
+{
+inline constexpr uint8_t RED_R = 255, RED_G = 0, RED_B = 0;
+inline constexpr uint8_t OFF_R = 0, OFF_G = 0, OFF_B = 0;
+inline constexpr uint8_t BLUE_R = 0, BLUE_G = 0, BLUE_B = 255;
+inline constexpr uint8_t GREEN_R = 0, GREEN_G = 255, GREEN_B = 0;
+} // namespace color
 
 } // namespace ecotiter::infrastructure::drivers

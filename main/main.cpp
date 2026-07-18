@@ -133,9 +133,10 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
         auto bootCal = infrastructure::storage::calibrationRead();
         if (bootCal)
         {
-            // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) // reason: heap-allocated CalibrationData stored in gCalCache
+            // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) // reason: heap-allocated
+            // CalibrationData stored in gCalCache
             infrastructure::gCalCache.store(new domain::CalibrationData(*bootCal),
-                                    std::memory_order_release);
+                                            std::memory_order_release);
         }
     }
 
@@ -319,8 +320,7 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
                     .vlv = ecotiter::domain::gValvePosition.load(std::memory_order_acquire),
                     .brt = ecotiter::domain::gBuretteState.load(std::memory_order_acquire),
                     .volumeMl = ecotiter::domain::gVolumeMl.load(std::memory_order_acquire),
-                    .speedMlMin =
-                        ecotiter::domain::gSpeedMlMin.load(std::memory_order_acquire),
+                    .speedMlMin = ecotiter::domain::gSpeedMlMin.load(std::memory_order_acquire),
                     .limitFull = ecotiter::domain::gStopFull.load(std::memory_order_acquire),
                     .limitEmpty = ecotiter::domain::gStopEmpty.load(std::memory_order_acquire),
                     .usbSerialConnected =
@@ -333,7 +333,8 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
                     .isStalled = false,
                     .stallGuardThreshold =
                         ecotiter::domain::gStallGuardThreshold.load(std::memory_order_acquire),
-                    .motorIsMoving = ecotiter::domain::gMotorIsMoving.load(std::memory_order_acquire),
+                    .motorIsMoving =
+                        ecotiter::domain::gMotorIsMoving.load(std::memory_order_acquire),
                     .stepsTaken =
                         ecotiter::domain::gDispensedSteps.load(std::memory_order_acquire)};
 
@@ -514,7 +515,7 @@ extern "C" void app_main(void) // NOLINT(readability-function-cognitive-complexi
                 auto* controller = ecotiter::application::getMotorController();
                 if (controller)
                 {
-                    auto smResultOpt = controller->waitResult(0);  // non-blocking
+                    auto smResultOpt = controller->waitResult(0); // non-blocking
                     if (smResultOpt.has_value())
                     {
                         auto& smResult = *smResultOpt;

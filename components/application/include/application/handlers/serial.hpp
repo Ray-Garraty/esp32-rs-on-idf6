@@ -5,7 +5,8 @@
 #include "application/command.hpp"
 #include "domain/errors.hpp"
 
-namespace ecotiter::application::handlers::serial {
+namespace ecotiter::application::handlers::serial
+{
 
 [[nodiscard]] std::expected<CommandResponse, domain::AppError> handlePing();
 

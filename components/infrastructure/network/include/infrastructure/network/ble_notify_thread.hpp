@@ -1,6 +1,7 @@
 #pragma once
 
-namespace ecotiter::infrastructure::network {
+namespace ecotiter::infrastructure::network
+{
 
 class BleManager;
 

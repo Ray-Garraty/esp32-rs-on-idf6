@@ -1,10 +1,11 @@
 #pragma once
 
 #include <cstdint>
-#include "hal/wdt_hal.h"
 #include "esp_err.h"
+#include "hal/wdt_hal.h"
 
-namespace ecotiter::diag {
+namespace ecotiter::diag
+{
 
 // RAII wrapper for the RTC Watchdog Timer (RWDT) on ESP32-S3.
 //
@@ -26,7 +27,8 @@ namespace ecotiter::diag {
 //   wdt.feed();        // call from main loop every < 6s
 //   // ~RtcWatchdog()  // deinit on destruction
 //
-class RtcWatchdog {
+class RtcWatchdog
+{
 public:
     RtcWatchdog() noexcept;
     ~RtcWatchdog() noexcept;

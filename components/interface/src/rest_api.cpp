@@ -173,46 +173,11 @@ esp_err_t ecotiter::interface::command_handler(httpd_req_t* req)
         return ESP_OK;
     }
 
-    // AckThen: wait for result via motor controller (decouples from
-    // infrastructure globals — uses IMotorController interface)
-    auto* controller = application::getMotorController();
-    if (!controller)
-    {
-        ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
-        auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
-        std::snprintf(buf.data(), buf.size(),
-                      R"({"status":"error","message":"controller_unavailable"})");
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_set_status(req, "500 Internal Server Error");
-        httpd_resp_send(req, buf.data(), HTTPD_RESP_USE_STRLEN);
-        return ESP_OK;
-    }
-
-    auto result = controller->waitResult(60000);
-    if (result)
-    {
-        ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
-        auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
-        size_t off = application::formatSmResult(buf, rsp->id, *result);
-
-        httpd_resp_set_type(req, "application/json");
-        if (off > 0 && off < buf.size())
-        {
-            httpd_resp_send(req, buf.data(), static_cast<ssize_t>(off));
-        }
-        else
-        {
-            httpd_resp_send(req, R"({"status":"error"})", HTTPD_RESP_USE_STRLEN);
-        }
-        return ESP_OK;
-    }
-
-    // Timeout
+    // AckThen: return immediately — result arrives via WS broadcast
     ecotiter::memory::PsramBuffer<domain::memory::MAX_RSP_SIZE> _buf{};
     auto& buf = *reinterpret_cast<domain::memory::ResponseBuffer*>(_buf.data());
-    std::snprintf(buf.data(), buf.size(), R"({"status":"error","message":"watchdog_timeout"})");
+    std::snprintf(buf.data(), buf.size(), R"({"status":"accepted"})");
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_set_status(req, "408 Request Timeout");
     httpd_resp_send(req, buf.data(), HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }

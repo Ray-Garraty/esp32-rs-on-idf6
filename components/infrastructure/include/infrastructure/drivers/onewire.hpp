@@ -1,18 +1,20 @@
 #pragma once
 
-#include <atomic>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <limits>
 #include <optional>
 
 #include "driver/gpio.h"
 
-namespace ecotiter::infrastructure::drivers {
+namespace ecotiter::infrastructure::drivers
+{
 
 inline std::atomic<int32_t> gTempCX100{std::numeric_limits<int32_t>::min()};
 
-class OneWireBus {
+class OneWireBus
+{
 public:
     explicit OneWireBus(gpio_num_t pin);
     ~OneWireBus() = default;

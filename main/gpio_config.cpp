@@ -5,7 +5,8 @@
 
 #include "infrastructure/config.hpp"
 
-void configureGpioPins() {
+void configureGpioPins()
+{
     using namespace ecotiter;
     // DIR pin (GPIO5) — safe
     gpio_set_direction(config::PIN_DIR, GPIO_MODE_OUTPUT);
@@ -13,7 +14,7 @@ void configureGpioPins() {
 
     // EN pin (GPIO13) — safe (moved from GPIO27: LL-027 PSRAM D3)
     gpio_set_direction(config::PIN_EN, GPIO_MODE_OUTPUT);
-    gpio_set_level(config::PIN_EN, 0);  // Active LOW: enable driver
+    gpio_set_level(config::PIN_EN, 0); // Active LOW: enable driver
 
     // FULL endstop (GPIO7) — input with pull-down, pos-edge interrupt
     gpio_config_t fullConf = {};

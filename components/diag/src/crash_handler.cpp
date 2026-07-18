@@ -2,30 +2,37 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "diag/black_box.hpp"
+#include "diag/stack_monitor.hpp"
 #include "esp_private/panic_internal.h"
 #include "hal/uart_hal.h"
 #include "xtensa_context.h"
-#include "diag/black_box.hpp"
-#include "diag/stack_monitor.hpp"
 
 // Forward declare: defined in esp_system/panic.c, not in any public header
 extern "C" void esp_panic_handler_feed_wdts(void);
 
 // Direct UART HAL output — no stdio/VFS dependency
 // Safe even when the UART driver or VFS layer is corrupted (LL-026).
-namespace {
+namespace
+{
 
-uart_hal_context_t s_panic_uart = { .dev = &UART0 };
+uart_hal_context_t s_panic_uart = {.dev = &UART0};
 
-void panic_putc(char c) {
+void panic_putc(char c)
+{
     uint32_t sz = 0;
-    while (uart_hal_get_txfifo_len(&s_panic_uart) == 0) { }
+    while (uart_hal_get_txfifo_len(&s_panic_uart) == 0)
+    {
+    }
     uart_hal_write_txfifo(&s_panic_uart, reinterpret_cast<const uint8_t*>(&c), 1, &sz);
 }
 
-void panic_puts(const char* s) {
-    for (; *s; ++s) {
-        if (*s == '\n') {
+void panic_puts(const char* s)
+{
+    for (; *s; ++s)
+    {
+        if (*s == '\n')
+        {
             panic_putc('\r');
         }
         panic_putc(*s);
@@ -33,14 +40,19 @@ void panic_puts(const char* s) {
 }
 
 // Minimal unsigned integer printer to a static buffer
-void panic_print_uint(unsigned long val) {
+void panic_print_uint(unsigned long val)
+{
     char buf[16];
     char* p = buf + sizeof(buf);
     *--p = '\0';
-    if (val == 0) {
+    if (val == 0)
+    {
         *--p = '0';
-    } else {
-        while (val > 0) {
+    }
+    else
+    {
+        while (val > 0)
+        {
             *--p = '0' + (val % 10);
             val /= 10;
         }
@@ -48,12 +60,14 @@ void panic_print_uint(unsigned long val) {
     panic_puts(p);
 }
 
-void panic_print_hex_addr(uint32_t addr) {
+void panic_print_hex_addr(uint32_t addr)
+{
     char buf[11];
     buf[0] = '0';
     buf[1] = 'x';
     buf[10] = '\0';
-    for (int i = 9; i >= 2; --i) {
+    for (int i = 9; i >= 2; --i)
+    {
         unsigned nibble = addr & 0xF;
         buf[i] = nibble < 10 ? '0' + nibble : 'a' + nibble - 10;
         addr >>= 4;
@@ -64,7 +78,8 @@ void panic_print_hex_addr(uint32_t addr) {
 } // anonymous namespace
 
 // NOLINTBEGIN(bugprone-reserved-identifier) // reason: platform-specific CPU register access
-extern "C" void __wrap_esp_panic_handler(void* info) noexcept {
+extern "C" void __wrap_esp_panic_handler(void* info) noexcept
+{
 
     __asm__ volatile("rsil a0, 3");
 
@@ -93,25 +108,41 @@ extern "C" void __wrap_esp_panic_handler(void* info) noexcept {
 
     panic_puts("=== REGISTERS ===\n");
     // Print a0-a15 (each is a long, 4 bytes on Xtensa)
-    panic_puts("a0=0x"); panic_print_hex_addr(static_cast<uint32_t>(frame->a0));
-    panic_puts("  a1=0x"); panic_print_hex_addr(static_cast<uint32_t>(frame->a1));
-    panic_puts("  a2=0x"); panic_print_hex_addr(static_cast<uint32_t>(frame->a2));
-    panic_puts("  a3=0x"); panic_print_hex_addr(static_cast<uint32_t>(frame->a3));
+    panic_puts("a0=0x");
+    panic_print_hex_addr(static_cast<uint32_t>(frame->a0));
+    panic_puts("  a1=0x");
+    panic_print_hex_addr(static_cast<uint32_t>(frame->a1));
+    panic_puts("  a2=0x");
+    panic_print_hex_addr(static_cast<uint32_t>(frame->a2));
+    panic_puts("  a3=0x");
+    panic_print_hex_addr(static_cast<uint32_t>(frame->a3));
     panic_puts("\n");
-    panic_puts("a4=0x"); panic_print_hex_addr(static_cast<uint32_t>(frame->a4));
-    panic_puts("  a5=0x"); panic_print_hex_addr(static_cast<uint32_t>(frame->a5));
-    panic_puts("  a6=0x"); panic_print_hex_addr(static_cast<uint32_t>(frame->a6));
-    panic_puts("  a7=0x"); panic_print_hex_addr(static_cast<uint32_t>(frame->a7));
+    panic_puts("a4=0x");
+    panic_print_hex_addr(static_cast<uint32_t>(frame->a4));
+    panic_puts("  a5=0x");
+    panic_print_hex_addr(static_cast<uint32_t>(frame->a5));
+    panic_puts("  a6=0x");
+    panic_print_hex_addr(static_cast<uint32_t>(frame->a6));
+    panic_puts("  a7=0x");
+    panic_print_hex_addr(static_cast<uint32_t>(frame->a7));
     panic_puts("\n");
-    panic_puts("a8=0x"); panic_print_hex_addr(static_cast<uint32_t>(frame->a8));
-    panic_puts("  a9=0x"); panic_print_hex_addr(static_cast<uint32_t>(frame->a9));
-    panic_puts("  a10=0x"); panic_print_hex_addr(static_cast<uint32_t>(frame->a10));
-    panic_puts("  a11=0x"); panic_print_hex_addr(static_cast<uint32_t>(frame->a11));
+    panic_puts("a8=0x");
+    panic_print_hex_addr(static_cast<uint32_t>(frame->a8));
+    panic_puts("  a9=0x");
+    panic_print_hex_addr(static_cast<uint32_t>(frame->a9));
+    panic_puts("  a10=0x");
+    panic_print_hex_addr(static_cast<uint32_t>(frame->a10));
+    panic_puts("  a11=0x");
+    panic_print_hex_addr(static_cast<uint32_t>(frame->a11));
     panic_puts("\n");
-    panic_puts("a12=0x"); panic_print_hex_addr(static_cast<uint32_t>(frame->a12));
-    panic_puts("  a13=0x"); panic_print_hex_addr(static_cast<uint32_t>(frame->a13));
-    panic_puts("  a14=0x"); panic_print_hex_addr(static_cast<uint32_t>(frame->a14));
-    panic_puts("  a15=0x"); panic_print_hex_addr(static_cast<uint32_t>(frame->a15));
+    panic_puts("a12=0x");
+    panic_print_hex_addr(static_cast<uint32_t>(frame->a12));
+    panic_puts("  a13=0x");
+    panic_print_hex_addr(static_cast<uint32_t>(frame->a13));
+    panic_puts("  a14=0x");
+    panic_print_hex_addr(static_cast<uint32_t>(frame->a14));
+    panic_puts("  a15=0x");
+    panic_print_hex_addr(static_cast<uint32_t>(frame->a15));
     panic_puts("\n");
 
     panic_puts("=== BLACK BOX ===\n");

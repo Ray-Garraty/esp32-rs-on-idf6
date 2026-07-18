@@ -4,7 +4,8 @@
 
 int logVprintf(const char* fmt, va_list args);
 
-namespace ecotiter::domain {
+namespace ecotiter::domain
+{
 struct LogEntry;
 }
 

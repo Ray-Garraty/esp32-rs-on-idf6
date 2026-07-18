@@ -6,9 +6,11 @@
 #include "domain/memory.hpp"
 #include "domain/types.hpp"
 
-namespace ecotiter::interface {
+namespace ecotiter::interface
+{
 
-struct BroadcastEvent {
+struct BroadcastEvent
+{
     uint32_t tick;
     int32_t tempCX100;
     uint16_t mv;
@@ -31,13 +33,11 @@ struct BroadcastEvent {
 };
 
 // Compact broadcast for Serial/BLE (legacy format_status_response_doc)
-[[nodiscard]] std::string_view serializeBroadcastCompact(
-    const BroadcastEvent& evt,
-    domain::memory::ResponseBuffer& buf);
+[[nodiscard]] std::string_view serializeBroadcastCompact(const BroadcastEvent& evt,
+                                                         domain::memory::ResponseBuffer& buf);
 
 // Extended broadcast for WebSocket (legacy sse_broadcast_all)
-[[nodiscard]] std::string_view serializeBroadcastExtended(
-    const BroadcastEvent& evt,
-    domain::memory::ResponseBuffer& buf);
+[[nodiscard]] std::string_view serializeBroadcastExtended(const BroadcastEvent& evt,
+                                                          domain::memory::ResponseBuffer& buf);
 
 } // namespace ecotiter::interface

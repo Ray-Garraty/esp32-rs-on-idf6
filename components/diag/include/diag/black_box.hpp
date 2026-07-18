@@ -4,14 +4,17 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace ecotiter::diag {
+namespace ecotiter::diag
+{
 
 // Lock-free ring buffer for pre-mortem events.
 // 64 events x 16 bytes = 1 KB SRAM. ~5 us per event.
 // Designed to be dumpable from panic handler context (no heap, no mutex).
-class BlackBox {
+class BlackBox
+{
 public:
-    enum class EventType : uint8_t {
+    enum class EventType : uint8_t
+    {
         FfiEnter,
         FfiExit,
         StateTransition,
@@ -23,7 +26,8 @@ public:
         TickDuration
     };
 
-    struct Event {
+    struct Event
+    {
         uint64_t timestampUs;
         EventType type;
         uint8_t threadId;
@@ -31,7 +35,8 @@ public:
         uint32_t payloadValue;
     };
 
-    [[nodiscard]] static BlackBox& instance() noexcept {
+    [[nodiscard]] static BlackBox& instance() noexcept
+    {
         static BlackBox bb;
         return bb;
     }

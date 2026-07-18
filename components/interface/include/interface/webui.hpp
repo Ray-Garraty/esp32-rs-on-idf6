@@ -1,15 +1,17 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <string_view>
-#include <array>
 
 using namespace std::literals::string_view_literals;
 
-namespace ecotiter::interface::webui {
+namespace ecotiter::interface::webui
+{
 
-namespace detail {
+namespace detail
+{
 
 static constexpr std::string_view MINIMAL_CSS = R"css(
 *,::before,::after{box-sizing:border-box}:root{--bg-dark-primary:#1a1a2e;--bg-dark-secondary:#16213e;--bg-dark-accent:#0f3460;--bg-input-dark:#0d1117;--border-dark:#30363d;--text-dark:#e0e0e0;--focus-border:#86b7fe}
@@ -329,7 +331,7 @@ button:hover{opacity:0.9}
 </div>
 <script>
 function togglePass(){var p=document.getElementById('password');var b=document.getElementById('toggle-pass');if(p.type==='password'){p.type='text';b.textContent='&#128066;';b.setAttribute('aria-label','Hide password');}else{p.type='password';b.textContent='&#128065;';b.setAttribute('aria-label','Show password');}}
-document.getElementById('wifi-form').addEventListener('submit',async function(e){e.preventDefault();var ssid=document.getElementById('ssid').value;var pass=document.getElementById('password').value;var status=document.getElementById('status');var btn=this.querySelector('button');btn.disabled=true;btn.textContent='Connecting...';status.className='status info';status.textContent='Connecting...';try{var r=await fetch('/wifi/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:ssid,password:pass})});var j=await r.json();if(j.success){status.className='status success';status.innerHTML='Connected!<br>Device restarting...';btn.textContent='Done!';}else{status.className='status error';status.textContent='Error: '+(j.message||'Failed');btn.disabled=false;btn.textContent='Connect';}}catch(e){status.className='status error';status.textContent='Connection lost. Device may be restarting.';btn.disabled=false;btn.textContent='Connect';}});
+document.getElementById('wifi-form').addEventListener('submit',async function(e){e.preventDefault();var ssid=document.getElementById('ssid').value;var pass=document.getElementById('password').value;var status=document.getElementById('status');var btn=this.querySelector('button');btn.disabled=true;btn.textContent='Connecting...';status.className='status info';status.textContent='Connecting...';try{var r=await fetch('/wifi/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:ssid,password:pass})});var j=await r.json();if(j.status==='accepted'){status.className='status info';status.innerHTML='Request accepted. Connecting...<br>Device will restart once connected.';btn.textContent='Requested';}else if(j.success){status.className='status success';status.innerHTML='Connected!<br>Device restarting...';btn.textContent='Done!';}else{status.className='status error';status.textContent='Error: '+(j.message||'Failed');btn.disabled=false;btn.textContent='Connect';}}catch(e){status.className='status error';status.textContent='Connection lost. Device may be restarting.';btn.disabled=false;btn.textContent='Connect';}});
 </script>
 </body>
 </html>)htmlraw"sv;
@@ -383,6 +385,13 @@ function connectWs(){
       }else if(data.event&&data.event==='limitsw'){
         if(data.full!==undefined)document.getElementById('hw-limit-full').textContent=data.full?'Activated':'--';
         if(data.empty!==undefined)document.getElementById('hw-limit-empty').textContent=data.empty?'Activated':'--';
+      }else if(data.event&&data.event==='motor_complete'){
+        if(_motorPollTimer){clearInterval(_motorPollTimer);_motorPollTimer=null;}
+        updateStepperUI({status:'idle'});
+        var btn=document.getElementById('stepper-start-stop-btn');
+        if(btn)btn.disabled=false;
+      }else if(data.event&&data.event==='wifi_connect_result'){
+        console.log('WiFi connect result:', data.success?'success':'failed','SSID:',data.ssid);
       }else{
         updateUI(data);updateDebugUI(data);
         if(APP_STATE.logs.wsAutoupdate){
@@ -519,6 +528,22 @@ window.setLogLevelFilter=setLogLevelFilter;window.addLogEntry=addLogEntry;window
 
 static constexpr std::string_view STEPPER_JS = R"js(
 var STEPPER_CFG=CONFIG.STEPPER;
+var _motorPollTimer=null;
+
+function startMotorPollFallback(){
+  if(_motorPollTimer)return;
+  _motorPollTimer=setInterval(function(){
+    if(_connAlive){clearInterval(_motorPollTimer);_motorPollTimer=null;return;}
+    fetch('/api/status').then(function(r){return r.json();}).then(function(data){
+      if(data&&data.state==='idle'){
+        clearInterval(_motorPollTimer);_motorPollTimer=null;
+        updateStepperUI({status:'idle'});
+        var btn=document.getElementById('stepper-start-stop-btn');
+        if(btn)btn.disabled=false;
+      }
+    }).catch(function(){});
+  },500);
+}
 
 function buildStepperCommand(mode,direction,value){
   if(mode==='steps')return{cmd:'burette.moveSteps',params:{steps:value,direction:direction,freq:STEPPER_CFG.DEFAULT_FREQ}};
@@ -564,7 +589,13 @@ function stepperStartStop(){
         });
         return;
       }
-      if(!res)showUIError('Command '+cmd.cmd+' failed');else if(res.status==='error')console.error('stepperStartStop: '+cmd.cmd+' rejected',JSON.stringify(res));if(btn)btn.disabled=false;
+      if(!res)showUIError('Command '+cmd.cmd+' failed');
+      else if(res.status==='error')console.error('stepperStartStop: '+cmd.cmd+' rejected',JSON.stringify(res));
+      else if(res.status==='accepted'){
+        if(!_connAlive)startMotorPollFallback();
+        return;
+      }
+      if(btn)btn.disabled=false;
     });
   }
 }
@@ -832,29 +863,33 @@ document.addEventListener('DOMContentLoaded',initApp);
 window.sendCommand=sendCommand;window.sendCmdRaw=sendCmdRaw;window.toggleTheme=toggleTheme;window.toggleValve=toggleValve;
 )js"sv;
 
-struct FileEntry {
+struct FileEntry
+{
     const char* path;
     std::string_view content;
 };
 
 static constexpr std::array<FileEntry, 10> FILES = {{
-    {"/",            INDEX_HTML},
-    {"/style.css",   MINIMAL_CSS},
-    {"/wifi",        CAPTIVE_HTML},
+    {"/", INDEX_HTML},
+    {"/style.css", MINIMAL_CSS},
+    {"/wifi", CAPTIVE_HTML},
     {"/js/state.js", STATE_JS},
-    {"/js/ws.js",    WS_JS},
+    {"/js/ws.js", WS_JS},
     {"/js/ui-update.js", UI_UPDATE_JS},
-    {"/js/logs.js",  LOGS_JS},
+    {"/js/logs.js", LOGS_JS},
     {"/js/stepper.js", STEPPER_JS},
     {"/js/calibration.js", CALIBRATION_JS},
-    {"/js/init.js",  INIT_JS},
+    {"/js/init.js", INIT_JS},
 }};
 
 } // namespace detail
 
-[[nodiscard]] inline std::string_view getFile(std::string_view path) {
-    for (auto& entry : detail::FILES) {
-        if (path == entry.path) {
+[[nodiscard]] inline std::string_view getFile(std::string_view path)
+{
+    for (auto& entry : detail::FILES)
+    {
+        if (path == entry.path)
+        {
             return entry.content;
         }
     }

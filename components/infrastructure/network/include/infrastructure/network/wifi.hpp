@@ -12,9 +12,11 @@
 #include "domain/errors.hpp"
 #include "domain/memory.hpp"
 
-namespace ecotiter::infrastructure::network {
+namespace ecotiter::infrastructure::network
+{
 
-class WifiManager {
+class WifiManager
+{
 public:
     WifiManager();
     ~WifiManager();
@@ -55,7 +57,7 @@ private:
     static constexpr uint32_t AP_IP = 0x0104A8C0; // 192.168.4.1 in network order
     static constexpr const char* AP_SSID = "EcoTiter-AP";
 
-    static constexpr EventBits_t STA_CONNECTED_BIT  = 1 << 0;
+    static constexpr EventBits_t STA_CONNECTED_BIT = 1 << 0;
     static constexpr EventBits_t STA_DISCONNECTED_BIT = 1 << 1;
 
     bool initialized_{false};

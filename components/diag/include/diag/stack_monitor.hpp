@@ -5,11 +5,14 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-namespace ecotiter::diag {
+namespace ecotiter::diag
+{
 
-class StackMonitor {
+class StackMonitor
+{
 public:
-    [[nodiscard]] static StackMonitor& instance() noexcept {
+    [[nodiscard]] static StackMonitor& instance() noexcept
+    {
         static StackMonitor sm;
         return sm;
     }

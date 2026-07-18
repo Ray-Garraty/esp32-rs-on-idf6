@@ -4,11 +4,13 @@
 
 #include "domain/types.hpp"
 
-namespace ecotiter::domain {
+namespace ecotiter::domain
+{
 
 /// Motor command type — moved from infrastructure to domain for SRP layering.
 /// These are pure data types with no hardware dependency.
-enum class MotorCommandType : uint8_t {
+enum class MotorCommandType : uint8_t
+{
     MoveSteps,
     Stop,
     EmergencyStop,
@@ -23,21 +25,25 @@ enum class MotorCommandType : uint8_t {
     StartCalSpeedSeq
 };
 
-struct StartRinseParams {
+struct StartRinseParams
+{
     uint8_t cycles;
     float speedMlMin;
 };
 
-struct StartCalDoseParams {
+struct StartCalDoseParams
+{
     float speedMlMin;
 };
 
-struct StartCalSpeedParams {
+struct StartCalSpeedParams
+{
     float speedMlMin;
     uint16_t testFreqHz;
 };
 
-struct StartCalSpeedSeqParams {
+struct StartCalSpeedSeqParams
+{
     uint16_t freqs[3];
     float fillSpeedMlMin;
 };
@@ -46,7 +52,8 @@ struct StartCalSpeedSeqParams {
 ///
 /// ABI-critical: layout must remain stable because FreeRTOS queues use
 /// sizeof(MotorCommand) for message sizing.
-struct MotorCommand {
+struct MotorCommand
+{
     MotorCommandType type;
     int32_t steps;
     Direction direction;

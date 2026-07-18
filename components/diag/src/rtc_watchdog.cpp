@@ -14,15 +14,18 @@ static constexpr unsigned RWDT_TIMEOUT_S = 6;
 //   - Internal RC: ~150 kHz  (RTC_SLOW_CLK_FREQ_150K)
 //   - 8MD256:      ~31.25 kHz (RTC_SLOW_CLK_FREQ_8MD256)
 // We query the actual frequency at init.
-static uint32_t rtc_slow_clk_hz() noexcept {
+static uint32_t rtc_slow_clk_hz() noexcept
+{
     return rtc_clk_slow_freq_get_hz();
 }
 
-namespace ecotiter::diag {
+namespace ecotiter::diag
+{
 
 RtcWatchdog* gRtcWdt = nullptr;
 
-RtcWatchdog::RtcWatchdog() noexcept {
+RtcWatchdog::RtcWatchdog() noexcept
+{
     // Step 1: Initialize HAL context. rwdt_hal_init disables RWDT + all
     // stages + sets defaults. Must be called first to get a clean state.
     wdt_hal_init(&hal_, WDT_RWDT, 0, false);
@@ -41,15 +44,15 @@ RtcWatchdog::RtcWatchdog() noexcept {
     // Step 5: Configure stage 1 — RESET_SYSTEM at RWDT_TIMEOUT_S.
     // Stage 1 ticks = 1:1 with RTC slow clock (no multiplier).
     auto clk_hz = rtc_slow_clk_hz();
-    if (clk_hz == 0) {
+    if (clk_hz == 0)
+    {
         ESP_LOGE(TAG, "RTC slow clock freq = 0! Cannot configure RWDT.");
         enabled_ = false;
         wdt_hal_write_protect_enable(&hal_);
         return;
     }
     uint32_t timeout_ticks = RWDT_TIMEOUT_S * clk_hz;
-    wdt_hal_config_stage(&hal_, WDT_STAGE1, timeout_ticks,
-                         WDT_STAGE_ACTION_RESET_SYSTEM);
+    wdt_hal_config_stage(&hal_, WDT_STAGE1, timeout_ticks, WDT_STAGE_ACTION_RESET_SYSTEM);
 
     // Step 6: Enable RWDT (also feeds it)
     wdt_hal_enable(&hal_);
@@ -60,16 +63,19 @@ RtcWatchdog::RtcWatchdog() noexcept {
     enabled_ = true;
     gRtcWdt = this;
 
-    ESP_LOGI(TAG, "RWDT enabled: %u s timeout (%u Hz RTC slow clk, %u ticks)",
-             RWDT_TIMEOUT_S, clk_hz, timeout_ticks);
+    ESP_LOGI(TAG, "RWDT enabled: %u s timeout (%u Hz RTC slow clk, %u ticks)", RWDT_TIMEOUT_S,
+             clk_hz, timeout_ticks);
 
     char dbg[80];
     std::snprintf(dbg, sizeof(dbg), "DBG: RWDT enabled, %us timeout", RWDT_TIMEOUT_S);
-    puts(dbg); fflush(stdout);
+    puts(dbg);
+    fflush(stdout);
 }
 
-RtcWatchdog::~RtcWatchdog() noexcept {
-    if (enabled_) {
+RtcWatchdog::~RtcWatchdog() noexcept
+{
+    if (enabled_)
+    {
         wdt_hal_deinit(&hal_);
         enabled_ = false;
         gRtcWdt = nullptr;
@@ -77,8 +83,10 @@ RtcWatchdog::~RtcWatchdog() noexcept {
     }
 }
 
-void RtcWatchdog::feed() noexcept {
-    if (!enabled_) {
+void RtcWatchdog::feed() noexcept
+{
+    if (!enabled_)
+    {
         return;
     }
     // RWDT registers are write-protected. Must unlock → feed → relock.

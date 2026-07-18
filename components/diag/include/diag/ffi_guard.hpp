@@ -2,7 +2,8 @@
 
 #include <cstdint>
 
-namespace ecotiter::diag {
+namespace ecotiter::diag
+{
 
 // Boundary ID convention:
 //   50       main boot
@@ -12,7 +13,8 @@ namespace ecotiter::diag {
 // RAII guard for ESP-IDF C API boundaries.
 // Records FfiEnter in constructor, FfiExit in destructor.
 // Must wrap every ESP-IDF C API call (GR-7).
-class FfiGuard {
+class FfiGuard
+{
 public:
     explicit FfiGuard(uint16_t boundaryId) noexcept;
     ~FfiGuard() noexcept;
