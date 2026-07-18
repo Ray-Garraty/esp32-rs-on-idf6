@@ -23,7 +23,8 @@ enum class MotorCommandType : uint8_t
     StartCalDose,
     StartCalSpeed,
     StartCalSpeedSeq,
-    SetValvePosition
+    SetValvePosition,
+    ReadTmcRegister
 };
 
 struct StartRinseParams
@@ -49,6 +50,11 @@ struct StartCalSpeedSeqParams
     float fillSpeedMlMin;
 };
 
+struct ReadTmcRegisterParams
+{
+    uint8_t reg; // TMC register address (e.g. TMC_REG_SG_RESULT)
+};
+
 /// Command struct sent via FreeRTOS queue to the motor task.
 ///
 /// ABI-critical: layout must remain stable because FreeRTOS queues use
@@ -66,6 +72,7 @@ struct MotorCommand
     StartCalDoseParams startCalDose;
     StartCalSpeedParams startCalSpeed;
     StartCalSpeedSeqParams startCalSpeedSeq;
+    ReadTmcRegisterParams readTmcReg;
 };
 
 } // namespace ecotiter::domain

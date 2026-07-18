@@ -261,6 +261,29 @@ extern "C" void motorTaskEntry(void* pvParameters)
                 }
                 break;
             }
+
+            case MotorCommandType::ReadTmcRegister: {
+                uint32_t regValue = 0;
+                bool ok = gTmcUart.readRegister(cmd.readTmcReg.reg, regValue);
+                if (ok && gWsBroadcastQueue)
+                {
+                    static struct
+                    {
+                        char data[domain::memory::MAX_RSP_SIZE];
+                        size_t len;
+                    } entry;
+                    int n = std::snprintf(entry.data, sizeof(entry.data),
+                                          R"({"event":"stallguard_result","reg":%u,"value":%lu})",
+                                          static_cast<unsigned>(cmd.readTmcReg.reg),
+                                          static_cast<unsigned long>(regValue));
+                    if (n > 0 && static_cast<size_t>(n) < sizeof(entry.data))
+                    {
+                        entry.len = static_cast<size_t>(n);
+                        xQueueSend(gWsBroadcastQueue, &entry, 0);
+                    }
+                }
+                break;
+            }
             }
         }
     }

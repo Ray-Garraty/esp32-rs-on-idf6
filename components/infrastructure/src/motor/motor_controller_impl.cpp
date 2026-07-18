@@ -375,19 +375,19 @@ bool MotorControllerImpl::sendCommand(const char* cmdJson, size_t len)
 }
 
 // ============================================================================
-// TMC register access — delegates to global gTmcUart
+// TMC register access — routes through motor command queue for task sovereignty
 // ============================================================================
 
 bool MotorControllerImpl::readTmcRegister(uint8_t reg, uint32_t& value)
 {
-    // Note: readTmcRegister runs in the caller's context (usually the main loop
-    // or HTTP handler). This is safe because:
-    // 1. TMC register reads are non-destructive
-    // 2. The only write-path is SetStallThreshold (infrequent, serialized through motor queue)
-    // 3. Half-duplex UART contention is theoretically possible but of negligible probability
-    // TODO: Full serialization requires routing reads through motor command queue
-    //       paired with a result-callback mechanism (deferred to MotorCommand domain migration)
-    return gTmcUart.readRegister(reg, value);
+    (void)value;
+    domain::MotorCommand cmd{};
+    cmd.type = domain::MotorCommandType::ReadTmcRegister;
+    cmd.readTmcReg.reg = reg;
+    QueueHandle_t q = getCmdQueue();
+    if (q == nullptr)
+        return false;
+    return xQueueSend(q, &cmd, 0) == pdTRUE;
 }
 
 // ============================================================================

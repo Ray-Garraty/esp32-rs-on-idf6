@@ -316,23 +316,21 @@ std::expected<CommandResponse, domain::AppError> handleAdcCalReset(AdcCalWriteCb
 std::expected<CommandResponse, domain::AppError> handleStallGuardGet(uint8_t threshold)
 {
     (void)threshold;
-    uint32_t sgResult = 0;
-    uint32_t drvStatus = 0;
+    // Fire-and-forget: queue TMC register reads to the motor task.
+    // The motor task reads the registers and broadcasts results via WS
+    // `stallguard_result` events. The HTTP handler returns immediately
+    // without blocking for UART I/O (Article II: Task Sovereignty).
     auto* controller = application::getMotorController();
     if (controller)
     {
-        controller->readTmcRegister(infrastructure::drivers::TMC_REG_SG_RESULT, sgResult);
-        controller->readTmcRegister(infrastructure::drivers::TMC_REG_DRV_STATUS, drvStatus);
+        uint32_t dummy = 0;
+        controller->readTmcRegister(infrastructure::drivers::TMC_REG_SG_RESULT, dummy);
+        controller->readTmcRegister(infrastructure::drivers::TMC_REG_DRV_STATUS, dummy);
     }
-    uint8_t currentThreshold = domain::gStallGuardThreshold.load(std::memory_order_acquire);
     CommandResponse rsp;
     rsp.kind = ResponseKind::Single;
-    rsp.bodySize = static_cast<size_t>(std::snprintf(rsp.body.data(), rsp.body.size(),
-                                                     R"({"cmd":"stallGuard.get","threshold":%u,)"
-                                                     R"("sg_result":%lu,"drv_status":%lu})",
-                                                     static_cast<unsigned>(currentThreshold),
-                                                     static_cast<unsigned long>(sgResult),
-                                                     static_cast<unsigned long>(drvStatus)));
+    rsp.bodySize = static_cast<size_t>(
+        std::snprintf(rsp.body.data(), rsp.body.size(), R"({"status":"accepted"})"));
     return rsp;
 }
 

@@ -394,6 +394,9 @@ function connectWs(){
         if(data.position){APP_STATE.valve.position=data.position;setText('hw-valve',data.position);}
       }else if(data.event&&data.event==='wifi_connect_result'){
         console.log('WiFi connect result:', data.success?'success':'failed','SSID:',data.ssid);
+      }else if(data.event&&data.event==='stallguard_result'){
+        if(data.reg===0x41){document.getElementById('stepperDrv-sg-result').textContent=data.value;}
+        else if(data.reg===0x6F){var stall=(data.value>>31)&1;var stst=(data.value>>12)&1;document.getElementById('stepperDrv-stall').textContent=stall?'Yes':'No';document.getElementById('stepperDrv-motor-busy').textContent=stst?'No':'Yes';}
       }else{
         updateUI(data);updateDebugUI(data);
         if(APP_STATE.logs.wsAutoupdate){
@@ -831,7 +834,8 @@ var toggleValve=async function(){
   try{
     console.log('[Valve] toggling to',newPos);
     var r=await fetch('/api/valve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({position:newPos})});
-    if(r.ok){var j=await r.json();console.log('[Valve] response:',JSON.stringify(j));}else console.error('[Valve] HTTP',r.status);
+    if(!r.ok)console.error('[Valve] HTTP',r.status);
+    // Valve position will be updated by WS valve_settled event after settle delay
   }catch(e){console.error('[Valve] fetch error:',e);}finally{if(btn){btn.disabled=false;btn.textContent='Toggle';}}
 };
 
