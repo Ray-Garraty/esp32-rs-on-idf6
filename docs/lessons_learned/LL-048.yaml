@@ -1,64 +1,53 @@
 id: LL-048
 date: 2026-07-13
-crash_signature: >
-  InstrFetchProhibited pc=0x00000000 excvaddr=0x00000000,
-  backtrace shows 0xfffffffd (corrupted stack),
-  backtrace: workerTaskEntry > wsLogCallback > broadcastWsEvent > httpd_ws_send_frame_async
-  Followed by reboot with IllegalInstruction and 0xa5a5a5a5 in backtrace.
-  Log shows "log_worker: wmark=348 used=95%" progressively degrading before crash.
-  Second crash explicitly: "A stack overflow in task log_worker has been detected."
+crash_signature: 'InstrFetchProhibited pc=0x00000000 excvaddr=0x00000000, backtrace shows 0xfffffffd (corrupted stack), backtrace:
+  workerTaskEntry > wsLogCallback > broadcastWsEvent > httpd_ws_send_frame_async Followed by reboot with IllegalInstruction
+  and 0xa5a5a5a5 in backtrace. Log shows "log_worker: wmark=348 used=95%" progressively degrading before crash. Second crash
+  explicitly: "A stack overflow in task log_worker has been detected."
+
+  '
 category: stack_overflow
 trigger_patterns:
-  - "log_worker.*wmark=\\d+ used=9\\d%"
-  - "LOW STACK.*log_worker"
-  - "A stack overflow in task log_worker has been detected"
-  - "Backtrace:.*0xa5a5a5a5.*CORRUPTED"
-  - "httpd_ws_recv_frame: Failed to receive payload" (preceding crash)
-lesson: >
-  The log_worker task (created with 8192 bytes stack in netTaskEntry) executes
-  a callback chain (LogBuffer::workerTaskEntry -> wsLogCallback ->
-  broadcastWsEvent -> httpd_ws_send_frame_async) that requires ~1200-1500 bytes
-  of stack. With only 8192 bytes total, repeated callback invocations progressively
-  degrade the stack watermark until overflow occurs — corrupting return addresses
-  and causing InstrFetchProhibited pc=0x00000000.
+- log_worker.*wmark=\d+ used=9\d%
+- LOW STACK.*log_worker
+- A stack overflow in task log_worker has been detected
+- Backtrace:.*0xa5a5a5a5.*CORRUPTED
+- 'httpd_ws_recv_frame: Failed to receive payload (preceding crash)'
+lesson: 'The log_worker task (created with 8192 bytes stack in netTaskEntry) executes a callback chain (LogBuffer::workerTaskEntry
+  -> wsLogCallback -> broadcastWsEvent -> httpd_ws_send_frame_async) that requires ~1200-1500 bytes of stack. With only 8192
+  bytes total, repeated callback invocations progressively degrade the stack watermark until overflow occurs — corrupting
+  return addresses and causing InstrFetchProhibited pc=0x00000000.
 
-  The stack guard in wsLogCallback checked uxTaskGetStackHighWaterMark(nullptr) < 256,
-  intending to skip when < 1024 bytes remain. However, uxTaskGetStackHighWaterMark
-  returns bytes (not words) on ESP-IDF v6 for ESP32-S3. The 256-byte threshold was
-  also far too small — the char buf[384] in wsLogCallback alone exceeds it.
+  The stack guard in wsLogCallback checked uxTaskGetStackHighWaterMark(nullptr) < 256, intending to skip when < 1024 bytes
+  remain. However, uxTaskGetStackHighWaterMark returns bytes (not words) on ESP-IDF v6 for ESP32-S3. The 256-byte threshold
+  was also far too small — the char buf[384] in wsLogCallback alone exceeds it.
 
-  ALWAYS verify callback chain stack usage when adding callbacks that execute
-  in a different task's context. The callback's worst-case stack consumption
-  must be budgeted into the task's overall stack allocation.
+  ALWAYS verify callback chain stack usage when adding callbacks that execute in a different task''s context. The callback''s
+  worst-case stack consumption must be budgeted into the task''s overall stack allocation.
 
-  LL-038 documents the same pattern for the system_event task. Both cases involve
-  the LogBuffer callback chain (ESP_LOGI hook -> log_worker -> WS broadcast).
-diagnostic: |
-  1. Check log_worker watermark degradation over time:
-     rg "log_worker.*wmark" logs/serial_*.log
-     If watermark decreases over multiple samples, stack usage is growing per-call.
-  2. Decode the crash backtrace with addr2line:
-     xtensa-esp32s3-elf-addr2line -pfiaC -e build/ecotiter.elf <PCs>
-     If chain is workerTaskEntry -> wsLogCallback -> broadcastWsEvent -> httpd_*, it's log_worker stack overflow.
-  3. Check the stack guard threshold in wsLogCallback:
-     grep "uxTaskGetStackHighWaterMark" main/main.cpp
-  4. Check CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE in sdkconfig.defaults (LL-038)
-  5. Verify by temporarily increasing log_worker stack from 8192 to 12288.
-fix: |
-  1. main/main.cpp: Increase log_worker task stack from 8192 to 12288 bytes:
-     - Add LOG_WORKER_STACK = 12288 to domain/types.hpp (consistent with other stack constants)
-     - Update xTaskCreate call to use LOG_WORKER_STACK / sizeof(configSTACK_DEPTH_TYPE)
-     - Update StackMonitor registration to use LOG_WORKER_STACK
+  LL-038 documents the same pattern for the system_event task. Both cases involve the LogBuffer callback chain (ESP_LOGI hook
+  -> log_worker -> WS broadcast).
 
-  2. main/main.cpp: Increase wsLogCallback stack guard threshold from 256 to 1536 bytes:
-     - The guard must account for the full callback chain stack usage (~1200-1500 bytes)
-     - uxTaskGetStackHighWaterMark returns bytes (not words) on ESP-IDF v6
-
-  3. Verify stability: monitor log_worker watermark over 30 seconds — should stabilize
-     at ~86% (1668/12288) without progressive degradation or LOW STACK warnings.
+  '
+diagnostic: "1. Check log_worker watermark degradation over time:\n   rg \"log_worker.*wmark\" logs/serial_*.log\n   If watermark\
+  \ decreases over multiple samples, stack usage is growing per-call.\n2. Decode the crash backtrace with addr2line:\n   xtensa-esp32s3-elf-addr2line\
+  \ -pfiaC -e build/ecotiter.elf <PCs>\n   If chain is workerTaskEntry -> wsLogCallback -> broadcastWsEvent -> httpd_*, it's\
+  \ log_worker stack overflow.\n3. Check the stack guard threshold in wsLogCallback:\n   grep \"uxTaskGetStackHighWaterMark\"\
+  \ main/main.cpp\n4. Check CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE in sdkconfig.defaults (LL-038)\n5. Verify by temporarily\
+  \ increasing log_worker stack from 8192 to 12288.\n"
+fix: "1. main/main.cpp: Increase log_worker task stack from 8192 to 12288 bytes:\n   - Add LOG_WORKER_STACK = 12288 to domain/types.hpp\
+  \ (consistent with other stack constants)\n   - Update xTaskCreate call to use LOG_WORKER_STACK / sizeof(configSTACK_DEPTH_TYPE)\n\
+  \   - Update StackMonitor registration to use LOG_WORKER_STACK\n\n2. main/main.cpp: Increase wsLogCallback stack guard threshold\
+  \ from 256 to 1536 bytes:\n   - The guard must account for the full callback chain stack usage (~1200-1500 bytes)\n   -\
+  \ uxTaskGetStackHighWaterMark returns bytes (not words) on ESP-IDF v6\n\n3. Verify stability: monitor log_worker watermark\
+  \ over 30 seconds — should stabilize\n   at ~86% (1668/12288) without progressive degradation or LOW STACK warnings.\n"
 refs:
-  - docs/lessons_learned/LL-038.yaml (same callback chain, different task)
-  - docs/lessons_learned/LL-001.yaml (stack overflow misdiagnosed as heap corruption)
-  - /home/vlabe/Documents/esp32-rs-on-idf6/main/main.cpp (wsLogCallback, log_worker creation)
-  - /home/vlabe/Documents/esp32-rs-on-idf6/components/domain/src/log_buffer.cpp (workerTaskEntry)
-  - /home/vlabe/Documents/esp32-rs-on-idf6/components/infrastructure/network/src/http_server.cpp (broadcastWsEvent)
+- docs/lessons_learned/LL-038.yaml (same callback chain, different task)
+- docs/lessons_learned/LL-001.yaml (stack overflow misdiagnosed as heap corruption)
+- /home/vlabe/Documents/esp32-rs-on-idf6/main/main.cpp (wsLogCallback, log_worker creation)
+- /home/vlabe/Documents/esp32-rs-on-idf6/components/domain/src/log_buffer.cpp (workerTaskEntry)
+- /home/vlabe/Documents/esp32-rs-on-idf6/components/infrastructure/network/src/http_server.cpp (broadcastWsEvent)
+title: 'InstrFetchProhibited pc=0x00000000 excvaddr=0x00000000, backtrace shows 0xfffffffd (corrupted stack), backtrace: workerTaskEntry
+  > wsLogCallback > broadcastWsEvent > httpd_ws_send_frame_async Followed by reboot with IllegalInstruction and 0xa5a5a5a5
+  in backtrace. Log shows "log_worker: wmark=348 used=95%" progressively degrading before crash. Second crash explicitly:
+  "A stack overflow in task log_worker has been detected."'

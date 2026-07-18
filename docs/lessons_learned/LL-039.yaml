@@ -1,50 +1,30 @@
 id: LL-039
 date: 2026-07-09
-crash_signature: "connectSTA() returns false even with correct credentials — event handler race"
+crash_signature: connectSTA() returns false even with correct credentials — event handler race
 category: wifi_sta_connecting_race
 trigger_patterns:
-  - "connectSTA.*false.*correct credentials"
-  - "staConnecting_.*race"
-  - "WIFI_EVENT_STA_DISCONNECTED.*before staConnecting_"
-lesson: >
-  In WifiManager::connectSTA(), the flag staConnecting_ must be set to true
-  BEFORE calling esp_wifi_connect(), not after. The WiFi event handler runs
-  in a separate task (WiFi task) and can fire WIFI_EVENT_STA_DISCONNECTED
-  between esp_wifi_connect() returning and staConnecting_ being set.
+- connectSTA.*false.*correct credentials
+- staConnecting_.*race
+- WIFI_EVENT_STA_DISCONNECTED.*before staConnecting_
+lesson: "In WifiManager::connectSTA(), the flag staConnecting_ must be set to true BEFORE calling esp_wifi_connect(), not\
+  \ after. The WiFi event handler runs in a separate task (WiFi task) and can fire WIFI_EVENT_STA_DISCONNECTED between esp_wifi_connect()\
+  \ returning and staConnecting_ being set.\nIf the event handler fires in this window:\n  1. handleEvent sees staConnecting_\
+  \ == false\n  2. Does NOT clear staConnecting_ (because it's already false)\n  3. Then staConnecting_ = true is set — but\
+  \ the connection already failed\n  4. staConnecting_ remains true permanently\n  5. tryStartSTA() checks \"if (staConnecting_)\
+  \ return false\" → blocked forever\n  6. NVS-based STA auto-connect on next boot is silently disabled\n\nAlso, on the timeout/failure\
+  \ path at the end of connectSTA(), staConnecting_ must be set to false before calling esp_wifi_disconnect() to prevent the\
+  \ event handler from seeing stale state.\nThe same pattern exists in tryStartSTA() — it sets staConnecting_ = true BEFORE\
+  \ esp_wifi_connect(), which is correct.\nALWAYS set state flags BEFORE triggering asynchronous operations that may fire\
+  \ callbacks in other task contexts. Clean up flags on ALL exit paths.\n"
+diagnostic: 'Add ESP_LOGI to log staConnecting_ state before and after esp_wifi_connect(). If staConnecting_ remains true
+  after a connection failure, the race occurred.
 
-  If the event handler fires in this window:
-    1. handleEvent sees staConnecting_ == false
-    2. Does NOT clear staConnecting_ (because it's already false)
-    3. Then staConnecting_ = true is set — but the connection already failed
-    4. staConnecting_ remains true permanently
-    5. tryStartSTA() checks "if (staConnecting_) return false" → blocked forever
-    6. NVS-based STA auto-connect on next boot is silently disabled
-
-  Also, on the timeout/failure path at the end of connectSTA(), staConnecting_
-  must be set to false before calling esp_wifi_disconnect() to prevent the
-  event handler from seeing stale state.
-
-  The same pattern exists in tryStartSTA() — it sets staConnecting_ = true
-  BEFORE esp_wifi_connect(), which is correct.
-
-  ALWAYS set state flags BEFORE triggering asynchronous operations that may
-  fire callbacks in other task contexts. Clean up flags on ALL exit paths.
-diagnostic: >
-  Add ESP_LOGI to log staConnecting_ state before and after esp_wifi_connect().
-  If staConnecting_ remains true after a connection failure, the race occurred.
-fix: >
-  In connectSTA():
-    staConnecting_ = true;           // ← BEFORE esp_wifi_connect()
-    err = esp_wifi_connect();
-    if (err != ESP_OK) {
-        staConnecting_ = false;      // ← cleanup on error
-        return false;
-    }
-    // ... wait for event ...
-    // on timeout/failure:
-    staConnecting_ = false;          // ← cleanup on timeout
-    esp_wifi_disconnect();
-    return false;
+  '
+fix: "In connectSTA():\n  staConnecting_ = true;           // ← BEFORE esp_wifi_connect()\n  err = esp_wifi_connect();\n \
+  \ if (err != ESP_OK) {\n      staConnecting_ = false;      // ← cleanup on error\n      return false;\n  }\n  // ... wait\
+  \ for event ...\n  // on timeout/failure:\n  staConnecting_ = false;          // ← cleanup on timeout\n  esp_wifi_disconnect();\n\
+  \  return false;\n"
 refs:
-  - components/infrastructure/network/src/wifi.cpp
-  - docs/lessons_learned/LL-001.yaml (stack overflow — similar race pattern)
+- components/infrastructure/network/src/wifi.cpp
+- docs/lessons_learned/LL-001.yaml (stack overflow — similar race pattern)
+title: connectSTA() returns false even with correct credentials — event handler race

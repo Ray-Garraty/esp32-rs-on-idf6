@@ -1,42 +1,34 @@
 id: LL-023
 date: 2026-07-07
-crash_signature: 'assert failed: xTaskCreatePinnedToCore freertos_tasks_c_additions.h:161
-  — core ID 1 invalid with CONFIG_FREERTOS_UNICORE=y'
+crash_signature: 'assert failed: xTaskCreatePinnedToCore freertos_tasks_c_additions.h:161 — core ID 1 invalid with CONFIG_FREERTOS_UNICORE=y'
 category: api_misuse
 trigger_patterns:
 - 'assert failed: xTaskCreatePinnedToCore'
 - freertos_tasks_c_additions.h:161
 - xTaskCreatePinnedToCore.*core 1
 - xTaskCreatePinnedToCore.*core ID
-lesson: "On ESP32-S3 with CONFIG_FREERTOS_UNICORE=y (single-core FreeRTOS), only core\
-  \ 0 exists. Passing core ID 1 to xTaskCreatePinnedToCore() triggers an assert in\
-  \ freertos_tasks_c_additions.h:161 which checks `xCoreID >= 0 && xCoreID < configNUM_CORES`.\
-  \ With configNUM_CORES=1, core 1 fails the assertion.\nThis assert fired inside\
-  \ the panic handler wrapper (crash_handler.cpp) which was in .iram1 but called flash\
-  \ functions (printf, BlackBox::dump, uxTaskGetStackHighWaterMark). The wrapper itself\
-  \ crashed (LoadProhibited), causing ESP-IDF's recursive panic detection to fire.\
-  \ The only visible symptom was \"Panic handler entered multiple times\" — the original\
-  \ assert was completely masked.\nThe panic handler was in .iram1 because the CMakeLists.txt\
-  \ had `-ffunction-sections` and a [[gnu::section(\".iram1\")]] attribute on the\
-  \ wrapper — intended for LL-010 crash safety but backfired because .iram1 functions\
-  \ must NOT call flash-resident functions.\nTwo bugs masked each other:\n  1. Primary:\
-  \ xTaskCreatePinnedToCore(..., 1) with UNICORE=y → assert\n  2. Secondary: panic\
-  \ handler in .iram1 calls flash functions → crash\n  3. Result: \"Panic handler\
-  \ entered multiple times\" with no visible assert\n"
-diagnostic: "1. If crash shows only \"Panic handler entered multiple times\", assume\n\
-  \   the primary crash is being masked by a broken wrapper (LL-025).\n2. Remove or\
-  \ neutralize the panic handler wrapper (e.g. empty __wrap_\n   that calls __real_esp_panic_handler)\
-  \ to see the real first crash.\n3. Check for xTaskCreatePinnedToCore with core ID\
-  \ != 0 when\n   CONFIG_FREERTOS_UNICORE=y. Use xTaskCreate() for unicore builds.\n\
-  4. Verify Saved PC before/after the wrapper change — different PC\n   suggests the\
-  \ wrapper was the secondary crash.\n"
-fix: "Use xTaskCreate() instead of xTaskCreatePinnedToCore() when the core is not\
-  \ critical, or pass tskNO_AFFINITY / core 0 for unicore:\n  xTaskCreate(entry, name,\
-  \ stack_words, param, priority, &handle);\nFor the panic handler wrapper: do NOT\
-  \ place in .iram1 unless all called functions are also in IRAM (printf is NOT).\
-  \ Remove .iram1 attribute or implement an IRAM-safe printf (ets_printf). See LL-025.\n"
+lesson: "On ESP32-S3 with CONFIG_FREERTOS_UNICORE=y (single-core FreeRTOS), only core 0 exists. Passing core ID 1 to xTaskCreatePinnedToCore()\
+  \ triggers an assert in freertos_tasks_c_additions.h:161 which checks `xCoreID >= 0 && xCoreID < configNUM_CORES`. With\
+  \ configNUM_CORES=1, core 1 fails the assertion.\nThis assert fired inside the panic handler wrapper (crash_handler.cpp)\
+  \ which was in .iram1 but called flash functions (printf, BlackBox::dump, uxTaskGetStackHighWaterMark). The wrapper itself\
+  \ crashed (LoadProhibited), causing ESP-IDF's recursive panic detection to fire. The only visible symptom was \"Panic handler\
+  \ entered multiple times\" — the original assert was completely masked.\nThe panic handler was in .iram1 because the CMakeLists.txt\
+  \ had `-ffunction-sections` and a [[gnu::section(\".iram1\")]] attribute on the wrapper — intended for LL-010 crash safety\
+  \ but backfired because .iram1 functions must NOT call flash-resident functions.\nTwo bugs masked each other:\n  1. Primary:\
+  \ xTaskCreatePinnedToCore(..., 1) with UNICORE=y → assert\n  2. Secondary: panic handler in .iram1 calls flash functions\
+  \ → crash\n  3. Result: \"Panic handler entered multiple times\" with no visible assert\n"
+diagnostic: "1. If crash shows only \"Panic handler entered multiple times\", assume\n   the primary crash is being masked\
+  \ by a broken wrapper (LL-025).\n2. Remove or neutralize the panic handler wrapper (e.g. empty __wrap_\n   that calls __real_esp_panic_handler)\
+  \ to see the real first crash.\n3. Check for xTaskCreatePinnedToCore with core ID != 0 when\n   CONFIG_FREERTOS_UNICORE=y.\
+  \ Use xTaskCreate() for unicore builds.\n4. Verify Saved PC before/after the wrapper change — different PC\n   suggests\
+  \ the wrapper was the secondary crash.\n"
+fix: "Use xTaskCreate() instead of xTaskCreatePinnedToCore() when the core is not critical, or pass tskNO_AFFINITY / core\
+  \ 0 for unicore:\n  xTaskCreate(entry, name, stack_words, param, priority, &handle);\nFor the panic handler wrapper: do\
+  \ NOT place in .iram1 unless all called functions are also in IRAM (printf is NOT). Remove .iram1 attribute or implement\
+  \ an IRAM-safe printf (ets_printf). See LL-025.\n"
 refs:
 - main/main.cpp (xTaskCreate call site)
 - components/diag/src/crash_handler.cpp (panic wrapper)
 - AGENTS.md §3.3 (WDT & Brownout — but same .iram1 concern for panics)
 - docs/lessons_learned (LL-025, LL-005)
+title: 'assert failed: xTaskCreatePinnedToCore freertos_tasks_c_additions.h:161 — core ID 1 invalid with CONFIG_FREERTOS_UNICORE=y'

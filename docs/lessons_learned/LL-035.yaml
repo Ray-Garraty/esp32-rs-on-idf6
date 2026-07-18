@@ -1,44 +1,31 @@
 id: LL-035
 date: 2026-07-09
-crash_signature: "ERR_CONNECTION_TIMED_OUT on port 80, httpd_start() returns ESP_OK but TCP accept fails"
+crash_signature: ERR_CONNECTION_TIMED_OUT on port 80, httpd_start() returns ESP_OK but TCP accept fails
 category: wifi_netif_init_order
 trigger_patterns:
-  - "ERR_CONNECTION_TIMED_OUT"
-  - "httpd_start.*ESP_OK.*but no TCP"
-  - "DNS works.*TCP fails"
-lesson: >
-  On ESP-IDF v6, the order of WiFi + netif initialization is critical for TCP
-  functionality. Specifically:
-  
-    esp_netif_create_default_wifi_ap() MUST be called BEFORE esp_wifi_init().
-  
-  If the AP netif is created AFTER esp_wifi_init(), the WiFi stack does not
-  properly register the interface with the TCP/IP stack. As a result:
-    - UDP works (DHCP, DNS) because UDP is handled at the lwip level
-    - TCP does NOT work (HTTP server on port 80 gets connection refused/timeout)
-      because the TCP listener socket has no route to the netif
-  
-  The official ESP-IDF captive portal example confirms this order:
-    esp_netif_init() → esp_event_loop_create_default()
-    → esp_netif_create_default_wifi_ap()   ← BEFORE wifi init!
-    → esp_wifi_init() → esp_wifi_set_mode() → ...
-  
-  Same applies to STA interface: create it before or alongside AP before wifi_init.
-  esp_netif_create_default_wifi_sta() also needs to be called before esp_wifi_init(),
-  otherwise STA connection may also have TCP issues.
-  
-  Also, HTTP server config.max_open_sockets should be set to 13 (as in the official
-  captive portal example) to ensure enough LWIP sockets for captive portal traffic.
-  HTTPD_MAX_SOCKETS = max(LWIP_MAX_SOCKETS, 16), so LWIP_MAX_SOCKETS >= 16 is safe.
-diagnostic: >
-  Check that esp_netif_create_default_wifi_ap() is called before esp_wifi_init().
-  If httpd_start() returns ESP_OK but TCP connections to port 80 fail, this is
-  the most likely cause. DNS (UDP) will still work in this broken state.
-fix: >
-  Move esp_netif_create_default_wifi_ap() and esp_netif_create_default_wifi_sta()
-  creation into the init() function, BEFORE esp_wifi_init(). Keep the netif*
-  pointers assigned in init(), use them later in startAP()/tryStartSTA() without
-  calling create_default again.
+- ERR_CONNECTION_TIMED_OUT
+- httpd_start.*ESP_OK.*but no TCP
+- DNS works.*TCP fails
+lesson: "On ESP-IDF v6, the order of WiFi + netif initialization is critical for TCP functionality. Specifically:\n\n  esp_netif_create_default_wifi_ap()\
+  \ MUST be called BEFORE esp_wifi_init().\n\nIf the AP netif is created AFTER esp_wifi_init(), the WiFi stack does not properly\
+  \ register the interface with the TCP/IP stack. As a result:\n  - UDP works (DHCP, DNS) because UDP is handled at the lwip\
+  \ level\n  - TCP does NOT work (HTTP server on port 80 gets connection refused/timeout)\n    because the TCP listener socket\
+  \ has no route to the netif\n\nThe official ESP-IDF captive portal example confirms this order:\n  esp_netif_init() → esp_event_loop_create_default()\n\
+  \  → esp_netif_create_default_wifi_ap()   ← BEFORE wifi init!\n  → esp_wifi_init() → esp_wifi_set_mode() → ...\n\nSame applies\
+  \ to STA interface: create it before or alongside AP before wifi_init. esp_netif_create_default_wifi_sta() also needs to\
+  \ be called before esp_wifi_init(), otherwise STA connection may also have TCP issues.\nAlso, HTTP server config.max_open_sockets\
+  \ should be set to 13 (as in the official captive portal example) to ensure enough LWIP sockets for captive portal traffic.\
+  \ HTTPD_MAX_SOCKETS = max(LWIP_MAX_SOCKETS, 16), so LWIP_MAX_SOCKETS >= 16 is safe.\n"
+diagnostic: 'Check that esp_netif_create_default_wifi_ap() is called before esp_wifi_init(). If httpd_start() returns ESP_OK
+  but TCP connections to port 80 fail, this is the most likely cause. DNS (UDP) will still work in this broken state.
+
+  '
+fix: 'Move esp_netif_create_default_wifi_ap() and esp_netif_create_default_wifi_sta() creation into the init() function, BEFORE
+  esp_wifi_init(). Keep the netif* pointers assigned in init(), use them later in startAP()/tryStartSTA() without calling
+  create_default again.
+
+  '
 refs:
-  - https://github.com/espressif/esp-idf/blob/master/examples/protocols/http_server/captive_portal/main/captive_portal_main.c
-  - docs/issues/active/26_07_09_captive_portal_not_working.md
+- https://github.com/espressif/esp-idf/blob/master/examples/protocols/http_server/captive_portal/main/captive_portal_main.c
+- docs/issues/active/26_07_09_captive_portal_not_working.md
+title: ERR_CONNECTION_TIMED_OUT on port 80, httpd_start() returns ESP_OK but TCP accept fails

@@ -1,39 +1,33 @@
 id: LL-012
 date: 2026-07-04
-crash_signature: memory allocation of 40000 bytes failed — compute_ramp — motor_task
-  homing — free=30KB largest=20KB
+crash_signature: memory allocation of 40000 bytes failed — compute_ramp — motor_task homing — free=30KB largest=20KB
 category: heap_exhaustion
 trigger_patterns:
 - memory allocation of \d+ bytes failed
 - compute_ramp
 - with_capacity.*total_steps
 - HOMING_MAX_STEPS
-lesson: 'compute_ramp() allocates Vec<u32> with capacity = total_steps. With HOMING_MAX_STEPS=10000
-  this is 40KB; with full-volume motion (62,922 steps via volume_to_steps) this would
-  be ~250KB. These allocations happen in the motor thread AFTER BLE init has consumed
-  ~30KB heap, leaving only 20KB largest contiguous block.
+lesson: 'compute_ramp() allocates Vec<u32> with capacity = total_steps. With HOMING_MAX_STEPS=10000 this is 40KB; with full-volume
+  motion (62,922 steps via volume_to_steps) this would be ~250KB. These allocations happen in the motor thread AFTER BLE init
+  has consumed ~30KB heap, leaving only 20KB largest contiguous block.
 
-  Use RampIter (a lazy iterator) instead of compute_ramp wherever possible. RampIter
-  produces identical per-step intervals but computes them on-the-fly with zero heap
-  allocation. The only memory needed is a small chunk buffer (RMT_CHUNK_MAX × 2 symbols
-  × 8 bytes = ~2KB) inside move_steps_intervals().
+  Use RampIter (a lazy iterator) instead of compute_ramp wherever possible. RampIter produces identical per-step intervals
+  but computes them on-the-fly with zero heap allocation. The only memory needed is a small chunk buffer (RMT_CHUNK_MAX ×
+  2 symbols × 8 bytes = ~2KB) inside move_steps_intervals().
 
-  The same pattern applies to move_steps() (the StepperMotor trait impl) which previously
-  allocated Vec for every motion command. Both homing and regular motion commands
-  now use RampIter directly.
+  The same pattern applies to move_steps() (the StepperMotor trait impl) which previously allocated Vec for every motion command.
+  Both homing and regular motion commands now use RampIter directly.
 
   '
-diagnostic: "1. If crash shows \"memory allocation of NNNNN bytes failed\" with\n\
-  \   compute_ramp in the backtrace, the fix is to use RampIter instead.\n2. Check\
-  \ heap at crash time: free < NNNNN or largest < NNNNN. 3. Check if BLE init (30KB)\
+diagnostic: "1. If crash shows \"memory allocation of NNNNN bytes failed\" with\n   compute_ramp in the backtrace, the fix\
+  \ is to use RampIter instead.\n2. Check heap at crash time: free < NNNNN or largest < NNNNN. 3. Check if BLE init (30KB)\
   \ has already consumed memory before\n   the motor task runs.\n"
-fix: "Replace compute_ramp + Vec allocation with RampIter:\n  // BEFORE: let intervals\
-  \ = compute_ramp(steps, &cfg);\n  //         stepper.move_steps_intervals(ctx, &intervals)?;\n\
-  \  // AFTER:  stepper.move_steps_intervals(ctx, RampIter::new(steps, &cfg))?;\n\
-  move_steps_intervals() accepts impl IntoIterator<Item = u32> so RampIter can be\
-  \ passed directly.\n"
+fix: "Replace compute_ramp + Vec allocation with RampIter:\n  // BEFORE: let intervals = compute_ramp(steps, &cfg);\n  //\
+  \         stepper.move_steps_intervals(ctx, &intervals)?;\n  // AFTER:  stepper.move_steps_intervals(ctx, RampIter::new(steps,\
+  \ &cfg))?;\nmove_steps_intervals() accepts impl IntoIterator<Item = u32> so RampIter can be passed directly.\n"
 refs:
 - src/stepper/ramp.rs (RampIter struct)
 - src/infrastructure/drivers/stepper.rs (move_steps_intervals)
 - src/motor_task.rs (homing call site)
 - docs/crash_reports/2026-07-04_http_dropped_motor_oom.md
+title: memory allocation of 40000 bytes failed — compute_ramp — motor_task homing — free=30KB largest=20KB

@@ -1,80 +1,49 @@
 id: LL-045
 date: 2026-07-12
-crash_signature: >
-  RTCWDT_SYS_RST (rst:0x9 / rst:0x10) ~5-8s after app_main.
-  Saved PC in _xt_lowint1 (level 1 interrupt dispatcher).
-  Tick counter freezes (xTaskGetTickCount stops incrementing).
-  No Guru Meditation, no panic handler output.
-  Deterministic: every boot cycle with WiFi AP enabled.
+crash_signature: 'RTCWDT_SYS_RST (rst:0x9 / rst:0x10) ~5-8s after app_main. Saved PC in _xt_lowint1 (level 1 interrupt dispatcher).
+  Tick counter freezes (xTaskGetTickCount stops incrementing). No Guru Meditation, no panic handler output. Deterministic:
+  every boot cycle with WiFi AP enabled.
+
+  '
 category: unicore_spinlock_deadlock
 trigger_patterns:
-  - "rst:0x9.*RTCWDT_SYS_RST"
-  - "rst:0x10.*RTCWDT_RTC_RST"
-  - "_xt_lowint1"
-  - "Saved PC:0x4037b9"
-  - "CONFIG_FREERTOS_UNICORE=y"
-  - "CONFIG_FREERTOS_UNICORE=y.*wifi.*AP started"
-lesson: >
-  ESP32-S3 with CONFIG_FREERTOS_UNICORE=y (single-core mode) and WiFi
-  enabled will deadlock under specific interrupt load conditions.
-
-  MECHANISM:
-  1. WiFi driver task (priority 23) holds a spinlock (gpio_spinlock or
-     wifi_mac_spinlock) while processing a MAC event
-  2. WiFi MAC generates a level-1 interrupt
-  3. CPU enters _xt_lowint1 (level-1 interrupt dispatcher) at INTLEVEL=1
-  4. WiFi ISR tries to acquire the same spinlock — spins forever
-  5. WiFi task cannot release the spinlock (no CPU — UNICORE, same core)
-  6. ISR cannot return without the spinlock → INTLEVEL stays at 1
-  7. Tick ISR (also level 1) is masked → xTaskGetTickCount freezes
-  8. Main loop never runs → RWDT not fed → rst:0x9 after 6s
-
-  The ESP-IDF Kconfig help for CONFIG_FREERTOS_UNICORE explicitly warns:
-    "It is not recommended to use single-core mode when Wi-Fi or Bluetooth
-     are enabled, as some drivers rely on spinlocks that require both cores
-     to make progress."
-
-  This crash often manifests as deterministic boot loop after WiFi AP
-  starts (esp_wifi_start), but can also occur later under higher interrupt
-  load (RMT homing + HTTP + BLE). It is a known platform limitation, NOT
-  a bug in application code.
-
-  NOTE: This crash was previously masked by LL-026 (uart_write_bytes panic
-  handler crash). Fixing LL-026 revealed the underlying UNICORE deadlock.
-diagnostic: |
-  1. Check reset reason in boot log: rst:0x9 (RTCWDT_SYS_RST) or rst:0x10 (RTCWDT_RTC_RST)
-  2. Check Saved PC: should be in _xt_lowint1 range (0x4037b9xx)
-  3. Check tick counter: should freeze at a value near WiFi init (typically 1200-1400)
-  4. grep sdkconfig.defaults for CONFIG_FREERTOS_UNICORE — if =y, this is the likely cause
-  5. Verify: set CONFIG_FREERTOS_UNICORE=n, rebuild, reflash
-  6. If crash disappears with dual-core, the cause is confirmed
-  7. Distinguish from heap/stack crashes: those produce Guru Meditation with
-     backtrace, not silent rst:0x9
-  8. Distinguish from IWDT: IWDT fires at 500ms and produces panic handler
-     output; this crash fires at 6s (RWDT) with no panic output
-fix: |
-  SET CONFIG_FREERTOS_UNICORE=n in sdkconfig.defaults.
-
-  This enables dual-core mode on ESP32-S3. WiFi/BLE driver interrupts
-  and tasks run on CPU1, while application tasks (main loop, motor, etc.)
-  run on CPU0. The spinlock deadlock cannot occur because the WiFi task
-  and WiFi ISR can make progress on separate cores.
-
-  Additional changes needed for dual-core:
-  1. Ensure all ISR handlers are IRAM_ATTR (already done for limit
-     switches)
-  2. Check that xTaskCreate priorities are appropriate for dual-core
-     scheduling
-  3. Verify stack budgets (dual-core may shift memory pressure)
-
-  WORKAROUND (if dual-core is not desired):
-  - Defer esp_wifi_start() until after all RMT/motor initialization is
-    complete and the interrupt load is low
-  - OR disable WiFi entirely and use BLE-only
+- rst:0x9.*RTCWDT_SYS_RST
+- rst:0x10.*RTCWDT_RTC_RST
+- _xt_lowint1
+- Saved PC:0x4037b9
+- CONFIG_FREERTOS_UNICORE=y
+- CONFIG_FREERTOS_UNICORE=y.*wifi.*AP started
+lesson: "ESP32-S3 with CONFIG_FREERTOS_UNICORE=y (single-core mode) and WiFi enabled will deadlock under specific interrupt\
+  \ load conditions.\nMECHANISM: 1. WiFi driver task (priority 23) holds a spinlock (gpio_spinlock or\n   wifi_mac_spinlock)\
+  \ while processing a MAC event\n2. WiFi MAC generates a level-1 interrupt 3. CPU enters _xt_lowint1 (level-1 interrupt dispatcher)\
+  \ at INTLEVEL=1 4. WiFi ISR tries to acquire the same spinlock — spins forever 5. WiFi task cannot release the spinlock\
+  \ (no CPU — UNICORE, same core) 6. ISR cannot return without the spinlock → INTLEVEL stays at 1 7. Tick ISR (also level\
+  \ 1) is masked → xTaskGetTickCount freezes 8. Main loop never runs → RWDT not fed → rst:0x9 after 6s\nThe ESP-IDF Kconfig\
+  \ help for CONFIG_FREERTOS_UNICORE explicitly warns:\n  \"It is not recommended to use single-core mode when Wi-Fi or Bluetooth\n\
+  \   are enabled, as some drivers rely on spinlocks that require both cores\n   to make progress.\"\n\nThis crash often manifests\
+  \ as deterministic boot loop after WiFi AP starts (esp_wifi_start), but can also occur later under higher interrupt load\
+  \ (RMT homing + HTTP + BLE). It is a known platform limitation, NOT a bug in application code.\nNOTE: This crash was previously\
+  \ masked by LL-026 (uart_write_bytes panic handler crash). Fixing LL-026 revealed the underlying UNICORE deadlock.\n"
+diagnostic: "1. Check reset reason in boot log: rst:0x9 (RTCWDT_SYS_RST) or rst:0x10 (RTCWDT_RTC_RST)\n2. Check Saved PC:\
+  \ should be in _xt_lowint1 range (0x4037b9xx)\n3. Check tick counter: should freeze at a value near WiFi init (typically\
+  \ 1200-1400)\n4. grep sdkconfig.defaults for CONFIG_FREERTOS_UNICORE — if =y, this is the likely cause\n5. Verify: set CONFIG_FREERTOS_UNICORE=n,\
+  \ rebuild, reflash\n6. If crash disappears with dual-core, the cause is confirmed\n7. Distinguish from heap/stack crashes:\
+  \ those produce Guru Meditation with\n   backtrace, not silent rst:0x9\n8. Distinguish from IWDT: IWDT fires at 500ms and\
+  \ produces panic handler\n   output; this crash fires at 6s (RWDT) with no panic output\n"
+fix: "SET CONFIG_FREERTOS_UNICORE=n in sdkconfig.defaults.\n\nThis enables dual-core mode on ESP32-S3. WiFi/BLE driver interrupts\n\
+  and tasks run on CPU1, while application tasks (main loop, motor, etc.)\nrun on CPU0. The spinlock deadlock cannot occur\
+  \ because the WiFi task\nand WiFi ISR can make progress on separate cores.\n\nAdditional changes needed for dual-core:\n\
+  1. Ensure all ISR handlers are IRAM_ATTR (already done for limit\n   switches)\n2. Check that xTaskCreate priorities are\
+  \ appropriate for dual-core\n   scheduling\n3. Verify stack budgets (dual-core may shift memory pressure)\n\nWORKAROUND\
+  \ (if dual-core is not desired):\n- Defer esp_wifi_start() until after all RMT/motor initialization is\n  complete and the\
+  \ interrupt load is low\n- OR disable WiFi entirely and use BLE-only\n"
 refs:
-  - /home/vlabe/.espressif/v6.0.1/esp-idf/Kconfig (grep CONFIG_FREERTOS_UNICORE)
-  - docs/refs/project.md §Thread Architecture
-  - docs/refs/project.md §Init Order & DRAM
-  - docs/lessons_learned/LL-031.yaml (PHY calibration spinlock)
-  - docs/lessons_learned/LL-026.yaml (masked crash)
-  - /home/vlabe/Documents/esp32-rs-on-idf6/sdkconfig.defaults (line 26)
+- /home/vlabe/.espressif/v6.0.1/esp-idf/Kconfig (grep CONFIG_FREERTOS_UNICORE)
+- docs/refs/project.md §Thread Architecture
+- docs/refs/project.md §Init Order & DRAM
+- docs/lessons_learned/LL-031.yaml (PHY calibration spinlock)
+- docs/lessons_learned/LL-026.yaml (masked crash)
+- /home/vlabe/Documents/esp32-rs-on-idf6/sdkconfig.defaults (line 26)
+title: 'RTCWDT_SYS_RST (rst:0x9 / rst:0x10) ~5-8s after app_main. Saved PC in _xt_lowint1 (level 1 interrupt dispatcher).
+  Tick counter freezes (xTaskGetTickCount stops incrementing). No Guru Meditation, no panic handler output. Deterministic:
+  every boot cycle with WiFi AP enabled.'

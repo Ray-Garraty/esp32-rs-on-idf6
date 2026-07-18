@@ -1,36 +1,31 @@
 id: LL-026
 date: 2026-07-12
-crash_signature: "Panic handler entered multiple times — uart_write_bytes in logVprintf before UART driver install"
+crash_signature: Panic handler entered multiple times — uart_write_bytes in logVprintf before UART driver install
 category: api_misuse
 trigger_patterns:
-- "Panic handler entered multiple times" at boot (~50ms after BOOT OK)
+- Panic handler entered multiple times at boot (~50ms after BOOT OK)
 - rst:0xc (RTC_SW_CPU_RST)
 - No crash dump (no exccause, backtrace, registers)
 - Saved PC:0x403848c0 (ROM panic vector)
-lesson: >
-  `uart_write_bytes()` requires `uart_driver_install()` to be called first. At boot time,
-  before `SerialReader::init()` (or equivalent), the UART driver context for UART_NUM_0
-  is NULL — `p_uart_obj[UART_NUM_0] == NULL`. Calling `uart_write_bytes()` dereferences
-  this NULL pointer, causing LoadProhibited → panic handler → recursive crash → 
-  "Panic handler entered multiple times" with no visible crash dump.
+lesson: '`uart_write_bytes()` requires `uart_driver_install()` to be called first. At boot time, before `SerialReader::init()`
+  (or equivalent), the UART driver context for UART_NUM_0 is NULL — `p_uart_obj[UART_NUM_0] == NULL`. Calling `uart_write_bytes()`
+  dereferences this NULL pointer, causing LoadProhibited → panic handler → recursive crash →  "Panic handler entered multiple
+  times" with no visible crash dump.
 
-  Inside `logVprintf()` (registered via `esp_log_set_vprintf()`), use `fwrite/fflush(stdout)`
-  instead of `uart_write_bytes()`. The VFS layer uses `uart_tx_chars()` (HAL-level,
-  no driver needed) which writes directly to the UART FIFO.
+  Inside `logVprintf()` (registered via `esp_log_set_vprintf()`), use `fwrite/fflush(stdout)` instead of `uart_write_bytes()`.
+  The VFS layer uses `uart_tx_chars()` (HAL-level, no driver needed) which writes directly to the UART FIFO.
 
-  This applies to ANY code that calls `uart_write_bytes()` before UART driver install.
-  The UART driver is typically installed by the peripheral init code (e.g., `SerialReader::init()`),
-  not by the ESP-IDF startup.
-fix: >
-  Replace `uart_write_bytes(UART_NUM_0, buf, n)` with:
-  ```cpp
-  fwrite(buf, 1, n, stdout);
-  fflush(stdout);
-  ```
-  in `logVprintf()` and any other ESP_LOG vprintf callback. The VFS-based output
-  works without a UART driver install.
+  This applies to ANY code that calls `uart_write_bytes()` before UART driver install. The UART driver is typically installed
+  by the peripheral init code (e.g., `SerialReader::init()`), not by the ESP-IDF startup.
+
+  '
+fix: 'Replace `uart_write_bytes(UART_NUM_0, buf, n)` with: ```cpp fwrite(buf, 1, n, stdout); fflush(stdout); ``` in `logVprintf()`
+  and any other ESP_LOG vprintf callback. The VFS-based output works without a UART driver install.
+
+  '
 refs:
 - components/diag/src/crash_handler.cpp (panic wrapper — printf also goes through VFS)
 - main/main.cpp (logVprintf — the fix location)
 - docs/lessons_learned/LL-025.md (related: panic handler crash masking)
 - ESP-IDF: esp_driver_uart component
+title: Panic handler entered multiple times — uart_write_bytes in logVprintf before UART driver install

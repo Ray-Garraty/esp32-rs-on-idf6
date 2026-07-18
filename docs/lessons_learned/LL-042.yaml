@@ -1,47 +1,28 @@
 id: LL-042
 date: 2026-07-09
-crash_signature: "constexpr char[] passed via const_cast to ESP-IDF API — potential StoreProhibited"
+crash_signature: constexpr char[] passed via const_cast to ESP-IDF API — potential StoreProhibited
 category: constexpr_const_cast_ub
 trigger_patterns:
-  - "constexpr.*const_cast.*esp_netif_dhcps_option"
-  - "static constexpr char.*captivePortalUri"
-  - "constexpr.*rodata.*StoreProhibited"
-lesson: >
-  Passing a constexpr (or const) char array via const_cast to an ESP-IDF
-  function that takes void* is undefined behavior if the function modifies
-  the buffer. Even if the function is read-only (as esp_netif_dhcps_option
-  likely is for ESP_NETIF_OP_SET), relying on undocumented implementation
-  details is fragile.
+- constexpr.*const_cast.*esp_netif_dhcps_option
+- static constexpr char.*captivePortalUri
+- constexpr.*rodata.*StoreProhibited
+lesson: "Passing a constexpr (or const) char array via const_cast to an ESP-IDF function that takes void* is undefined behavior\
+  \ if the function modifies the buffer. Even if the function is read-only (as esp_netif_dhcps_option likely is for ESP_NETIF_OP_SET),\
+  \ relying on undocumented implementation details is fragile.\nOn ESP32-S3, constexpr arrays with static storage duration\
+  \ may be placed in .rodata (flash), which is read-only. If the function writes to the buffer, a StoreProhibited exception\
+  \ occurs.\nThe pattern:\n  static constexpr char uri[] = \"http://192.168.4.1/wifi\";\n  esp_netif_dhcps_option(..., const_cast<char*>(uri),\
+  \ ...);  // UB!\n\nThe fix: use a mutable local char array:\n  char uri[] = \"http://192.168.4.1/wifi\";\n  esp_netif_dhcps_option(...,\
+  \ uri, ...);  // OK\n\nThis is safe because: - The array is on the stack (or in .bss/.data for static locals) - It is writable\
+  \ - The const_cast is eliminated\nThe nearby dnsEnabled variable in the same function correctly uses a mutable uint8_t local\
+  \ — follow the same pattern.\n"
+diagnostic: 'grep for "const_cast" in all source files. Each use must be justified with a comment explaining why the target
+  is writable.
 
-  On ESP32-S3, constexpr arrays with static storage duration may be placed
-  in .rodata (flash), which is read-only. If the function writes to the
-  buffer, a StoreProhibited exception occurs.
-
-  The pattern:
-    static constexpr char uri[] = "http://192.168.4.1/wifi";
-    esp_netif_dhcps_option(..., const_cast<char*>(uri), ...);  // UB!
-
-  The fix: use a mutable local char array:
-    char uri[] = "http://192.168.4.1/wifi";
-    esp_netif_dhcps_option(..., uri, ...);  // OK
-
-  This is safe because:
-  - The array is on the stack (or in .bss/.data for static locals)
-  - It is writable
-  - The const_cast is eliminated
-
-  The nearby dnsEnabled variable in the same function correctly uses a
-  mutable uint8_t local — follow the same pattern.
-diagnostic: >
-  grep for "const_cast" in all source files. Each use must be justified
-  with a comment explaining why the target is writable.
-fix: >
-  Change:
-    static constexpr char captivePortalUri[] = "http://192.168.4.1/wifi";
-    esp_netif_dhcps_option(..., const_cast<char*>(captivePortalUri), ...);
-  To:
-    char captivePortalUri[] = "http://192.168.4.1/wifi";
-    esp_netif_dhcps_option(..., captivePortalUri, ...);
+  '
+fix: "Change:\n  static constexpr char captivePortalUri[] = \"http://192.168.4.1/wifi\";\n  esp_netif_dhcps_option(..., const_cast<char*>(captivePortalUri),\
+  \ ...);\nTo:\n  char captivePortalUri[] = \"http://192.168.4.1/wifi\";\n  esp_netif_dhcps_option(..., captivePortalUri,\
+  \ ...);\n"
 refs:
-  - components/infrastructure/network/src/wifi.cpp
-  - /home/vlabe/Downloads/esp-idf-master/components/esp_netif/include/esp_netif.h
+- components/infrastructure/network/src/wifi.cpp
+- /home/vlabe/Downloads/esp-idf-master/components/esp_netif/include/esp_netif.h
+title: constexpr char[] passed via const_cast to ESP-IDF API — potential StoreProhibited

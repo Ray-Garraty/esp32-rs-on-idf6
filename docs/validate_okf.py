@@ -2,7 +2,8 @@
 """
 OKF documentation validator.
 
-Checks all .md files in docs/ for compliance with OKF v0.1 standards.
+Checks .md files in docs/ for compliance with OKF v0.1 standards.
+Also checks .yaml lessons-learned files.
 Exit code 0 = all good, 1 = errors found.
 """
 
@@ -30,13 +31,14 @@ ALLOWED_TYPES = {
     "Code Review",
     "CrashReport",
     "Docs Rule",
-    "CrashReport",
 }
 
 SKIP_DIRS = frozenset({"esp_idf_v6"})
 SKIP_FILES = frozenset({"refs/esp32-s3_datasheet_en.md"})
 
 REQUIRED_FIELDS = {"type", "title", "description", "tags", "timestamp"}
+LL_REQUIRED_FIELDS = {"id", "date", "category", "title", "lesson"}
+LL_ID_RE = re.compile(r"^LL-\d{3}$")
 ISO8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 HEADING_RE = re.compile(r"^#{1,6}\s+")
 EMOJI_RE = re.compile(
@@ -44,26 +46,28 @@ EMOJI_RE = re.compile(
 )
 CYRILLIC_RE = re.compile("[\u0400-\u04FF\u0500-\u052F]")
 
+LESSONS_DIR = DOCS_DIR / "lessons_learned"
 
-def find_md_files(root: Path):
+
+def find_doc_files(root: Path):
+    """Yield (filepath, kind) where kind is 'md' or 'll'."""
     for dirpath, _dirnames, filenames in os.walk(root):
-        # skip hidden dirs and configured skip dirs
         parts = Path(dirpath).parts
         if any(part.startswith(".") for part in parts):
             continue
         if SKIP_DIRS & set(parts):
             continue
         for f in filenames:
-            if not f.endswith(".md"):
-                continue
-            # skip reserved filenames
-            if f in ("index.md", "log.md"):
-                continue
-            filepath = Path(dirpath) / f
-            rel = filepath.relative_to(root)
-            if str(rel) in SKIP_FILES:
-                continue
-            yield filepath
+            if f.endswith(".md"):
+                if f in ("index.md", "log.md"):
+                    continue
+                filepath = Path(dirpath) / f
+                rel = filepath.relative_to(root)
+                if str(rel) in SKIP_FILES:
+                    continue
+                yield filepath, "md"
+            elif f.endswith(".yaml") and Path(dirpath) == LESSONS_DIR:
+                yield Path(dirpath) / f, "ll"
 
 
 def parse_frontmatter(content: str):
@@ -112,16 +116,35 @@ def check_first_heading(content: str, body_start: int, filepath: Path):
     return False
 
 
-def validate_file(filepath: Path) -> bool:
+def check_cyrillic(content: str, rel: Path) -> list[str]:
+    """Return error lines for any Cyrillic characters in content."""
+    errors = []
+    for m in CYRILLIC_RE.finditer(content):
+        line_num = content[: m.start()].count("\n") + 1
+        snippet = content[max(0, m.start() - 10) : m.end() + 10].replace("\n", " ")
+        errors.append(
+            f"FAIL: {rel} — Cyrillic character '{m.group()}' at line {line_num}: ...{snippet}..."
+        )
+    return errors
+
+
+def _check_iso8601(value: str, field: str, rel: Path) -> bool:
+    """Print error and return True if value is not ISO 8601."""
+    if not ISO8601_RE.match(value):
+        print(f"FAIL: {rel} — {field} '{value}' is not ISO 8601 (expected YYYY-MM-DD)")
+        return True
+    return False
+
+
+def validate_md(filepath: Path) -> bool:
     ok = True
+    rel = filepath.relative_to(DOCS_DIR)
     content = filepath.read_text(encoding="utf-8")
 
     fm, body_start = parse_frontmatter(content)
     if fm is None:
-        print(f"FAIL: {filepath.relative_to(DOCS_DIR)} — missing or invalid frontmatter")
+        print(f"FAIL: {rel} — missing or invalid frontmatter")
         return False
-
-    rel = filepath.relative_to(DOCS_DIR)
 
     for field in REQUIRED_FIELDS:
         if field not in fm:
@@ -135,38 +158,71 @@ def validate_file(filepath: Path) -> bool:
         ok = False
 
     if "timestamp" in fm:
-        ts = str(fm["timestamp"])
-        if not ISO8601_RE.match(ts):
-            print(f"FAIL: {rel} — timestamp '{ts}' is not ISO 8601 (expected YYYY-MM-DD)")
+        if _check_iso8601(str(fm["timestamp"]), "timestamp", rel):
             ok = False
 
     if not check_first_heading(content, body_start, filepath):
         ok = False
 
-    cyrillic_matches = list(CYRILLIC_RE.finditer(content))
-    if cyrillic_matches:
-        for m in cyrillic_matches[:10]:
-            line_num = content[: m.start()].count("\n") + 1
-            snippet = content[max(0, m.start() - 10) : m.end() + 10].replace("\n", " ")
-            print(f"FAIL: {rel} — Cyrillic character '{m.group()}' at line {line_num}: ...{snippet}...")
-        if len(cyrillic_matches) > 10:
-            print(f"  ({len(cyrillic_matches) - 10} more Cyrillic character(s))")
+    for err in check_cyrillic(content, rel):
+        print(err)
+        ok = False
+
+    return ok
+
+
+def validate_ll(filepath: Path) -> bool:
+    ok = True
+    rel = filepath.relative_to(DOCS_DIR)
+    content = filepath.read_text(encoding="utf-8")
+
+    try:
+        data = yaml.safe_load(content)
+    except yaml.YAMLError as e:
+        print(f"FAIL: {rel} — YAML parse error: {e}")
+        return False
+
+    if not isinstance(data, dict):
+        print(f"FAIL: {rel} — not a YAML mapping")
+        return False
+
+    for field in LL_REQUIRED_FIELDS:
+        if field not in data:
+            print(f"FAIL: {rel} — missing required field '{field}'")
+            ok = False
+
+    if "id" in data:
+        lid = str(data["id"])
+        if not LL_ID_RE.match(lid):
+            print(f"FAIL: {rel} — id '{lid}' does not match LL-NNN pattern")
+            ok = False
+
+    if "date" in data:
+        if _check_iso8601(str(data["date"]), "date", rel):
+            ok = False
+
+    for err in check_cyrillic(content, rel):
+        print(err)
         ok = False
 
     return ok
 
 
 def main():
-    files = list(find_md_files(DOCS_DIR))
+    files = list(find_doc_files(DOCS_DIR))
     if not files:
-        print("No .md files found (excluding index.md, log.md)")
+        print("No files found to check")
         return 0
 
     print(f"Checking {len(files)} file(s)...\n")
     errors = 0
-    for f in sorted(files):
-        if not validate_file(f):
-            errors += 1
+    for fpath, kind in sorted(files, key=lambda x: x[0]):
+        if kind == "md":
+            if not validate_md(fpath):
+                errors += 1
+        elif kind == "ll":
+            if not validate_ll(fpath):
+                errors += 1
 
     print(f"\n{'=' * 40}")
     if errors:

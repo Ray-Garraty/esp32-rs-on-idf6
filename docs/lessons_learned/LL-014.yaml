@@ -1,7 +1,6 @@
 id: LL-014
 date: 2026-07-04
-crash_signature: UART reader thread panic on std::io::stdin().read() — first call
-  panics — stdout (println!) works fine
+crash_signature: UART reader thread panic on std::io::stdin().read() — first call panics — stdout (println!) works fine
 category: api_misuse
 trigger_patterns:
 - std::io::stdin\(\)\.read
@@ -9,26 +8,20 @@ trigger_patterns:
 - stdin.*panic
 - uart_driver_install.*not called
 - uart_vfs_dev_use_driver
-lesson: "ESP-IDF's boot console only sets up polled-mode output via direct UART register\
-  \ writes (printf/println! works). It does NOT install the UART driver required for\
-  \ interrupt-driven blocking input. When std::io::stdin().read() (which goes through\
-  \ libc read(0) → ESP-IDF VFS) is called, the VFS layer has no driver backing fd\
-  \ 0, causing a panic.\nThe three-step fix:\n  1. uart_vfs_dev_register() — register\
-  \ UART VFS device (idempotent)\n  2. uart_driver_install(UART_NUM_0, rx_buf, 0,\
-  \ queue_size, NULL, 0)\n     — install UART driver with RX buffer\n  3. uart_vfs_dev_use_driver(UART_NUM_0)\
-  \ — switch VFS to driver mode\n\nThis init was planned as a feature (uart0_driver_init)\
-  \ in esp-idf-sys's start.rs but was never completed — the code remains commented\
-  \ out.\n"
-diagnostic: "1. Check if stdout (println!) works but stdin (read) panics —\n   this\
-  \ confirms the UART driver is not installed for VFS reads.\n2. Check esp-idf-sys/src/start.rs\
-  \ for the commented-out init_uart0()\n   function — this is the canonical fix.\n\
-  3. Verify that uart_vfs_dev_register(), uart_driver_install(), and\n   uart_vfs_dev_use_driver()\
-  \ are available in the generated bindings.\n4. Rule out stack overflow (LL-010/LL-001)\
-  \ by checking watermark first;\n   if watermark > 2048 with 8KB stack, it's not\
-  \ overflow.\n"
-fix: 'Add uart_init_stdin() in esp_safe.rs that calls the three FFI functions above.
-  Call it once from main() before spawning any thread that reads from stdin. See docs/crash_reports/2026-07-04_uart_stdin_panic.md
-  for the complete implementation.
+lesson: "ESP-IDF's boot console only sets up polled-mode output via direct UART register writes (printf/println! works). It\
+  \ does NOT install the UART driver required for interrupt-driven blocking input. When std::io::stdin().read() (which goes\
+  \ through libc read(0) → ESP-IDF VFS) is called, the VFS layer has no driver backing fd 0, causing a panic.\nThe three-step\
+  \ fix:\n  1. uart_vfs_dev_register() — register UART VFS device (idempotent)\n  2. uart_driver_install(UART_NUM_0, rx_buf,\
+  \ 0, queue_size, NULL, 0)\n     — install UART driver with RX buffer\n  3. uart_vfs_dev_use_driver(UART_NUM_0) — switch\
+  \ VFS to driver mode\n\nThis init was planned as a feature (uart0_driver_init) in esp-idf-sys's start.rs but was never completed\
+  \ — the code remains commented out.\n"
+diagnostic: "1. Check if stdout (println!) works but stdin (read) panics —\n   this confirms the UART driver is not installed\
+  \ for VFS reads.\n2. Check esp-idf-sys/src/start.rs for the commented-out init_uart0()\n   function — this is the canonical\
+  \ fix.\n3. Verify that uart_vfs_dev_register(), uart_driver_install(), and\n   uart_vfs_dev_use_driver() are available in\
+  \ the generated bindings.\n4. Rule out stack overflow (LL-010/LL-001) by checking watermark first;\n   if watermark > 2048\
+  \ with 8KB stack, it's not overflow.\n"
+fix: 'Add uart_init_stdin() in esp_safe.rs that calls the three FFI functions above. Call it once from main() before spawning
+  any thread that reads from stdin. See docs/crash_reports/2026-07-04_uart_stdin_panic.md for the complete implementation.
 
   '
 refs:
@@ -36,3 +29,4 @@ refs:
 - src/main.rs (call site before UART thread)
 - docs/crash_reports/2026-07-04_uart_stdin_panic.md
 - ~/.cargo/git/checkouts/esp-idf-sys-*/src/start.rs (commented-out init code)
+title: UART reader thread panic on std::io::stdin().read() — first call panics — stdout (println!) works fine

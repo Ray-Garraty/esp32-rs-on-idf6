@@ -1,49 +1,40 @@
 id: LL-025
 date: 2026-07-07
-crash_signature: Panic handler entered multiple times — .iram1 wrapper calls flash
-  functions (printf, BlackBox::dump) — secondary crash masks primary
+crash_signature: Panic handler entered multiple times — .iram1 wrapper calls flash functions (printf, BlackBox::dump) — secondary
+  crash masks primary
 category: instrumentation_gap
 trigger_patterns:
 - Panic handler entered multiple times
 - .iram1.*panic_handler
 - section.*iram1.*printf
 - __wrap_esp_panic_handler.*crash
-lesson: "A panic handler placed in IRAM (.iram1 section) MUST NOT call any function\
-  \ that lives in flash. When the original crash is due to a cache error (e.g., flash\
-  \ cache miss during interrupt, XTOS dispatch error, or hardware exception that disabled\
-  \ cache), calling flash- resident functions from an IRAM function will immediately\
-  \ crash again with LoadProhibited or StoreProhibited.\nThis creates a deadly diagnostic\
-  \ black hole: the secondary crash in the .iram1 wrapper triggers ESP-IDF's recursive\
-  \ panic detection (PANIC_ENTRY_COUNT_MAX=2), causing \"Panic handler entered multiple\
-  \ times\" — with zero visibility into the ORIGINAL crash.\nThe fix has two valid\
-  \ approaches:\n  A) Remove .iram1 from the wrapper — let it live in flash. Most\n\
-  \     crash types (stack overflow, assert failure, null dereference)\n     do NOT\
-  \ disable the flash cache, so flash access works fine.\n     Only cache-specific\
-  \ crashes will exhibit the secondary crash,\n     and those are rare.\n  B) Implement\
-  \ an IRAM-safe version using only IRAM functions:\n     ets_printf() instead of\
-  \ printf(), and a reduced black box dump\n     that only touches IRAM data.\n\n\
-  The cmake comment in diag/CMakeLists.txt says \"Panic handler chain MUST be in IRAM\
-  \ (LL-010)\" — this was cargo-culted from the Rust phase without understanding that\
-  \ LL-010's context was different (stack overflow, which DOES corrupt flash cache).\
-  \ For non-stack- overflow crashes, flash access from the wrapper is safe.\nThe safest\
-  \ approach: provide TWO paths — check for stack overflow first (which is IRAM-safe\
-  \ via uxTaskGetStackHighWaterMark), and only call flash functions if cache is confirmed\
-  \ intact.\n"
-diagnostic: "1. If \"Panic handler entered multiple times\" is the ONLY crash\n  \
-  \ output, suspect the wrapper itself is crashing.\n2. Check if __wrap_esp_panic_handler\
-  \ has .iram1 section attribute. 3. Check if it calls printf, puts, cout, or any\
-  \ other flash function. 4. Verify by removing .iram1 and rebuilding. If the real\
-  \ crash\n   appears, the .iram1 wrapper was the secondary crash cause.\n5. For a\
-  \ permanent fix, use approach B: ets_printf + IRAM-safe dump.\n"
-fix: "Remove .iram1 section from __wrap_esp_panic_handler:\n  // REMOVE: [[gnu::section(\"\
-  .iram1\")]]\n  extern \"C\" void __wrap_esp_panic_handler(void* info) noexcept {\n\
-  \    // Flash-safe: printf, BlackBox::dump all OK for most crashes\n    ...\n  }\n\
-  For cache-related crashes, implement a two-phase approach:\n  Phase 1 (IRAM): check\
-  \ stack watermark, print minimal info via\n    ets_printf. If cache seems OK ->\
-  \ Phase 2 (flash).\nMark the function with __attribute__((noinline)) to prevent\
-  \ LTO from inlining it and accidentally pulling flash calls into IRAM.\n"
+lesson: "A panic handler placed in IRAM (.iram1 section) MUST NOT call any function that lives in flash. When the original\
+  \ crash is due to a cache error (e.g., flash cache miss during interrupt, XTOS dispatch error, or hardware exception that\
+  \ disabled cache), calling flash- resident functions from an IRAM function will immediately crash again with LoadProhibited\
+  \ or StoreProhibited.\nThis creates a deadly diagnostic black hole: the secondary crash in the .iram1 wrapper triggers ESP-IDF's\
+  \ recursive panic detection (PANIC_ENTRY_COUNT_MAX=2), causing \"Panic handler entered multiple times\" — with zero visibility\
+  \ into the ORIGINAL crash.\nThe fix has two valid approaches:\n  A) Remove .iram1 from the wrapper — let it live in flash.\
+  \ Most\n     crash types (stack overflow, assert failure, null dereference)\n     do NOT disable the flash cache, so flash\
+  \ access works fine.\n     Only cache-specific crashes will exhibit the secondary crash,\n     and those are rare.\n  B)\
+  \ Implement an IRAM-safe version using only IRAM functions:\n     ets_printf() instead of printf(), and a reduced black\
+  \ box dump\n     that only touches IRAM data.\n\nThe cmake comment in diag/CMakeLists.txt says \"Panic handler chain MUST\
+  \ be in IRAM (LL-010)\" — this was cargo-culted from the Rust phase without understanding that LL-010's context was different\
+  \ (stack overflow, which DOES corrupt flash cache). For non-stack- overflow crashes, flash access from the wrapper is safe.\n\
+  The safest approach: provide TWO paths — check for stack overflow first (which is IRAM-safe via uxTaskGetStackHighWaterMark),\
+  \ and only call flash functions if cache is confirmed intact.\n"
+diagnostic: "1. If \"Panic handler entered multiple times\" is the ONLY crash\n   output, suspect the wrapper itself is crashing.\n\
+  2. Check if __wrap_esp_panic_handler has .iram1 section attribute. 3. Check if it calls printf, puts, cout, or any other\
+  \ flash function. 4. Verify by removing .iram1 and rebuilding. If the real crash\n   appears, the .iram1 wrapper was the\
+  \ secondary crash cause.\n5. For a permanent fix, use approach B: ets_printf + IRAM-safe dump.\n"
+fix: "Remove .iram1 section from __wrap_esp_panic_handler:\n  // REMOVE: [[gnu::section(\".iram1\")]]\n  extern \"C\" void\
+  \ __wrap_esp_panic_handler(void* info) noexcept {\n    // Flash-safe: printf, BlackBox::dump all OK for most crashes\n \
+  \   ...\n  }\nFor cache-related crashes, implement a two-phase approach:\n  Phase 1 (IRAM): check stack watermark, print\
+  \ minimal info via\n    ets_printf. If cache seems OK -> Phase 2 (flash).\nMark the function with __attribute__((noinline))\
+  \ to prevent LTO from inlining it and accidentally pulling flash calls into IRAM.\n"
 refs:
 - components/diag/src/crash_handler.cpp
 - components/diag/CMakeLists.txt (comment about IRAM)
 - docs/lessons_learned (LL-010, LL-023, LL-024)
 - AGENTS.md §3.3 (IRAM considerations for WDT/Brownout)
+title: Panic handler entered multiple times — .iram1 wrapper calls flash functions (printf, BlackBox::dump) — secondary crash
+  masks primary

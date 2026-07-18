@@ -1,43 +1,41 @@
 id: LL-038
 date: 2026-07-11
-crash_signature: "IP_EVENT_STA_GOT_IP → 'Panic handler entered multiple times' — no crash dump"
+crash_signature: IP_EVENT_STA_GOT_IP → 'Panic handler entered multiple times' — no crash dump
 category: stack_overflow
 trigger_patterns:
-  - "Panic handler entered multiple times"
-  - "WS broadcast:Panic handler entered"
-  - "esp_netif_handlers: sta ip:.*→.*WS broadcast:Panic"
-  - "I \\(\\d+\\) http_srv: WS broadcast:Panic handler entered"
-  - "Panic handler entered multiple times" without preceding "=== CRASH ==="
-lesson: >
-  The LogBuffer callback chain (ESP_LOG hook → wsLogCallback → broadcastWsEvent →
-  httpd API) executes synchronously in the calling task's context. When the system
-  event task (default stack=2304 B) calls ESP_LOGI during IP_EVENT_STA_GOT_IP handling,
-  the callback chain adds ~2000+ bytes to the stack, exceeding the limit. The stack
-  overflow corrupts adjacent memory, causing a primary crash. The panic handler itself
-  cannot operate on the depleted stack, producing "Panic handler entered multiple times"
-  without any crash dump.
+- Panic handler entered multiple times
+- WS broadcast:Panic handler entered
+- 'esp_netif_handlers: sta ip:.*→.*WS broadcast:Panic'
+- 'I \(\d+\) http_srv: WS broadcast:Panic handler entered'
+- Panic handler entered multiple times without preceding "=== CRASH ==="
+lesson: 'The LogBuffer callback chain (ESP_LOG hook → wsLogCallback → broadcastWsEvent → httpd API) executes synchronously
+  in the calling task''s context. When the system event task (default stack=2304 B) calls ESP_LOGI during IP_EVENT_STA_GOT_IP
+  handling, the callback chain adds ~2000+ bytes to the stack, exceeding the limit. The stack overflow corrupts adjacent memory,
+  causing a primary crash. The panic handler itself cannot operate on the depleted stack, producing "Panic handler entered
+  multiple times" without any crash dump.
 
-  ALWAYS configure CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE when using ESP_LOG hooks
-  that invoke complex callbacks. Alternatively, make the callback asynchronous.
+  ALWAYS configure CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE when using ESP_LOG hooks that invoke complex callbacks. Alternatively,
+  make the callback asynchronous.
 
-  The symptom "Panic handler entered multiple times" without "=== CRASH ===" header
-  is diagnostic of a stack overflow in the crash site — the panic handler has
-  insufficient stack to print its dump.
+  The symptom "Panic handler entered multiple times" without "=== CRASH ===" header is diagnostic of a stack overflow in the
+  crash site — the panic handler has insufficient stack to print its dump.
 
-  Key diagnostic signs:
-  - No "=== CRASH ===" in log — panic handler itself crashed
-  - Interleaved output like "WS broadcast:Panic handler entered" — crash during printf
-  - Crash within 100ms of IP_EVENT_STA_GOT_IP — event handler triggers the overflow
+  Key diagnostic signs: - No "=== CRASH ===" in log — panic handler itself crashed - Interleaved output like "WS broadcast:Panic
+  handler entered" — crash during printf - Crash within 100ms of IP_EVENT_STA_GOT_IP — event handler triggers the overflow
   - 4 WS sessions active (all expired) — callback chain is exercised on every ESP_LOGI
-diagnostic: >
-  1. Check CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE in sdkconfig (default=2304)
-  2. If default and wsLogCallback is active → stack overflow is likely
-  3. Verify by temporarily increasing to 8192 and re-testing
-  4. Alternatively, add uxTaskGetStackHighWaterMark check at wsLogCallback entry
-fix: |
-  CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=8192 (or larger) in sdkconfig.defaults
+
+  '
+diagnostic: '1. Check CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE in sdkconfig (default=2304) 2. If default and wsLogCallback
+  is active → stack overflow is likely 3. Verify by temporarily increasing to 8192 and re-testing 4. Alternatively, add uxTaskGetStackHighWaterMark
+  check at wsLogCallback entry
+
+  '
+fix: 'CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=8192 (or larger) in sdkconfig.defaults
+
+  '
 refs:
-  - docs/crash_reports/2026-07-11_ip_event_stack_overflow.md
-  - docs/protocols/stack_overflow.md
-  - LL-001 (same pattern: stack overflow → misleading crash, different task)
-  - AGENTS.md §GR-6 (Stack budget is law)
+- docs/crash_reports/2026-07-11_ip_event_stack_overflow.md
+- docs/protocols/stack_overflow.md
+- LL-001 (same pattern: stack overflow → misleading crash, different task)
+- AGENTS.md §GR-6 (Stack budget is law)
+title: IP_EVENT_STA_GOT_IP → 'Panic handler entered multiple times' — no crash dump

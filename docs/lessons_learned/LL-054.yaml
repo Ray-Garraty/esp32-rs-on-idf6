@@ -1,0 +1,120 @@
+id: LL-054
+date: 2026-07-18
+title: "Retrospective: Arduino on ESP-IDF v5 instead of a from-scratch FreeRTOS architecture"
+category: architecture
+crash_signature: >
+  Not a crash, but an architectural skew: 14k lines of production code on
+  bare ESP-IDF v6 master vs 6k lines of the Arduino prototype, for identical
+  functionality. The entire delta is diagnostic harness that treats problems
+  introduced by the FreeRTOS architecture, plus driver porting overhead for
+  code that already exists in the Arduino ecosystem.
+trigger_patterns:
+  - "14k vs 6k lines for same functionality"
+  - "diagnostic harness > business logic"
+  - "stack monitor / state tracer / black box needed daily"
+  - "FastAccelStepper incompatible"
+  - "Arduino library porting effort"
+lesson: >
+  The project should have taken the proven Arduino code (legacy/arduino/src/ —
+  6k lines, debugged and working), placed it on ESP-IDF v5.3 + Arduino
+  as an ESP-IDF component, and obtained everything truly needed from FreeRTOS:
+
+  - Two cores (WiFi/BLE on core 0, loop() on core 1)
+  - Hardware watchdog per core
+  - Stack isolation (task stack + guard pages)
+  - PSRAM for large buffers
+
+  WITHOUT the sources of complexity:
+
+  - Queues and semaphores (Arduino loop() is non-blocking by nature)
+  - State machine framework for dispatch
+  - Black box, state tracer, stack monitor, heap monitor, RTC watchdog,
+    tick watchdog — all the diagnostics that became necessary only because
+    the FreeRTOS architecture multiplies race conditions
+  - Driver porting (RMT stepper, TMC UART, onewire, RGB LED) — all exist
+    in the Arduino ecosystem
+
+  ESP-IDF v6 master gave the project NOTHING of value:
+
+  | Feature | Used in project? | Available in v5? |
+  |---------|-----------------|------------------|
+  | C++23 (std::expected, constexpr, etc.) | Yes | GCC 12+ (IDF v5) |
+  | New RMT API (rmt_new_tx_channel) | Used in stepper | IDF v5.3 |
+  | Dual-core + FreeRTOS | Foundational | IDF v5 |
+  | PSRAM | Only heap_monitor | IDF v5 |
+  | PSA Crypto | Not used | — |
+  | Legacy driver removal | Only broke compatibility | Present in v5 |
+  | GCC 15.2.0 vs 13.x | Code uses no GCC-15-specific features | — |
+
+  Cost of choosing IDF v6 master:
+
+  - FastAccelStepper incompatible (depends on MCPWM/PCNT/legacy RMT)
+  - Arduino-ecosystem incompatible (no Arduino as component for v6)
+  - Had to write diagnostics from scratch (state tracer, black box, etc.)
+  - Lost ~1 month of development on architecture that delivers zero business
+    value beyond the Arduino prototype
+
+  Project paradox: the diagnostic harness is necessary precisely because
+  the architecture is complex enough to need it for debugging. Had the
+  architecture stayed simple (superloop on core 1, off-the-shelf libraries
+  on core 0), diagnostics would have been unnecessary — crashes would have
+  been as rare as in the Arduino original.
+
+  Alternative approach (retrospective plan):
+
+  1. Take legacy/arduino/src/ as-is
+  2. ESP-IDF v5.3 as the base
+  3. Arduino as ESP-IDF component (officially supported by Espressif)
+  4. FastAccelStepper as a component (supports IDF v5.3)
+  5. One superloop task on core 1 — all business logic
+  6. WiFi/BLE/HTTP — standard esp_http_server + esp_wifi on core 0
+  7. Only FreeRTOS glue: xTaskCreatePinnedToCore + watchdog
+
+  Result: ~7-8k lines, working device in 1.5 weeks,
+  Arduino stability + two FreeRTOS cores.
+diagnostic: |
+  How to recognize this situation in future projects:
+
+  1. If a project uses < 30% of its platform's specific capabilities
+     (FreeRTOS IPC, task priorities, event groups) while > 50% of the
+     code is diagnostic — the architecture is overcomplicated.
+  2. If crashes happen daily rather than monthly — the architecture
+     introduces more problems than it solves.
+  3. If off-the-shelf libraries (FastAccelStepper, OneWire, etc.)
+     are incompatible with the chosen IDF version — STOP sign.
+  4. If the project picks the ESP-IDF master branch over a stable
+     release — justification must be explicit and measurable
+     (e.g., "PSA Crypto is required for FIPS 140-3").
+  5. If C++ standard version is the sole justification for a toolchain
+     upgrade — verify which language features are actually used and
+     whether they are available in the stable release.
+fix: |
+  For future projects — platform selection scale:
+
+  | Level | Stack | TL;DR |
+  |-------|-------|-------|
+  | 1 | Plain Arduino framework | Prototype, 1 week |
+  | 2 | Arduino as IDF component + IDF v5 stable | Product, 1.5 weeks |
+  | 3 | Pure ESP-IDF v5 stable + FreeRTOS | Complex product, 3 weeks |
+  | 4 | ESP-IDF v6/master | Only if justified by a specific feature |
+
+  Level selection rules:
+  - Level 4 requires LEVEL_4_JUSTIFICATION in the plan containing a
+    concrete IDF v6 feature (not C++23, not "being modern", not
+    "keeping up to date").
+  - Only upgrade from Level 3 to Level 4 after Level 3 builds and
+    runs on hardware.
+  - If a project starts at Level 4 — reconsider.
+
+  This project should have chosen Level 2: Arduino as IDF component
+  on ESP-IDF v5.3. Stable, predictable, ecosystem-compatible.
+refs:
+  - legacy/arduino/src/ (6k lines, proven code)
+  - AGENTS.md (GR-10, GR-11, GR-15)
+  - docs/refs/CONSTITUTION.md
+  - docs/lessons_learned/LL-015.yaml (stack budget lessons)
+  - docs/lessons_learned/LL-053.yaml (handler return values — also a
+    consequence of unnecessary complexity)
+  - https://components.espressif.com/components/gin66/fastaccelstepper
+  - /home/vlabe/Downloads/esp-idf-master/tools/cmake/version.cmake (v6.2.0)
+  - https://docs.espressif.com/projects/arduino-esp32/en/latest/esp-idf_component.html

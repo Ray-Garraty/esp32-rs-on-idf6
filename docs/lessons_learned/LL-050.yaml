@@ -1,94 +1,64 @@
 id: LL-050
 date: 2026-07-16
-crash_signature: >
-  POST /api/valve triggers StoreProhibited at vPortYieldFromInt (EXCVADDR=0xfffffec0)
-  followed by "Panic handler entered multiple times", then reboot with
-  LoadProhibited at prvSelectHighestPriorityTaskSMP with A2=0xa5a5a5a5
-  (FreeRTOS stack canary) and |<-CORRUPTED backtrace.
+crash_signature: 'POST /api/valve triggers StoreProhibited at vPortYieldFromInt (EXCVADDR=0xfffffec0) followed by "Panic handler
+  entered multiple times", then reboot with LoadProhibited at prvSelectHighestPriorityTaskSMP with A2=0xa5a5a5a5 (FreeRTOS
+  stack canary) and |<-CORRUPTED backtrace.
+
+  '
 category: stack_overflow
 trigger_patterns:
-  - "valve_post_handler ENTER: free=10684 bytes"
-  - "handleCommandCore ENTER: free=5124 bytes"
-  - "handleSetPosition ENTER: free=1700 bytes"
-  - "store to 0xfffffec0"
-  - "A2=0xa5a5a5a5.*prvSelectHighestPriorityTaskSMP"
-  - "HTTP server.*POST.*valve.*connection reset"
-lesson: >
-  The HTTP server task stack (12288 bytes, configured via HttpServer::STACK_SIZE
-  and HTTPD_DEFAULT_CONFIG().stack_size) is insufficient for handler call chains
-  that involve multiple large stack-local buffers.
+- 'valve_post_handler ENTER: free=10684 bytes'
+- 'handleCommandCore ENTER: free=5124 bytes'
+- 'handleSetPosition ENTER: free=1700 bytes'
+- store to 0xfffffec0
+- A2=0xa5a5a5a5.*prvSelectHighestPriorityTaskSMP
+- HTTP server.*POST.*valve.*connection reset
+lesson: 'The HTTP server task stack (12288 bytes, configured via HttpServer::STACK_SIZE and HTTPD_DEFAULT_CONFIG().stack_size)
+  is insufficient for handler call chains that involve multiple large stack-local buffers.
 
-  The POST /api/valve handler chain allocates:
-  - CommandBuffer body (256 bytes)
-  - nlohmann::json::parse() (~1-2 KB temporary stack)
-  - std::string posStr
-  - CommandBuffer cmdBuf (256 bytes)
-  - ResponseBuffer rspBuf (2048 bytes)
-  - Inside handleCommandCore: another ResponseBuffer (2048 bytes)
-  - Inside handleSetPosition: CommandResponse rsp with body buffer
-  - httpd_resp_send() internal overhead
+  The POST /api/valve handler chain allocates: - CommandBuffer body (256 bytes) - nlohmann::json::parse() (~1-2 KB temporary
+  stack) - std::string posStr - CommandBuffer cmdBuf (256 bytes) - ResponseBuffer rspBuf (2048 bytes) - Inside handleCommandCore:
+  another ResponseBuffer (2048 bytes) - Inside handleSetPosition: CommandResponse rsp with body buffer - httpd_resp_send()
+  internal overhead
 
-  Total stack consumed from handler entry to handleSetPosition: 8984 bytes,
-  leaving only 1700 bytes free in the 12288-byte stack. The remaining code
-  path (vTaskDelay, return chain with destructors, httpd_resp_send) exceeds
-  this, causing a stack overflow into adjacent FreeRTOS TCB/list data
-  structures.
+  Total stack consumed from handler entry to handleSetPosition: 8984 bytes, leaving only 1700 bytes free in the 12288-byte
+  stack. The remaining code path (vTaskDelay, return chain with destructors, httpd_resp_send) exceeds this, causing a stack
+  overflow into adjacent FreeRTOS TCB/list data structures.
 
-  The crash presents as a StoreProhibited in the FreeRTOS scheduler
-  (vPortYieldFromInt) because the overflow corrupts the ready list linked
-  list pointers. After reboot, the A2=0xa5a5a5a5 stack canary confirms
-  the overflow. The panic handler itself ALSO crashes (LL-025 pattern)
-  because it's placed in IRAM and calls flash-resident functions.
+  The crash presents as a StoreProhibited in the FreeRTOS scheduler (vPortYieldFromInt) because the overflow corrupts the
+  ready list linked list pointers. After reboot, the A2=0xa5a5a5a5 stack canary confirms the overflow. The panic handler itself
+  ALSO crashes (LL-025 pattern) because it''s placed in IRAM and calls flash-resident functions.
 
-  This lesson applies to ALL HTTP handler call chains that use
-  nlohmann::json::parse(), ResponseBuffer (2048 bytes), or deep
-  callbacks. The HTTP server stack must be sized to accommodate the
-  WORST-CASE handler, not the average.
+  This lesson applies to ALL HTTP handler call chains that use nlohmann::json::parse(), ResponseBuffer (2048 bytes), or deep
+  callbacks. The HTTP server stack must be sized to accommodate the WORST-CASE handler, not the average.
 
-  12288 bytes was sufficient when handlers were simple (ping, status)
-  but became insufficient when the valve setPosition handler was added
-  with its deep call chain through dispatch -> handleSetPosition ->
-  gValve.setPosition -> vTaskDelay -> return chain.
-diagnostic: |
-  1. Add uxTaskGetStackHighWaterMark(nullptr) at entry and exit of
-     HTTP handler — compare free bytes against total stack size.
-  2. Monitor the decrease between entry and deepest call point.
-  3. If watermark < 2048 bytes at any point, the stack is too small.
-  4. Check which handler triggered the crash using the HTTP server
-     log (POST /api/valve, etc.)
-  5. Reproduce by sending the suspect HTTP request while monitoring
-     serial output.
-  6. Verify fix by repeating step 5 — crash should not occur and
-     GET should return the expected value.
-fix: |
-  1. Increase HTTP server task stack from 12288 to 16384 bytes:
-     - components/infrastructure/network/include/infrastructure/network/http_server.hpp:
-       static constexpr size_t STACK_SIZE = 16384;
-     - components/domain/include/domain/types.hpp:
-       inline constexpr size_t HTTP_SERVER_STACK = 16384;
-  
-  2. Keep both constants in sync (they represent the same value).
-  
-  3. If DRAM pressure prevents increasing to 16384, alternatives include:
-     a. Move ResponseBuffer allocations to heap (std::unique_ptr or
-        static buffer in BSS)
-     b. Reduce ResponseBuffer size from 2048 to 1024 (if all existing
-        responses fit)
-     c. Use a shared pre-allocated buffer pool for HTTP handler responses
-     d. Remove redundant JSON parsing (valve_post_handler parses JSON,
-       then constructs a CommandBuffer with "{...}" which is parsed AGAIN
-       in parseCommand)
+  12288 bytes was sufficient when handlers were simple (ping, status) but became insufficient when the valve setPosition handler
+  was added with its deep call chain through dispatch -> handleSetPosition -> gValve.setPosition -> vTaskDelay -> return chain.
 
-  4. For new HTTP handlers, ALWAYS check stack budget first —
-     estimate worst-case chain depth and verify with watermark measurement
-     on real hardware.
-
+  '
+diagnostic: "1. Add uxTaskGetStackHighWaterMark(nullptr) at entry and exit of\n   HTTP handler — compare free bytes against\
+  \ total stack size.\n2. Monitor the decrease between entry and deepest call point.\n3. If watermark < 2048 bytes at any\
+  \ point, the stack is too small.\n4. Check which handler triggered the crash using the HTTP server\n   log (POST /api/valve,\
+  \ etc.)\n5. Reproduce by sending the suspect HTTP request while monitoring\n   serial output.\n6. Verify fix by repeating\
+  \ step 5 — crash should not occur and\n   GET should return the expected value.\n"
+fix: "1. Increase HTTP server task stack from 12288 to 16384 bytes:\n   - components/infrastructure/network/include/infrastructure/network/http_server.hpp:\n\
+  \     static constexpr size_t STACK_SIZE = 16384;\n   - components/domain/include/domain/types.hpp:\n     inline constexpr\
+  \ size_t HTTP_SERVER_STACK = 16384;\n\n2. Keep both constants in sync (they represent the same value).\n\n3. If DRAM pressure\
+  \ prevents increasing to 16384, alternatives include:\n   a. Move ResponseBuffer allocations to heap (std::unique_ptr or\n\
+  \      static buffer in BSS)\n   b. Reduce ResponseBuffer size from 2048 to 1024 (if all existing\n      responses fit)\n\
+  \   c. Use a shared pre-allocated buffer pool for HTTP handler responses\n   d. Remove redundant JSON parsing (valve_post_handler\
+  \ parses JSON,\n     then constructs a CommandBuffer with \"{...}\" which is parsed AGAIN\n     in parseCommand)\n\n4. For\
+  \ new HTTP handlers, ALWAYS check stack budget first —\n   estimate worst-case chain depth and verify with watermark measurement\n\
+  \   on real hardware.\n"
 refs:
-  - docs/lessons_learned/LL-001.yaml (stack overflow misdiagnosed as heap corruption)
-  - docs/lessons_learned/LL-025.yaml (panic handler in IRAM + flash calls)
-  - docs/lessons_learned/LL-048.yaml (log_worker stack overflow, similar callback chain)
-  - components/infrastructure/network/include/infrastructure/network/http_server.hpp
-  - components/domain/include/domain/types.hpp
-  - components/interface/src/rest_api.cpp (valve_post_handler)
-  - components/application/src/handlers/valve.cpp (handleSetPosition)
-  - docs/crash_reports/http_valve_stack_overflow.md
+- docs/lessons_learned/LL-001.yaml (stack overflow misdiagnosed as heap corruption)
+- docs/lessons_learned/LL-025.yaml (panic handler in IRAM + flash calls)
+- docs/lessons_learned/LL-048.yaml (log_worker stack overflow, similar callback chain)
+- components/infrastructure/network/include/infrastructure/network/http_server.hpp
+- components/domain/include/domain/types.hpp
+- components/interface/src/rest_api.cpp (valve_post_handler)
+- components/application/src/handlers/valve.cpp (handleSetPosition)
+- docs/crash_reports/http_valve_stack_overflow.md
+title: POST /api/valve triggers StoreProhibited at vPortYieldFromInt (EXCVADDR=0xfffffec0) followed by "Panic handler entered
+  multiple times", then reboot with LoadProhibited at prvSelectHighestPriorityTaskSMP with A2=0xa5a5a5a5 (FreeRTOS stack canary)
+  and |<-CORRUPTED backtrace.

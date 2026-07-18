@@ -1,51 +1,41 @@
 id: LL-013
 date: 2026-07-04
-crash_signature: 'pthread: Failed to create task! ×3 — UART reader thread disconnected
-  flooding — post-BLE heap free=11KB largest=9KB — motor/temp/uart threads never spawned'
+crash_signature: 'pthread: Failed to create task! ×3 — UART reader thread disconnected flooding — post-BLE heap free=11KB
+  largest=9KB — motor/temp/uart threads never spawned'
 category: dma_heap_fragmentation
 trigger_patterns:
 - Failed to create task
 - UART reader thread disconnected
 - 'pthread: Failed to create task'
 - PTHREAD_TASK_STACK_SIZE_DEFAULT
-lesson: 'BLE NimBLE init consumes ~30KB of DRAM via MALLOC_CAP_INTERNAL for the host
-  controller interface, GATT database, and advertising buffers. After WiFi (69→50KB)
-  and HTTP (50→30KB), BLE consumes the remaining contiguous INTERNAL memory, leaving
-  only 11KB free / 9KB largest block.
+lesson: 'BLE NimBLE init consumes ~30KB of DRAM via MALLOC_CAP_INTERNAL for the host controller interface, GATT database,
+  and advertising buffers. After WiFi (69→50KB) and HTTP (50→30KB), BLE consumes the remaining contiguous INTERNAL memory,
+  leaving only 11KB free / 9KB largest block.
 
-  When subsequent threads (motor 16KB, temp 16KB, uart 8KB) are spawned via std::thread,
-  the FreeRTOS pthread layer calls xTaskCreate() which needs MALLOC_CAP_INTERNAL stack
-  memory. With only 9KB largest contiguous block, even the 8KB uart thread fails.
-  The `pthread: Failed to create task!` log confirms xTaskCreate returned pdFAIL.
+  When subsequent threads (motor 16KB, temp 16KB, uart 8KB) are spawned via std::thread, the FreeRTOS pthread layer calls
+  xTaskCreate() which needs MALLOC_CAP_INTERNAL stack memory. With only 9KB largest contiguous block, even the 8KB uart thread
+  fails. The `pthread: Failed to create task!` log confirms xTaskCreate returned pdFAIL.
 
-  The consequence is not a crash but a silent degradation: motor never homes, temperature
-  never reads, UART stdin reader never starts (producing endless "UART reader thread
-  disconnected" warnings).
+  The consequence is not a crash but a silent degradation: motor never homes, temperature never reads, UART stdin reader never
+  starts (producing endless "UART reader thread disconnected" warnings).
 
-  This is a DRAM budget problem: WiFi + HTTP + BLE consume ~148KB of the ~196KB usable
-  DRAM, leaving only ~48KB for all other threads. With motor (16K) + temp (16K) +
-  uart (8K) = 40KB total stack requirement, there is physically enough memory but
+  This is a DRAM budget problem: WiFi + HTTP + BLE consume ~148KB of the ~196KB usable DRAM, leaving only ~48KB for all other
+  threads. With motor (16K) + temp (16K) + uart (8K) = 40KB total stack requirement, there is physically enough memory but
   it is fragmented into pieces < 9KB.
 
   '
-diagnostic: "1. Check post-BLE heap: free < 15KB or largest < 10KB → threads will\
-  \ fail. 2. Look for \"pthread: Failed to create task!\" in the log — this confirms\n\
-  \   xTaskCreate failure from DRAM exhaustion.\n3. Count the thread spawns that fail:\
-  \ each failure is one uncreatable thread. 4. Check if the failing threads are spawned\
-  \ AFTER BLE init in the boot\n   sequence — if yes, either move them BEFORE BLE\
-  \ or reduce BLE footprint.\n5. Run `idf.py menuconfig` → Component config → Bluetooth\
-  \ → NimBLE Options\n   and check: CONFIG_BT_NIMBLE_ACL_BUF_COUNT, CONFIG_BT_NIMBLE_HCI_EVT_BUF_SIZE,\n\
-  \   CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT.\n"
-fix: "Option A (preferred): Reorder boot sequence so that motor/temp/uart threads\
-  \ are spawned BEFORE BLE init (while heap has 50KB+ largest block). BLE init becomes\
-  \ the last step after all worker threads are running.\nOption B: Reduce NimBLE DRAM\
-  \ footprint in sdkconfig.defaults:\n  CONFIG_BT_NIMBLE_ACL_BUF_COUNT=12 (was 24,\
-  \ saves ~2KB)\n  CONFIG_BT_NIMBLE_HCI_EVT_BUF_SIZE=70 (was 256, saves ~1KB)\n  CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=12\
-  \ (was 24, saves ~3KB)\n  CONFIG_BT_NIMBLE_MAX_CCCD=4 (was 8, saves ~1KB)\n\nOption\
-  \ C: Reduce thread stack sizes (risky — see GR-6 budget table):\n  motor: 16K →\
-  \ 12K (risks stack overflow on complex homing profiles)\n  temp: 16K → 8K (risks\
-  \ stack overflow on DS18B20 bitbang)\n  uart: 8K → keep (already at minimum per\
-  \ LL-010)\n\nOption A is preferred because it doesn't reduce safety margins.\n"
+diagnostic: "1. Check post-BLE heap: free < 15KB or largest < 10KB → threads will fail. 2. Look for \"pthread: Failed to create\
+  \ task!\" in the log — this confirms\n   xTaskCreate failure from DRAM exhaustion.\n3. Count the thread spawns that fail:\
+  \ each failure is one uncreatable thread. 4. Check if the failing threads are spawned AFTER BLE init in the boot\n   sequence\
+  \ — if yes, either move them BEFORE BLE or reduce BLE footprint.\n5. Run `idf.py menuconfig` → Component config → Bluetooth\
+  \ → NimBLE Options\n   and check: CONFIG_BT_NIMBLE_ACL_BUF_COUNT, CONFIG_BT_NIMBLE_HCI_EVT_BUF_SIZE,\n   CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT.\n"
+fix: "Option A (preferred): Reorder boot sequence so that motor/temp/uart threads are spawned BEFORE BLE init (while heap\
+  \ has 50KB+ largest block). BLE init becomes the last step after all worker threads are running.\nOption B: Reduce NimBLE\
+  \ DRAM footprint in sdkconfig.defaults:\n  CONFIG_BT_NIMBLE_ACL_BUF_COUNT=12 (was 24, saves ~2KB)\n  CONFIG_BT_NIMBLE_HCI_EVT_BUF_SIZE=70\
+  \ (was 256, saves ~1KB)\n  CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=12 (was 24, saves ~3KB)\n  CONFIG_BT_NIMBLE_MAX_CCCD=4 (was\
+  \ 8, saves ~1KB)\n\nOption C: Reduce thread stack sizes (risky — see GR-6 budget table):\n  motor: 16K → 12K (risks stack\
+  \ overflow on complex homing profiles)\n  temp: 16K → 8K (risks stack overflow on DS18B20 bitbang)\n  uart: 8K → keep (already\
+  \ at minimum per LL-010)\n\nOption A is preferred because it doesn't reduce safety margins.\n"
 refs:
 - sdkconfig.defaults (NimBLE buffer configs)
 - src/main.rs (thread spawn order)
@@ -54,3 +44,5 @@ refs:
 - AGENTS.md §4 (thread model & stack budget GR-6)
 - docs/crash_reports/2026-07-04_http_dropped_motor_oom.md
 fix_applied: 2026-07-04
+title: 'pthread: Failed to create task! ×3 — UART reader thread disconnected flooding — post-BLE heap free=11KB largest=9KB
+  — motor/temp/uart threads never spawned'

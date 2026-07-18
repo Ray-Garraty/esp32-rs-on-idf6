@@ -1,35 +1,29 @@
 id: LL-008
 date: 2026-07-04
-crash_signature: IllegalInstruction + stack overflow in task pthread — net_owner watermark=0
-  — preceded by wifi:malloc buffer fail
+crash_signature: IllegalInstruction + stack overflow in task pthread — net_owner watermark=0 — preceded by wifi:malloc buffer
+  fail
 category: stack_overflow
 trigger_patterns:
 - stack overflow in task pthread
 - net_owner watermark=0
 - IllegalInstruction.*pthread
 - A stack overflow in task pthread has been detected
-lesson: "Error paths consume MORE stack than happy paths. Adding FFI retry loops (wifi_deinit_retry),\
-  \ log::error! with format_args! (5+ temporaries), and nested FFI calls to a thread's\
-  \ error branch pushes the 32 KB net_owner stack over budget. The happy path leaves\
-  \ ~20 KB watermark, but the error path exhausts the entire stack.\nWhen adding error\
-  \ recovery code to a thread with a budgeted stack: - Measure BOTH happy and error\
-  \ path watermarks (not just happy path) - format! / log::error! with many {} placeholders\
-  \ allocates temporaries\n  on the stack (each temporary ~32-64 bytes, 5+ = 160-320+\
-  \ bytes)\n- FFI calls (esp_wifi_deinit, esp_rom_delay_us) consume additional\n \
-  \ C-side stack (~1-2 KB each)\n- Retry loops multiply per-iteration stack usage\
-  \ by iteration count - Prefer heapless::String + write! over format! in constrained\
-  \ contexts\nThe total stack budget for the error path must include ALL nested calls\
-  \ in the match arm, not just the happy-path frame.\n"
-diagnostic: "1. Check if crash is preceded by an error log in the net_owner thread.\
-  \ 2. Check net_owner stack watermark — if 0, stack overflow confirmed. 3. Compare\
-  \ happy path watermark (measured before crash) vs error path\n   (often 0 because\
-  \ crash happens before measurement).\n4. Look for wifi_deinit_retry, log::error!\
-  \ with many params, or other\n   stack-heavy code in the error branch.\n5. Use uxTaskGetStackHighWaterMark()\
-  \ inside the error branch itself.\n"
-fix: "Remove or reduce stack-heavy code from error paths in budgeted threads: - Move\
-  \ retry loops to a separate thread or reduce retry count - Split long log messages\
-  \ into multiple shorter ones - Move complex error recovery to a dedicated worker\
-  \ thread with its own\n  stack, not the primary net_owner thread\n- Increase thread\
-  \ stack if budget allows (NET_OWNER_STACK: 32K → 48K)\n"
+lesson: "Error paths consume MORE stack than happy paths. Adding FFI retry loops (wifi_deinit_retry), log::error! with format_args!\
+  \ (5+ temporaries), and nested FFI calls to a thread's error branch pushes the 32 KB net_owner stack over budget. The happy\
+  \ path leaves ~20 KB watermark, but the error path exhausts the entire stack.\nWhen adding error recovery code to a thread\
+  \ with a budgeted stack: - Measure BOTH happy and error path watermarks (not just happy path) - format! / log::error! with\
+  \ many {} placeholders allocates temporaries\n  on the stack (each temporary ~32-64 bytes, 5+ = 160-320+ bytes)\n- FFI calls\
+  \ (esp_wifi_deinit, esp_rom_delay_us) consume additional\n  C-side stack (~1-2 KB each)\n- Retry loops multiply per-iteration\
+  \ stack usage by iteration count - Prefer heapless::String + write! over format! in constrained contexts\nThe total stack\
+  \ budget for the error path must include ALL nested calls in the match arm, not just the happy-path frame.\n"
+diagnostic: "1. Check if crash is preceded by an error log in the net_owner thread. 2. Check net_owner stack watermark — if\
+  \ 0, stack overflow confirmed. 3. Compare happy path watermark (measured before crash) vs error path\n   (often 0 because\
+  \ crash happens before measurement).\n4. Look for wifi_deinit_retry, log::error! with many params, or other\n   stack-heavy\
+  \ code in the error branch.\n5. Use uxTaskGetStackHighWaterMark() inside the error branch itself.\n"
+fix: "Remove or reduce stack-heavy code from error paths in budgeted threads: - Move retry loops to a separate thread or reduce\
+  \ retry count - Split long log messages into multiple shorter ones - Move complex error recovery to a dedicated worker thread\
+  \ with its own\n  stack, not the primary net_owner thread\n- Increase thread stack if budget allows (NET_OWNER_STACK: 32K\
+  \ → 48K)\n"
 refs:
 - docs/crash_reports/2026-07-04_phase6_postmortem.md
+title: IllegalInstruction + stack overflow in task pthread — net_owner watermark=0 — preceded by wifi:malloc buffer fail

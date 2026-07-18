@@ -1,7 +1,6 @@
 id: LL-015
 date: 2026-07-04
-crash_signature: heap free=3K largest=3K after ~10s steady-state — no crash but everything
-  degrades — OOM on any alloc >3KB
+crash_signature: heap free=3K largest=3K after ~10s steady-state — no crash but everything degrades — OOM on any alloc >3KB
 category: dma_heap_fragmentation
 trigger_patterns:
 - free=3K.*largest=3K
@@ -9,41 +8,32 @@ trigger_patterns:
 - Failed to create task
 - UART reader thread disconnected
 - ESP_ERR_HTTPD_TASK
-lesson: "After full init sequence (WiFi→HTTP→BLE→motor/temp/uart threads) and ~10\
-  \ seconds of runtime, the heap collapses to 3KB free / 3KB largest contiguous block.\
-  \ This is not a leak but cumulative internal fragmentation: each init phase allocates\
-  \ and frees buffers, leaving the TLSF allocator with many small holes.\nMeasured\
-  \ heap trajectory during a single boot:\n  Boot:          159K free, 108K largest\n\
-  \  Pre-WiFi:      136K free, 108K largest\n  Post-WiFi:      69K free,  60K largest\
-  \  (WiFi driver allocs)\n  Post-HTTP:      50K free,  42K largest  (HTTP server\
-  \ task + handlers)\n  Post-BLE:       30K free,  20K largest  (NimBLE HCI + GATT\
-  \ + advertising)\n  Motor spawn:    25K free,  15K largest  (16KB stack alloc fragments)\n\
-  \  Temp spawn:     22K free,  12K largest\n  UART spawn:     18K free,  10K largest\n\
-  \  10s runtime:     3K free,   3K largest  (WebSocket broadcasts + logging)\n\n\
-  Every prior fix in this session (LL-010 through LL-014) fixed a symptom but exposed\
-  \ the next symptom further down the heap cascade. The system has no DRAM margin\
-  \ — any alloc > 3KB will OOM.\nThe feasibility study §7 was correct: \"no margin\
-  \ — 0 to 5 KB free\". Phase 0 measurements (§11) were misleading because they tested\
-  \ only WiFi + BLE init without HTTP server, worker threads, or runtime load.\n"
+lesson: "After full init sequence (WiFi→HTTP→BLE→motor/temp/uart threads) and ~10 seconds of runtime, the heap collapses to\
+  \ 3KB free / 3KB largest contiguous block. This is not a leak but cumulative internal fragmentation: each init phase allocates\
+  \ and frees buffers, leaving the TLSF allocator with many small holes.\nMeasured heap trajectory during a single boot:\n\
+  \  Boot:          159K free, 108K largest\n  Pre-WiFi:      136K free, 108K largest\n  Post-WiFi:      69K free,  60K largest\
+  \  (WiFi driver allocs)\n  Post-HTTP:      50K free,  42K largest  (HTTP server task + handlers)\n  Post-BLE:       30K\
+  \ free,  20K largest  (NimBLE HCI + GATT + advertising)\n  Motor spawn:    25K free,  15K largest  (16KB stack alloc fragments)\n\
+  \  Temp spawn:     22K free,  12K largest\n  UART spawn:     18K free,  10K largest\n  10s runtime:     3K free,   3K largest\
+  \  (WebSocket broadcasts + logging)\n\nEvery prior fix in this session (LL-010 through LL-014) fixed a symptom but exposed\
+  \ the next symptom further down the heap cascade. The system has no DRAM margin — any alloc > 3KB will OOM.\nThe feasibility\
+  \ study §7 was correct: \"no margin — 0 to 5 KB free\". Phase 0 measurements (§11) were misleading because they tested only\
+  \ WiFi + BLE init without HTTP server, worker threads, or runtime load.\n"
 diagnostic: "1. Log heap_caps_get_free_size(MALLOC_CAP_DEFAULT) and\n   heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)\
-  \ after every\n   init phase and every 10s in steady-state.\n2. If largest < 10KB\
-  \ after all inits, the system will OOM on any\n   non-trivial operation.\n3. If\
-  \ largest drops continuously during steady-state (not just during\n   init), there\
-  \ is a runtime allocation pattern that fragments the heap.\n4. Check broadcast_websocket_event()\
-  \ — each call may alloc+free\n   heapless::String which, despite \"heapless\" name,\
-  \ may trigger\n   internal reallocation on the C side.\n5. Check log::info! in the\
-  \ main loop — format_args! allocates\n   temporaries on the stack (not heap) but\
-  \ also triggers C-side\n   printf buffer management.\n"
-fix: "The only reliable fix on ESP32-WROOM-32 (no PSRAM) is one of: A) Hardware: upgrade\
-  \ to ESP32-WROVER-B (8MB PSRAM, pin-compatible,\n   +$1.50-2.00). PSRAM makes all\
-  \ DRAM constraints disappear.\nB) Reduce feature set: strip BLE or HTTP server to\
-  \ free ~50-70KB.\n   Product impact: loss of BLE connectivity or WebUI.\nC) Aggressive\
-  \ DRAM budget: reduce NimBLE buffers (ACL=12, MSYS=12,\n   CCCD=4), reduce HTTP\
-  \ handler count, remove WebSocket static file\n   handlers, reduce log buffer, use\
-  \ opt-level=s. Saves ~15-20KB\n   but still leaves zero margin.\nOption A is the\
-  \ only permanent fix. Options B/C are temporary patches.\n"
+  \ after every\n   init phase and every 10s in steady-state.\n2. If largest < 10KB after all inits, the system will OOM on\
+  \ any\n   non-trivial operation.\n3. If largest drops continuously during steady-state (not just during\n   init), there\
+  \ is a runtime allocation pattern that fragments the heap.\n4. Check broadcast_websocket_event() — each call may alloc+free\n\
+  \   heapless::String which, despite \"heapless\" name, may trigger\n   internal reallocation on the C side.\n5. Check log::info!\
+  \ in the main loop — format_args! allocates\n   temporaries on the stack (not heap) but also triggers C-side\n   printf\
+  \ buffer management.\n"
+fix: "The only reliable fix on ESP32-WROOM-32 (no PSRAM) is one of: A) Hardware: upgrade to ESP32-WROVER-B (8MB PSRAM, pin-compatible,\n\
+  \   +$1.50-2.00). PSRAM makes all DRAM constraints disappear.\nB) Reduce feature set: strip BLE or HTTP server to free ~50-70KB.\n\
+  \   Product impact: loss of BLE connectivity or WebUI.\nC) Aggressive DRAM budget: reduce NimBLE buffers (ACL=12, MSYS=12,\n\
+  \   CCCD=4), reduce HTTP handler count, remove WebSocket static file\n   handlers, reduce log buffer, use opt-level=s. Saves\
+  \ ~15-20KB\n   but still leaves zero margin.\nOption A is the only permanent fix. Options B/C are temporary patches.\n"
 refs:
 - docs/plans/completed/26_06_27_rust_esp_idf_v6_feasibility_study.md (§7, §11)
 - sdkconfig.defaults (all CONFIG_* buffer sizes)
 - src/infrastructure/network/http_server.rs (broadcast_websocket_event)
 - src/main.rs (init order, thread spawns)
+title: heap free=3K largest=3K after ~10s steady-state — no crash but everything degrades — OOM on any alloc >3KB

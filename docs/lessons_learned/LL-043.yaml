@@ -1,54 +1,46 @@
 id: LL-043
 date: 2026-07-11
-crash_signature: >
-  "Panic handler entered multiple times" crash at ESP_LOGI in net_owner or
-  log_worker after httpd_start. Deterministic. No Guru Meditation visible.
-  Root cause: stack overflow in log_worker (4KB) via CALL CHAIN:
-  wsLogCallback -> broadcastWsEvent -> httpd_ws_send_frame_async -> send_fn -> LWIP send().
+crash_signature: '"Panic handler entered multiple times" crash at ESP_LOGI in net_owner or log_worker after httpd_start. Deterministic.
+  No Guru Meditation visible. Root cause: stack overflow in log_worker (4KB) via CALL CHAIN: wsLogCallback -> broadcastWsEvent
+  -> httpd_ws_send_frame_async -> send_fn -> LWIP send().
+
+  '
 category: stack_overflow_misleading_name
 trigger_patterns:
-  - "I \\(1\\d{3}\\) net_owner: HTTP sePanic handler entered multiple times"
-  - "All routes registered.*Panic handler entered multiple times"
-  - "\\(1\\d{3}\\) .*: HTTP server.*Panic handler entered multiple times"
-  - "PHY wait complete.*Panic handler entered multiple times"
-lesson: >
-  httpd_ws_send_frame_async() in ESP-IDF is a LIAR. Despite the "_async" suffix,
-  it calls sess->send_fn() SYNCHRONOUSLY (httpd_ws.c ligne 562-563). This means
-  every call walks the full LWIP send() code path, which uses 1.5-2 KB of stack
-  on ESP32-S3.
+- 'I \(1\d{3}\) net_owner: HTTP sePanic handler entered multiple times'
+- All routes registered.*Panic handler entered multiple times
+- '\(1\d{3}\) .*: HTTP server.*Panic handler entered multiple times'
+- PHY wait complete.*Panic handler entered multiple times
+lesson: "httpd_ws_send_frame_async() in ESP-IDF is a LIAR. Despite the \"_async\" suffix, it calls sess->send_fn() SYNCHRONOUSLY\
+  \ (httpd_ws.c ligne 562-563). This means every call walks the full LWIP send() code path, which uses 1.5-2 KB of stack on\
+  \ ESP32-S3.\nWhen called from a worker task (4KB), the combined stack usage of:\n  - LogEntry copy (140B)\n  - wsLogCallback\
+  \ buf[384] (384B)\n  - broadcastWsEvent frame struct (~48B)\n  - httpd_ws_build_frame header_buf[10] + locals (~200B)\n\
+  \  - LWIP send() (~1500-2000B)\ntotals ~3500-4000B, over.owing the 4KB stack.\nThe overflow corrupts adjacent heap metadata\
+  \ (TCB or adjacent malloc'd block), causing a cascading \"Panic handler entered multiple times\" crash at the next heap\
+  \ operation (fwrite, malloc, free).\nDIAGNOSTIC: To distinguish this from heap corruption: 1. Replace wsLogCallback with\
+  \ an empty lambda -> if boot succeeds, stack overflow in callback 2. Empty lambda boots OK -> wsLogCallback is the culprit\
+  \ 3. httpd_ws_send_frame_async is synchronous -> it's the LWIP send that overflows 4. Increasing worker stack to 8192 fixes\
+  \ it\n"
+diagnostic: '1. Is the crash in or near a WebSocket broadcast path? Check call stack for broadcastWsEvent
 
-  When called from a worker task (4KB), the combined stack usage of:
-    - LogEntry copy (140B)
-    - wsLogCallback buf[384] (384B)
-    - broadcastWsEvent frame struct (~48B)
-    - httpd_ws_build_frame header_buf[10] + locals (~200B)
-    - LWIP send() (~1500-2000B)
-  totals ~3500-4000B, over.owing the 4KB stack.
-
-  The overflow corrupts adjacent heap metadata (TCB or adjacent malloc'd block),
-  causing a cascading "Panic handler entered multiple times" crash at the next
-  heap operation (fwrite, malloc, free).
-
-  DIAGNOSTIC: To distinguish this from heap corruption:
-  1. Replace wsLogCallback with an empty lambda -> if boot succeeds, stack overflow in callback
-  2. Empty lambda boots OK -> wsLogCallback is the culprit
-  3. httpd_ws_send_frame_async is synchronous -> it's the LWIP send that overflows
-  4. Increasing worker stack to 8192 fixes it
-diagnostic: |
-  1. Is the crash in or near a WebSocket broadcast path? Check call stack for broadcastWsEvent
   2. Try empty lambda callback — if boot succeeds, stack overflow in callback chain
+
   3. Check worker task stack: 4KB is too small for LWIP send() path
-  4. httpd_ws_send_frame_async is synchronous — read the source, don't trust the name
+
+  4. httpd_ws_send_frame_async is synchronous — read the source, don''t trust the name
+
   5. Increase to 8192 as safe default for any task calling LWIP socket operations
-fix: "
-  Increase log_worker stack from 4096 to 8192 bytes in xTaskCreate call.
-  Worker creation also deferred to after ensureGpioReady() to avoid draining
-  stale queue entries during early boot.
-"
+
+  '
+fix: ' Increase log_worker stack from 4096 to 8192 bytes in xTaskCreate call. Worker creation also deferred to after ensureGpioReady()
+  to avoid draining stale queue entries during early boot. '
 refs:
-  - docs/crash_reports/2026-07-11_new_crash_after_ll038_fix.md
-  - docs/crash_reports/2026-07-11_ip_event_stack_overflow.md (original LL-038)
-  - docs/lessons_learned/LL-038.yaml
-  - main/main.cpp (lines 185-189, worker creation)
-  - components/infrastructure/network/src/http_server.cpp (line 543, broadcastWsEvent)
-  - /home/vlabe/Downloads/esp-idf-master/components/esp_http_server/src/httpd_ws.c (line 512-570, synchronous send)
+- docs/crash_reports/2026-07-11_new_crash_after_ll038_fix.md
+- docs/crash_reports/2026-07-11_ip_event_stack_overflow.md (original LL-038)
+- docs/lessons_learned/LL-038.yaml
+- main/main.cpp (lines 185-189, worker creation)
+- components/infrastructure/network/src/http_server.cpp (line 543, broadcastWsEvent)
+- /home/vlabe/Downloads/esp-idf-master/components/esp_http_server/src/httpd_ws.c (line 512-570, synchronous send)
+title: '"Panic handler entered multiple times" crash at ESP_LOGI in net_owner or log_worker after httpd_start. Deterministic.
+  No Guru Meditation visible. Root cause: stack overflow in log_worker (4KB) via CALL CHAIN: wsLogCallback -> broadcastWsEvent
+  -> httpd_ws_send_frame_async -> send_fn -> LWIP send().'

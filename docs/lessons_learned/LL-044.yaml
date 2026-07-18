@@ -1,68 +1,59 @@
 id: LL-044
 date: 2026-07-11
-crash_signature: >
-  WebUI dashboard shows "--" for all status fields. WebSocket readyState=1
-  (OPEN) but ws.onmessage never fires, wsEntries=0, baseDate=null.
-  No crash — silent data starvation.
+crash_signature: 'WebUI dashboard shows "--" for all status fields. WebSocket readyState=1 (OPEN) but ws.onmessage never fires,
+  wsEntries=0, baseDate=null. No crash — silent data starvation.
+
+  '
 category: websocket_handler_not_called
 trigger_patterns:
-  - "ws_state: 1.*wsEntries: 0.*baseDate: null"
-  - "WS broadcast: 0 sent, 4 skipped"
-  - "onmessage never called despite readyState === 1"
-lesson: >
-  ESP-IDF v6.0.1 handles the WebSocket HTTP_GET upgrade INTERNALLY —
-  it does NOT call the registered ws_handler for the upgrade request.
-  Here is the exact code path in httpd_uri.c (lines 337-363):
+- 'ws_state: 1.*wsEntries: 0.*baseDate: null'
+- 'WS broadcast: 0 sent, 4 skipped'
+- onmessage never called despite readyState === 1
+lesson: "ESP-IDF v6.0.1 handles the WebSocket HTTP_GET upgrade INTERNALLY — it does NOT call the registered ws_handler for\
+  \ the upgrade request. Here is the exact code path in httpd_uri.c (lines 337-363):\n\n  if (uri->is_websocket && aux->ws_handshake_detect\
+  \ && uri->method == HTTP_GET) {\n      httpd_ws_respond_server_handshake(...);\n      aux->sd->ws_handshake_done = true;\n\
+  \      aux->sd->ws_handler = uri->handler;\n      /* If the request is websocket handshake, then do not call the uri->handler\
+  \ */\n      return ESP_OK;  // ← handler NEVER called for HTTP_GET\n  }\n\nThe ws_handler is only invoked when the CLIENT\
+  \ sends a data frame. In a server-push broadcast model (no client messages), the handler is NEVER called, addSession() is\
+  \ NEVER called, and broadcastWsEvent() sends to NO ONE.\nAdditionally, log messages forwarded via wsLogCallback() contained\
+  \ raw \\n characters in the JSON msg field, causing JSON.parse() to throw SyntaxError on every log event. The empty catch(err){}\
+  \ silently swallowed the error, aborting the try block before updateUI()/renderWsLog() could execute for subsequent broadcast\
+  \ messages.\n"
+diagnostic: '1. Check if ws_handler HTTP_GET branch is actually reached — use ESP_LOGI, grep ESP-IDF source
 
-    if (uri->is_websocket && aux->ws_handshake_detect && uri->method == HTTP_GET) {
-        httpd_ws_respond_server_handshake(...);
-        aux->sd->ws_handshake_done = true;
-        aux->sd->ws_handler = uri->handler;
-        /* If the request is websocket handshake, then do not call the uri->handler */
-        return ESP_OK;  // ← handler NEVER called for HTTP_GET
-    }
-
-  The ws_handler is only invoked when the CLIENT sends a data frame. In a
-  server-push broadcast model (no client messages), the handler is NEVER called,
-  addSession() is NEVER called, and broadcastWsEvent() sends to NO ONE.
-
-  Additionally, log messages forwarded via wsLogCallback() contained raw \n
-  characters in the JSON msg field, causing JSON.parse() to throw SyntaxError
-  on every log event. The empty catch(err){} silently swallowed the error,
-  aborting the try block before updateUI()/renderWsLog() could execute for
-  subsequent broadcast messages.
-diagnostic: |
-  1. Check if ws_handler HTTP_GET branch is actually reached — use ESP_LOGI, grep ESP-IDF source
   2. Browser DevTools: check ws.onmessage fires at all (console.log in handler)
+
   3. Browser DevTools: check WebSocket state (readyState, wsEntries, baseDate)
+
   4. If readyState=1 but wsEntries=0 and baseDate=null → handler never receives data frames
+
   5. grep httpd_uri.c in the actual ESP-IDF version installed at /home/vlabe/.espressif/
+
   6. Check log message JSON validity — newlines in msg field break JSON.parse
+
   7. Empty catch(err){} hides ALL JavaScript errors — always add console.error
-fix:
-  "Three changes were required:
 
-   1. SERVER (ws_handler): Add session on ANY frame, not just HTTP_GET.
-      Since ESP-IDF never calls the handler for upgrade, the client must
-      send an initial message to trigger addSession().
+  '
+fix: 'Three changes were required:
 
-   2. CLIENT (ws.js): Send a subscribe message in ws.onopen:
-        ws.send(JSON.stringify({type:'sub'}));
-      This triggers the server's ws_handler data frame path, which adds
-      the session to sessions_.
+  1. SERVER (ws_handler): Add session on ANY frame, not just HTTP_GET. Since ESP-IDF never calls the handler for upgrade,
+  the client must send an initial message to trigger addSession().
 
-   3. SERVER (wsLogCallback): Escape \\n, \\r, \\t in JSON msg field to
-      prevent SyntaxError on the client side:
-        else if (*src == '\\n') { buf[n++] = '\\\\'; buf[n++] = 'n'; }
+  2. CLIENT (ws.js): Send a subscribe message in ws.onopen: ws.send(JSON.stringify({type:''sub''})); This triggers the server''s
+  ws_handler data frame path, which adds the session to sessions_.
 
-   Alternative: enable CONFIG_HTTPD_WS_PRE_HANDSHAKE_CB_SUPPORT and use
-   ws_pre_handshake_cb to add the session during upgrade — avoids the
-   extra round-trip but requires Kconfig change."
+  3. SERVER (wsLogCallback): Escape \n, \r, \t in JSON msg field to prevent SyntaxError on the client side: else if (*src
+  == ''\n'') { buf[n++] = ''\\''; buf[n++] = ''n''; }
+
+  Alternative: enable CONFIG_HTTPD_WS_PRE_HANDSHAKE_CB_SUPPORT and use ws_pre_handshake_cb to add the session during upgrade
+  — avoids the extra round-trip but requires Kconfig change.'
 refs:
-  - docs/crash_reports/2026-07-11_boot_invalid_segment_length.md
-  - docs/issues/active/26_07_11_webui.md
-  - components/interface/include/interface/webui.hpp (ws.js onopen/onmessage)
-  - components/infrastructure/network/src/http_server.cpp (ws_handler, broadcastWsEvent)
-  - main/main.cpp (wsLogCallback, line 112-118)
-  - /home/vlabe/.espressif/v6.0.1/esp-idf/components/esp_http_server/src/httpd_uri.c (lines 337-363)
-  - /home/vlabe/.espressif/v6.0.1/esp-idf/components/esp_http_server/src/httpd_parse.c (lines 788-803)
+- docs/crash_reports/2026-07-11_boot_invalid_segment_length.md
+- docs/issues/active/26_07_11_webui.md
+- components/interface/include/interface/webui.hpp (ws.js onopen/onmessage)
+- components/infrastructure/network/src/http_server.cpp (ws_handler, broadcastWsEvent)
+- main/main.cpp (wsLogCallback, line 112-118)
+- /home/vlabe/.espressif/v6.0.1/esp-idf/components/esp_http_server/src/httpd_uri.c (lines 337-363)
+- /home/vlabe/.espressif/v6.0.1/esp-idf/components/esp_http_server/src/httpd_parse.c (lines 788-803)
+title: WebUI dashboard shows "--" for all status fields. WebSocket readyState=1 (OPEN) but ws.onmessage never fires, wsEntries=0,
+  baseDate=null. No crash — silent data starvation.

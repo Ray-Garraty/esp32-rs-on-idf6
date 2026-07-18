@@ -1,42 +1,33 @@
 id: LL-021
 date: 2026-07-06
-crash_signature: TG1WDT_SYS_RST at ~980ms after app_main — IWDT fires during init
-  sequence — Saved PC in _xt_handle_exc
+crash_signature: TG1WDT_SYS_RST at ~980ms after app_main — IWDT fires during init sequence — Saved PC in _xt_handle_exc
 category: init_order_error
 trigger_patterns:
 - TG1WDT_SYS_RST
 - PRO CPU has been reset by WDT
 - CONFIG_ESP_INT_WDT
 - rst:0x8
-lesson: "The Interrupt Watchdog (IWDT, CONFIG_ESP_INT_WDT) is enabled by default in\
-  \ ESP-IDF v6 with a 300ms timeout. It fires when interrupts are masked for >300ms\
-  \ cumulative. NVS flash writes, WiFi firmware loading, and BLE controller init all\
-  \ legitimately mask interrupts during flash I/O. On ESP32-S3 with the full feature\
-  \ set, the cumulative masked time during init exceeds 300ms, causing TG1WDT_SYS_RST\
-  \ — a hard reset with no diagnostic output.\nKey characteristics: - Timing: ~900-1050ms\
-  \ after app_main() — consistent with init sequence\n  duration, NOT a 300ms IWDT\
-  \ timeout. The IWDT fires after interrupts\n  are re-enabled (the timeout counter\
-  \ clears when unmasked), so the\n  actual crash happens when the next interrupt-masking\
-  \ operation pushes\n  over the threshold.\n- Saved PC: Always in _xt_handle_exc\
-  \ (lines 740-806 of xtensa_vectors.S).\n  This is NOT evidence that an exception\
-  \ occurred — it's an artifact of\n  the IWDT catching the CPU during Xtensa exception\
-  \ vector dispatch.\n- No crash dump, no Guru Meditation, no Rust panic — the IWDT\
-  \ is a\n  hardware timer that asynchronously resets the chip.\n\nThe IWDT is a DIFFERENT\
-  \ watchdog from the FreeRTOS Task WDT (TWDT). disable_wdt() (calls esp_task_wdt_deinit())\
-  \ only disables the TWDT. The IWDT must be disabled separately via sdkconfig.\n\
-  Fix: CONFIG_ESP_INT_WDT=n in sdkconfig.defaults. The firmware manages its own watchdog\
-  \ strategy via disable_wdt() for TWDT, and the main loop has its own tick watchdog.\n"
-diagnostic: "1. Check rst cause: if TG1WDT_SYS_RST (0x8) and timing ~1s after\n  \
-  \ app_main(), the IWDT is the likely cause.\n2. Check CONFIG_ESP_INT_WDT in sdkconfig.\
-  \ If enabled (default=y),\n   and the init sequence exceeds its timeout, this is\
-  \ the root cause.\n3. Saved PC in _xt_handle_exc is an artifact of the WDT catching\
-  \ the\n   CPU during exception dispatch — it does NOT mean a real exception\n  \
-  \ occurred.\n4. Distinguish from TWDT: TWDT shows \"Task watchdog got triggered\"\
+lesson: "The Interrupt Watchdog (IWDT, CONFIG_ESP_INT_WDT) is enabled by default in ESP-IDF v6 with a 300ms timeout. It fires\
+  \ when interrupts are masked for >300ms cumulative. NVS flash writes, WiFi firmware loading, and BLE controller init all\
+  \ legitimately mask interrupts during flash I/O. On ESP32-S3 with the full feature set, the cumulative masked time during\
+  \ init exceeds 300ms, causing TG1WDT_SYS_RST — a hard reset with no diagnostic output.\nKey characteristics: - Timing: ~900-1050ms\
+  \ after app_main() — consistent with init sequence\n  duration, NOT a 300ms IWDT timeout. The IWDT fires after interrupts\n\
+  \  are re-enabled (the timeout counter clears when unmasked), so the\n  actual crash happens when the next interrupt-masking\
+  \ operation pushes\n  over the threshold.\n- Saved PC: Always in _xt_handle_exc (lines 740-806 of xtensa_vectors.S).\n \
+  \ This is NOT evidence that an exception occurred — it's an artifact of\n  the IWDT catching the CPU during Xtensa exception\
+  \ vector dispatch.\n- No crash dump, no Guru Meditation, no Rust panic — the IWDT is a\n  hardware timer that asynchronously\
+  \ resets the chip.\n\nThe IWDT is a DIFFERENT watchdog from the FreeRTOS Task WDT (TWDT). disable_wdt() (calls esp_task_wdt_deinit())\
+  \ only disables the TWDT. The IWDT must be disabled separately via sdkconfig.\nFix: CONFIG_ESP_INT_WDT=n in sdkconfig.defaults.\
+  \ The firmware manages its own watchdog strategy via disable_wdt() for TWDT, and the main loop has its own tick watchdog.\n"
+diagnostic: "1. Check rst cause: if TG1WDT_SYS_RST (0x8) and timing ~1s after\n   app_main(), the IWDT is the likely cause.\n\
+  2. Check CONFIG_ESP_INT_WDT in sdkconfig. If enabled (default=y),\n   and the init sequence exceeds its timeout, this is\
+  \ the root cause.\n3. Saved PC in _xt_handle_exc is an artifact of the WDT catching the\n   CPU during exception dispatch\
+  \ — it does NOT mean a real exception\n   occurred.\n4. Distinguish from TWDT: TWDT shows \"Task watchdog got triggered\"\
   \n   with backtrace. IWDT shows only rst:0x8 with no firmware output.\n"
-fix: "Disable IWDT in sdkconfig.defaults:\n  CONFIG_ESP_INT_WDT=n\nThen run `cargo\
-  \ build` to regenerate sdkconfig. The IWDT is not needed when the firmware has its\
-  \ own watchdog management (TWDT via disable_wdt(), main loop tick watchdog).\n"
+fix: "Disable IWDT in sdkconfig.defaults:\n  CONFIG_ESP_INT_WDT=n\nThen run `cargo build` to regenerate sdkconfig. The IWDT\
+  \ is not needed when the firmware has its own watchdog management (TWDT via disable_wdt(), main loop tick watchdog).\n"
 refs:
 - sdkconfig.defaults
 - src/esp_safe.rs (disable_wdt)
 - docs/crash_reports/2026-07-06_tg1wdt_bootloop_s3_migration.md
+title: TG1WDT_SYS_RST at ~980ms after app_main — IWDT fires during init sequence — Saved PC in _xt_handle_exc

@@ -1,80 +1,90 @@
 id: LL-051
 date: 2026-07-18
-crash_signature: >
-  FreeRTOS vApplicationStackOverflowHook for "motor" task.
-  wmark=0, used=100%, cfg=16384B.
-  exccause=0 (IllegalInstruction) at pc=0x40384d64 (panic_abort).
-  Backtrace: vApplicationStackOverflowHook ← vTaskSwitchContext ← _frxt_dispatch.
-  Deterministic: every boot during homing (I (1144) Starting homing sequence).
+crash_signature: 'FreeRTOS vApplicationStackOverflowHook for "motor" task. wmark=0, used=100%, cfg=16384B. exccause=0 (IllegalInstruction)
+  at pc=0x40384d64 (panic_abort). Backtrace: vApplicationStackOverflowHook ← vTaskSwitchContext ← _frxt_dispatch. Deterministic:
+  every boot during homing (I (1144) Starting homing sequence).
+
+  '
 category: stack_overflow
 trigger_patterns:
-  - "vApplicationStackOverflowHook"
-  - "wm=0 used=100%"
-  - "cfg=16384B wmark=0"
-lesson: >
-  ESP-IDF's UART console I/O stack consumption (~3200 bytes per printf/puts/ESP_LOGI call)
-  can exhaust task stacks, even with 16KB allocated. On ESP32-S3 with ESP-IDF v6, the
-  console I/O path traverses picolibc vfprintf → _write_r → ESP-IDF VFS → console
-  driver → UART HAL → interrupt handling, each layer adding 200-500 bytes of stack
-  frame. A single printf/ESP_LOGI call can consume ~3200 bytes of peak stack.
+- vApplicationStackOverflowHook
+- wm=0 used=100%
+- cfg=16384B wmark=0
+lesson: 'ESP-IDF''s UART console I/O stack consumption (~3200 bytes per printf/puts/ESP_LOGI call) can exhaust task stacks,
+  even with 16KB allocated. On ESP32-S3 with ESP-IDF v6, the console I/O path traverses picolibc vfprintf → _write_r → ESP-IDF
+  VFS → console driver → UART HAL → interrupt handling, each layer adding 200-500 bytes of stack frame. A single printf/ESP_LOGI
+  call can consume ~3200 bytes of peak stack.
 
-  In this crash, the motor task (16384B stack) had only 80 bytes free after boot
-  initialization, caused by cumulative I/O stack depth from 11+ puts/ESP_LOGI calls
-  in the boot path. The homing sequence's own call chain (640 bytes) then overflowed
+  In this crash, the motor task (16384B stack) had only 80 bytes free after boot initialization, caused by cumulative I/O
+  stack depth from 11+ puts/ESP_LOGI calls in the boot path. The homing sequence''s own call chain (640 bytes) then overflowed
   the remaining headroom.
 
-  KEY FINDINGS from instrumentation:
-  - After entry + first I/O + registerThread: 3792 bytes free (wm=948 words)
-  - After one printf call: 592 bytes free (wm=148 words — drop of 3200 bytes)
-  - After entering homing loop: 80 bytes free (wm=20 words — further drop of 512 bytes)
-  - Crash confirmed by FreeRTOS stack overflow hook
+  KEY FINDINGS from instrumentation: - After entry + first I/O + registerThread: 3792 bytes free (wm=948 words) - After one
+  printf call: 592 bytes free (wm=148 words — drop of 3200 bytes) - After entering homing loop: 80 bytes free (wm=20 words
+  — further drop of 512 bytes) - Crash confirmed by FreeRTOS stack overflow hook
 
-  This is NOT a bug in application code. It's a task stack dimensioning issue where
-  the motor task stack was insufficient for the ESP-IDF I/O subsystem's stack depth.
+  This is NOT a bug in application code. It''s a task stack dimensioning issue where the motor task stack was insufficient
+  for the ESP-IDF I/O subsystem''s stack depth.
 
-  DISTINCTION from LL-001 (main task stack overflow):
-  - LL-001 affects main task (heap crash signature A2=0xFFFFFFFC)
-  - LL-051 affects motor task (FreeRTOS stack overflow hook, wmark=0)
-  - Both share the same mechanism: ESP-IDF console I/O stack depth
-diagnostic: |
-  1. Check crash log for "vApplicationStackOverflowHook" in backtrace
-  2. Check stack watermark for the crashing task: wmark must be 0 or near-zero
-  3. Use instrumentation to measure watermark before/after printf calls:
-     ```
-     auto wm = uxTaskGetStackHighWaterMark(nullptr);
-     printf("[INVESTIGATION] wm=%lu words\n", (unsigned long)wm);
-     ```
-  4. If wm drops by >500 words (2000 bytes) during a single printf call, the
-     ESP-IDF I/O stack depth is the root cause
-  5. Do NOT blindly double the stack — measure first, then increase minimally
-fix: |
-  Increase the task's stack size to provide adequate headroom for ESP-IDF's
+  DISTINCTION from LL-001 (main task stack overflow): - LL-001 affects main task (heap crash signature A2=0xFFFFFFFC) - LL-051
+  affects motor task (FreeRTOS stack overflow hook, wmark=0) - Both share the same mechanism: ESP-IDF console I/O stack depth
+
+  '
+diagnostic: "1. Check crash log for \"vApplicationStackOverflowHook\" in backtrace\n2. Check stack watermark for the crashing\
+  \ task: wmark must be 0 or near-zero\n3. Use instrumentation to measure watermark before/after printf calls:\n   ```\n \
+  \  auto wm = uxTaskGetStackHighWaterMark(nullptr);\n   printf(\"[INVESTIGATION] wm=%lu words\\n\", (unsigned long)wm);\n\
+  \   ```\n4. If wm drops by >500 words (2000 bytes) during a single printf call, the\n   ESP-IDF I/O stack depth is the root\
+  \ cause\n5. Do NOT blindly double the stack — measure first, then increase minimally\n"
+fix: 'Increase the task''s stack size to provide adequate headroom for ESP-IDF''s
+
   console I/O stack consumption. Measure the actual peak usage with watermark
+
   instrumentation first, then add 2048 bytes safety margin for ISR nesting.
 
+
   For the motor task (MOTOR_THREAD_STACK):
+
   - Before: 16384 bytes
+
   - After: 20480 bytes (25% increase, NOT doubling)
+
   - Measured peak: 16304 bytes during normal boot
+
   - Safety margin: ~2048 bytes for ISR nesting
+
   - Total needed: 18352 bytes minimum → rounded to 20480
 
+
   File to modify:
+
   `components/domain/include/domain/types.hpp`:
+
   ```
+
   inline constexpr size_t MOTOR_THREAD_STACK = 20480;
+
   ```
+
 
   Update the stack budget table in `docs/refs/memory_spec.md` §5.4.
 
+
   OPTIONAL additional optimization:
+
   For functions with WsBcEntry (char data[2048] on stack), e.g. store_result()
+
   and SetValvePosition handler, move the buffer to static storage to reduce
+
   peak stack usage by 2112 bytes each.
+
+  '
 refs:
-  - /home/vlabe/Documents/esp32-rs-on-idf6/components/domain/include/domain/types.hpp (line 114)
-  - /home/vlabe/Documents/esp32-rs-on-idf6/components/infrastructure/src/motor/task.cpp (motorTaskEntry)
-  - /home/vlabe/Documents/esp32-rs-on-idf6/components/infrastructure/src/motor/homing.cpp (run_homing)
-  - /home/vlabe/Documents/esp32-rs-on-idf6/components/infrastructure/src/motor/motion.cpp (store_result, execute_move_steps)
-  - /home/vlabe/Documents/esp32-rs-on-idf6/docs/lessons_learned/LL-001.yaml (distinguish main task overflow)
-  - /home/vlabe/Documents/esp32-rs-on-idf6/docs/crash_reports/2026-07-18_motor_task_stack_overflow_homing.md
+- /home/vlabe/Documents/esp32-rs-on-idf6/components/domain/include/domain/types.hpp (line 114)
+- /home/vlabe/Documents/esp32-rs-on-idf6/components/infrastructure/src/motor/task.cpp (motorTaskEntry)
+- /home/vlabe/Documents/esp32-rs-on-idf6/components/infrastructure/src/motor/homing.cpp (run_homing)
+- /home/vlabe/Documents/esp32-rs-on-idf6/components/infrastructure/src/motor/motion.cpp (store_result, execute_move_steps)
+- /home/vlabe/Documents/esp32-rs-on-idf6/docs/lessons_learned/LL-001.yaml (distinguish main task overflow)
+- /home/vlabe/Documents/esp32-rs-on-idf6/docs/crash_reports/2026-07-18_motor_task_stack_overflow_homing.md
+title: 'FreeRTOS vApplicationStackOverflowHook for "motor" task. wmark=0, used=100%, cfg=16384B. exccause=0 (IllegalInstruction)
+  at pc=0x40384d64 (panic_abort). Backtrace: vApplicationStackOverflowHook ← vTaskSwitchContext ← _frxt_dispatch. Deterministic:
+  every boot during homing (I (1144) Starting homing sequence).'

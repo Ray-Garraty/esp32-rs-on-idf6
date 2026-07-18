@@ -1,85 +1,52 @@
 id: LL-049
 date: 2026-07-14
-crash_signature: >
-  (No crash — logic bug)
-  valve.setPosition("output") returns {"status":"ok","data":{"position":"output"}}
+crash_signature: '(No crash — logic bug) valve.setPosition("output") returns {"status":"ok","data":{"position":"output"}}
   but physical valve never toggles — broadcast vlv stays "in" indefinitely.
+
+  '
 category: untestable_through_unit_tests
 trigger_patterns:
-  - "valve.setPosition returns ok but broadcast vlv unchanged"
-  - "valve.setPosition -> ok, valve.setPosition -> ok, but valve never moves"
-  - "serial_api_test: broadcast did not show vlv=out in 5s"
-lesson: >
-  The valve.setPosition handler (handleSetPosition in handlers/valve.cpp) returned
-  {"status":"ok","data":{"position":"output"}} for 2+ years across three firmware
-  rewrites (Arduino → Rust → C++) without anyone noticing it never actually toggled
-  the valve GPIO pin.
-
-  Root cause: handleSetPosition only formatted a JSON response echoing the requested
-  position string. It never wrote to gValvePosition, never called gpio_set_level on
-  PIN_VALVE (GPIO14), and never sent a MotorCommand to the motor queue. The valve
-  was switched only as a side-effect of burette fill/empty operations via the motor
-  task (motion.cpp::set_valve).
-
-  How it survived:
-  - 246 unit tests with 774 assertions: all pass because handlers return
-    CommandResponse structs without checking hardware side effects.
-  - Command parsing tests: verify {"cmd":"valve.setPosition","position":"output"}
-    parses to CommandType::ValveSetPosition with correct valvePos — correct.
-  - Dispatch tests: verify dispatch returns ResponseKind::Single — correct.
-  - Handler tests: verify handleSetPosition returns valid JSON — correct.
-  - Unit tests never instantiate hardware (GPIO, motor queue, TMC UART).
-  - Legacy Arduino code review: same bug existed there too.
-  - Legacy Rust code review: same bug existed there too.
-  - Code audit by AI: identified the pattern (SIDE-EFFECT-FREE classification)
-    but only after an integration test proved the valve didn't move.
-
-  What caught it:
-  - The serial_api_test.py step 7 (added 2026-07-14) sends
-    valve.setPosition("output") over real UART, then waits 5 seconds for
-    the broadcast vlv field to change from "in" to "out". It never did.
-  - The valve toggle test failed on real hardware on the very first run.
-  - Broadcast-based validation proved the command returned ok but the
-    hardware state didn't change.
-
-  The fix required adding MotorCommandType::SetValve to the motor task enum,
-  a handler case in the motor dispatch loop calling set_valve(cmd.valvePos),
-  and updating handleSetPosition to send a MotorCommand via gMotorCmdQueue
-  instead of just formatting JSON.
-
-  Lesson: Unit tests confirm that code runs. Integration tests on real hardware
-  confirm that the system works. No amount of code review, static analysis,
-  or AI audit can replace plugging a serial cable in and watching the
-  broadcast messages change.
-diagnostic: |
-  1. Run serial_api_test.py — check if 7a (valve toggle) passes:
-     timeout 120 scripts/testing/serial_api_test.py
-  2. If 7a FAILS with "broadcast did not show vlv=out in 5s":
-     - The valve command returns ok but hardware doesn't respond
-     - Check handleSetPosition: does it call gpio_set_level?
-     - Check dispatch: does it send a MotorCommand to gMotorCmdQueue?
-     - Check motor task: does it have case MotorCommandType::SetValve?
-  3. If 7a PASSES but 7d FAILS:
-     - Check test uses "input"/"output" (command format), not "in"/"out" (broadcast format)
-  4. Run smoke test to confirm no side effects:
-     scripts/idf.sh smoke
-fix: |
-  1. components/infrastructure/include/infrastructure/motor_task.hpp:
-     - Add SetValve to MotorCommandType enum
-     - Add domain::ValvePosition valvePos field to MotorCommand struct
-  2. components/infrastructure/src/motor/task.cpp:
-     - Add case MotorCommandType::SetValve: calling set_valve(cmd.valvePos)
-       with VALVE_SETTLE_MS delay
-  3. components/application/src/handlers/valve.cpp:
-     - Replace JSON-only body with MotorCommand send via gMotorCmdQueue
-     - Return error on queue failure
-  4. Always verify with hardware test after any handler changes —
-     single-phase commands must be validated through broadcast state.
+- valve.setPosition returns ok but broadcast vlv unchanged
+- valve.setPosition -> ok, valve.setPosition -> ok, but valve never moves
+- 'serial_api_test: broadcast did not show vlv=out in 5s'
+lesson: "The valve.setPosition handler (handleSetPosition in handlers/valve.cpp) returned {\"status\":\"ok\",\"data\":{\"\
+  position\":\"output\"}} for 2+ years across three firmware rewrites (Arduino → Rust → C++) without anyone noticing it never\
+  \ actually toggled the valve GPIO pin.\nRoot cause: handleSetPosition only formatted a JSON response echoing the requested\
+  \ position string. It never wrote to gValvePosition, never called gpio_set_level on PIN_VALVE (GPIO14), and never sent a\
+  \ MotorCommand to the motor queue. The valve was switched only as a side-effect of burette fill/empty operations via the\
+  \ motor task (motion.cpp::set_valve).\nHow it survived: - 246 unit tests with 774 assertions: all pass because handlers\
+  \ return\n  CommandResponse structs without checking hardware side effects.\n- Command parsing tests: verify {\"cmd\":\"\
+  valve.setPosition\",\"position\":\"output\"}\n  parses to CommandType::ValveSetPosition with correct valvePos — correct.\n\
+  - Dispatch tests: verify dispatch returns ResponseKind::Single — correct. - Handler tests: verify handleSetPosition returns\
+  \ valid JSON — correct. - Unit tests never instantiate hardware (GPIO, motor queue, TMC UART). - Legacy Arduino code review:\
+  \ same bug existed there too. - Legacy Rust code review: same bug existed there too. - Code audit by AI: identified the\
+  \ pattern (SIDE-EFFECT-FREE classification)\n  but only after an integration test proved the valve didn't move.\n\nWhat\
+  \ caught it: - The serial_api_test.py step 7 (added 2026-07-14) sends\n  valve.setPosition(\"output\") over real UART, then\
+  \ waits 5 seconds for\n  the broadcast vlv field to change from \"in\" to \"out\". It never did.\n- The valve toggle test\
+  \ failed on real hardware on the very first run. - Broadcast-based validation proved the command returned ok but the\n \
+  \ hardware state didn't change.\n\nThe fix required adding MotorCommandType::SetValve to the motor task enum, a handler\
+  \ case in the motor dispatch loop calling set_valve(cmd.valvePos), and updating handleSetPosition to send a MotorCommand\
+  \ via gMotorCmdQueue instead of just formatting JSON.\nLesson: Unit tests confirm that code runs. Integration tests on real\
+  \ hardware confirm that the system works. No amount of code review, static analysis, or AI audit can replace plugging a\
+  \ serial cable in and watching the broadcast messages change.\n"
+diagnostic: "1. Run serial_api_test.py — check if 7a (valve toggle) passes:\n   timeout 120 scripts/testing/serial_api_test.py\n\
+  2. If 7a FAILS with \"broadcast did not show vlv=out in 5s\":\n   - The valve command returns ok but hardware doesn't respond\n\
+  \   - Check handleSetPosition: does it call gpio_set_level?\n   - Check dispatch: does it send a MotorCommand to gMotorCmdQueue?\n\
+  \   - Check motor task: does it have case MotorCommandType::SetValve?\n3. If 7a PASSES but 7d FAILS:\n   - Check test uses\
+  \ \"input\"/\"output\" (command format), not \"in\"/\"out\" (broadcast format)\n4. Run smoke test to confirm no side effects:\n\
+  \   scripts/idf.sh smoke\n"
+fix: "1. components/infrastructure/include/infrastructure/motor_task.hpp:\n   - Add SetValve to MotorCommandType enum\n  \
+  \ - Add domain::ValvePosition valvePos field to MotorCommand struct\n2. components/infrastructure/src/motor/task.cpp:\n\
+  \   - Add case MotorCommandType::SetValve: calling set_valve(cmd.valvePos)\n     with VALVE_SETTLE_MS delay\n3. components/application/src/handlers/valve.cpp:\n\
+  \   - Replace JSON-only body with MotorCommand send via gMotorCmdQueue\n   - Return error on queue failure\n4. Always verify\
+  \ with hardware test after any handler changes —\n   single-phase commands must be validated through broadcast state.\n"
 refs:
-  - docs/lessons_learned/LL-037.yaml (similar: broadcast field validation)
-  - docs/API/COMMS_PROTOCOL.md (broadcast vlv field spec)
-  - scripts/testing/serial_api_test.py (integration test that caught this)
-  - components/application/src/handlers/valve.cpp
-  - components/infrastructure/src/motor/motion.cpp (set_valve)
-  - components/infrastructure/include/infrastructure/motor_task.hpp (MotorCommandType)
-  - components/infrastructure/src/motor/task.cpp (motor dispatch loop)
+- docs/lessons_learned/LL-037.yaml (similar: broadcast field validation)
+- docs/API/COMMS_PROTOCOL.md (broadcast vlv field spec)
+- scripts/testing/serial_api_test.py (integration test that caught this)
+- components/application/src/handlers/valve.cpp
+- components/infrastructure/src/motor/motion.cpp (set_valve)
+- components/infrastructure/include/infrastructure/motor_task.hpp (MotorCommandType)
+- components/infrastructure/src/motor/task.cpp (motor dispatch loop)
+title: (No crash — logic bug) valve.setPosition("output") returns {"status":"ok","data":{"position":"output"}} but physical
+  valve never toggles — broadcast vlv stays "in" indefinitely.

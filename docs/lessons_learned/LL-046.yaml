@@ -1,70 +1,49 @@
 id: LL-046
 date: 2026-07-12
-crash_signature: >
-  Sub-agent received a well-scoped task (add timing to build script + measure
-  build times), but instead spent ~1 hour running 13 full firmware builds and
-  100+ tool calls without producing any output. Session log: 5596 lines of
-  debugging spiral.
+crash_signature: 'Sub-agent received a well-scoped task (add timing to build script + measure build times), but instead spent
+  ~1 hour running 13 full firmware builds and 100+ tool calls without producing any output. Session log: 5596 lines of debugging
+  spiral.
+
+  '
 category: subagent_scope_creep
 trigger_patterns:
-  - "Sub-agent runs more than 3 full builds investigating a single issue"
-  - "Sub-agent starts refactoring code not mentioned in the task"
-  - "Sub-agent asks 'let me check' more than 3 times in a row"
-  - "Sub-agent modifies CMakeLists.txt or other build files without explicit instructions"
-  - "Session exceeds 50 assistant turns without delivering any requested output"
-lesson: >
-  Sub-agents MUST stop and escalate to the orchestrator after 3 failed
-  iterations of any investigation. Continuing deeper without reporting
-  status wastes time on non-requested work and loses sight of the original
-  goal.
+- Sub-agent runs more than 3 full builds investigating a single issue
+- Sub-agent starts refactoring code not mentioned in the task
+- Sub-agent asks 'let me check' more than 3 times in a row
+- Sub-agent modifies CMakeLists.txt or other build files without explicit instructions
+- Session exceeds 50 assistant turns without delivering any requested output
+lesson: "Sub-agents MUST stop and escalate to the orchestrator after 3 failed iterations of any investigation. Continuing\
+  \ deeper without reporting status wastes time on non-requested work and loses sight of the original goal.\nMECHANISM OF\
+  \ THIS FAILURE: 1. Agent ran the first build — saw 0% ccache hit rate (expected for cold\n   cache, but agent didn't realise\
+  \ this)\n2. Instead of running a second build (hot cache), started investigating\n   why the first build had 0% hits\n3.\
+  \ Discovered the real root cause quickly (turn 6-7): BUILD_DATE/GIT_HASH\n   as add_compile_definitions poison all files'\
+  \ ccache hashes\n4. Instead of reporting this finding, decided to FIX it — started reading\n   CMakeLists.txt, planned a\
+  \ version.cpp refactor\n5. The fix spiraled into deeper debugging, 13 full builds (each ~3 min),\n   and never produced\
+  \ the requested timing measurements\n6. Original task: measure build times + add timing to script. Output: zero.\nROOT CAUSES:\
+  \ A. No escalation mechanism — the agent had no rule saying \"stop and report\n   after N failed attempts\"\nB. Scope creep\
+  \ without authorisation — started refactoring CMakeLists.txt\n   without asking the orchestrator\nC. Full build as the only\
+  \ diagnostic tool — each investigation cycle\n   triggered a 3-minute clean build instead of analysing build.ninja\n   statically\n\
+  D. Lost the original goal — after turn 7, \"measure build times\" was never\n   mentioned again\nE. No time budget — spent\
+  \ ~40 minutes waiting for builds without asking\n   \"is this worth it?\"\n"
+diagnostic: '1. Count the number of full builds in the session (>3 = red flag)
 
-  MECHANISM OF THIS FAILURE:
-  1. Agent ran the first build — saw 0% ccache hit rate (expected for cold
-     cache, but agent didn't realise this)
-  2. Instead of running a second build (hot cache), started investigating
-     why the first build had 0% hits
-  3. Discovered the real root cause quickly (turn 6-7): BUILD_DATE/GIT_HASH
-     as add_compile_definitions poison all files' ccache hashes
-  4. Instead of reporting this finding, decided to FIX it — started reading
-     CMakeLists.txt, planned a version.cpp refactor
-  5. The fix spiraled into deeper debugging, 13 full builds (each ~3 min),
-     and never produced the requested timing measurements
-  6. Original task: measure build times + add timing to script. Output: zero.
-
-  ROOT CAUSES:
-  A. No escalation mechanism — the agent had no rule saying "stop and report
-     after N failed attempts"
-  B. Scope creep without authorisation — started refactoring CMakeLists.txt
-     without asking the orchestrator
-  C. Full build as the only diagnostic tool — each investigation cycle
-     triggered a 3-minute clean build instead of analysing build.ninja
-     statically
-  D. Lost the original goal — after turn 7, "measure build times" was never
-     mentioned again
-  E. No time budget — spent ~40 minutes waiting for builds without asking
-     "is this worth it?"
-diagnostic: |
-  1. Count the number of full builds in the session (>3 = red flag)
   2. Check if the agent is investigating a problem NOT in the task spec
+
   3. Check if the agent has modified files without explicit instruction
+
   4. Check if the agent has reported any intermediate results
+
   5. If session has >50 assistant turns with no output, the agent is stuck
-fix: |
-  ENFORCE sub-agent escalation rules in AGENTS.md (GR-13):
 
-  1. After 3 consecutive failed attempts at any subtask, STOP. Report to
-     orchestrator with: what was tried, what was found, what help is needed.
-
-  2. Never fix a discovered problem without asking first. Report the finding,
-     propose the fix, wait for authorisation.
-
-  3. If an investigation requires more than 2 full builds to diagnose,
-     switch to static analysis (read build.ninja, compare files, check logs).
-
-  4. Maintain a todo list. After every turn, check: "am I still working on
-     the original task?" If not, realign or escalate.
-
-  5. Set a time budget up front. If the budget is exceeded, stop and report.
+  '
+fix: "ENFORCE sub-agent escalation rules in AGENTS.md (GR-13):\n\n1. After 3 consecutive failed attempts at any subtask, STOP.\
+  \ Report to\n   orchestrator with: what was tried, what was found, what help is needed.\n\n2. Never fix a discovered problem\
+  \ without asking first. Report the finding,\n   propose the fix, wait for authorisation.\n\n3. If an investigation requires\
+  \ more than 2 full builds to diagnose,\n   switch to static analysis (read build.ninja, compare files, check logs).\n\n\
+  4. Maintain a todo list. After every turn, check: \"am I still working on\n   the original task?\" If not, realign or escalate.\n\
+  \n5. Set a time budget up front. If the budget is exceeded, stop and report.\n"
 refs:
-  - /home/vlabe/Documents/esp32-rs-on-idf6/.opencode/tmp/session-ses_0a9c.md (5596-line session log)
-  - AGENTS.md §GR-13
+- /home/vlabe/Documents/esp32-rs-on-idf6/.opencode/tmp/session-ses_0a9c.md (5596-line session log)
+- AGENTS.md §GR-13
+title: 'Sub-agent received a well-scoped task (add timing to build script + measure build times), but instead spent ~1 hour
+  running 13 full firmware builds and 100+ tool calls without producing any output. Session log: 5596 lines of debugging spiral.'

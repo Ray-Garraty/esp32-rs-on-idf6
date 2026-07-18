@@ -1,39 +1,32 @@
 id: LL-011
 date: 2026-07-04
-crash_signature: Unregistered Httpd server handler for URI ... Httpd server stopped
-  — immediate after startup
+crash_signature: Unregistered Httpd server handler for URI ... Httpd server stopped — immediate after startup
 category: api_misuse
 trigger_patterns:
 - Unregistered Httpd server handler
 - Httpd server stopped
 - G_HTTP_SERVER_ALIVE.*false
 - http_ok.*false
-lesson: 'When HttpServer::new() is called with `match Ok(_)`, the underscore pattern
-  discards the created HttpServer immediately. When the match arm ends, the HttpServer
-  goes out of scope and its Drop impl calls httpd_stop() via EspHttpServer::drop().
+lesson: 'When HttpServer::new() is called with `match Ok(_)`, the underscore pattern discards the created HttpServer immediately.
+  When the match arm ends, the HttpServer goes out of scope and its Drop impl calls httpd_stop() via EspHttpServer::drop().
   This unregisters all handlers and stops the server before BLE init even starts.
 
-  The fix is to bind the HttpServer to a variable (e.g. `let _http_server` for explicit
-  lifetime management) so it lives for the duration of the enclosing scope (net_owner
-  thread loop).
+  The fix is to bind the HttpServer to a variable (e.g. `let _http_server` for explicit lifetime management) so it lives for
+  the duration of the enclosing scope (net_owner thread loop).
 
-  Any RAII guard that wraps an ESP-IDF resource that starts a task or allocates a
-  service MUST be stored by name, not matched as `_` or `Ok(_)`. The `_` pattern is
-  a sign that the caller didn''t think about the object''s lifetime — it should be
-  linted.
+  Any RAII guard that wraps an ESP-IDF resource that starts a task or allocates a service MUST be stored by name, not matched
+  as `_` or `Ok(_)`. The `_` pattern is a sign that the caller didn''t think about the object''s lifetime — it should be linted.
 
   '
-diagnostic: "1. Check for \"Unregistered Httpd server handler\" logs immediately\n\
-  \   after \"HTTP: server started\" — this indicates the server was\n   created and\
-  \ immediately destroyed.\n2. Find the HttpServer::new() call site and check if the\
-  \ return\n   value is bound to `_` or stored in a `bool` without keeping\n   the\
-  \ server.\n3. If `G_HTTP_SERVER_ALIVE` is set to true then immediately false,\n\
-  \   the HttpServer Drop cleared it.\n"
-fix: "Store the HttpServer:\n  let _http_server = match HttpServer::new(wifi_mgr)\
-  \ {\n      Ok(server) => Some(server),\n      Err(e) => { log::error!(...); None\
-  \ }\n  };\nThe `_http_server` naming convention signals intentional discard (it's\
+diagnostic: "1. Check for \"Unregistered Httpd server handler\" logs immediately\n   after \"HTTP: server started\" — this\
+  \ indicates the server was\n   created and immediately destroyed.\n2. Find the HttpServer::new() call site and check if\
+  \ the return\n   value is bound to `_` or stored in a `bool` without keeping\n   the server.\n3. If `G_HTTP_SERVER_ALIVE`\
+  \ is set to true then immediately false,\n   the HttpServer Drop cleared it.\n"
+fix: "Store the HttpServer:\n  let _http_server = match HttpServer::new(wifi_mgr) {\n      Ok(server) => Some(server),\n \
+  \     Err(e) => { log::error!(...); None }\n  };\nThe `_http_server` naming convention signals intentional discard (it's\
   \ not used after creation but its Drop is important).\n"
 refs:
 - src/main.rs (net_owner thread, ~line 243)
 - src/infrastructure/network/http_server.rs (HttpServer::new, Drop)
 - docs/crash_reports/2026-07-04_http_dropped_motor_oom.md
+title: Unregistered Httpd server handler for URI ... Httpd server stopped — immediate after startup

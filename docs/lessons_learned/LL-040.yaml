@@ -1,45 +1,27 @@
 id: LL-040
 date: 2026-07-09
-crash_signature: "AP remains visible after STA connects — user confusion"
+crash_signature: AP remains visible after STA connects — user confusion
 category: wifi_ap_auto_stop
 trigger_patterns:
-  - "AP still visible.*STA connected"
-  - "esp_wifi_set_config.*AP.*does not stop"
-  - "WIFI_MODE_APSTA.*should become.*STA"
-lesson: >
-  When ESP32 is in AP+STA mode (WIFI_MODE_APSTA) and STA successfully
-  connects and gets an IP, the AP interface should be stopped to:
-  - Save power (AP beacon frames consume airtime)
-  - Prevent user confusion (device shouldn't advertise a setup network
-    when it's already configured)
-  - Free radio resources for STA throughput
+- AP still visible.*STA connected
+- esp_wifi_set_config.*AP.*does not stop
+- WIFI_MODE_APSTA.*should become.*STA
+lesson: "When ESP32 is in AP+STA mode (WIFI_MODE_APSTA) and STA successfully connects and gets an IP, the AP interface should\
+  \ be stopped to: - Save power (AP beacon frames consume airtime) - Prevent user confusion (device shouldn't advertise a\
+  \ setup network\n  when it's already configured)\n- Free radio resources for STA throughput\nSimply calling esp_wifi_set_config(WIFI_IF_AP,\
+  \ {}) does NOT stop the AP — it only clears the config. The AP continues broadcasting beacons and accepting connections.\n\
+  The correct approach:\n  1. stopDnsServer() — stop the captive portal DNS server\n  2. esp_wifi_set_mode(WIFI_MODE_STA)\
+  \ — switch to station-only mode\n\nThis completely removes the AP interface. The AP can be restarted later if needed (e.g.,\
+  \ if STA disconnects) by calling esp_wifi_set_mode() back to APSTA and reconfiguring.\nNote: esp_wifi_stop() + esp_wifi_start()\
+  \ is NOT recommended because it would also stop the STA interface, causing a temporary disconnection. esp_wifi_set_mode()\
+  \ is the correct lightweight approach.\n"
+diagnostic: 'Check WiFi scan results from a phone after ESP32 connects to STA. If "EcoTiter-XXXX" still appears, the AP was
+  not properly stopped.
 
-  Simply calling esp_wifi_set_config(WIFI_IF_AP, {}) does NOT stop the
-  AP — it only clears the config. The AP continues broadcasting beacons
-  and accepting connections.
-
-  The correct approach:
-    1. stopDnsServer() — stop the captive portal DNS server
-    2. esp_wifi_set_mode(WIFI_MODE_STA) — switch to station-only mode
-
-  This completely removes the AP interface. The AP can be restarted later
-  if needed (e.g., if STA disconnects) by calling esp_wifi_set_mode()
-  back to APSTA and reconfiguring.
-
-  Note: esp_wifi_stop() + esp_wifi_start() is NOT recommended because it
-  would also stop the STA interface, causing a temporary disconnection.
-  esp_wifi_set_mode() is the correct lightweight approach.
-diagnostic: >
-  Check WiFi scan results from a phone after ESP32 connects to STA.
-  If "EcoTiter-XXXX" still appears, the AP was not properly stopped.
-fix: >
-  In handleEvent(), IP_EVENT_STA_GOT_IP handler:
-    if (apActive_) {
-        stopDnsServer();
-        esp_wifi_set_mode(WIFI_MODE_STA);
-        apActive_ = false;
-        ESP_LOGI(TAG, "AP stopped (STA connected)");
-    }
+  '
+fix: "In handleEvent(), IP_EVENT_STA_GOT_IP handler:\n  if (apActive_) {\n      stopDnsServer();\n      esp_wifi_set_mode(WIFI_MODE_STA);\n\
+  \      apActive_ = false;\n      ESP_LOGI(TAG, \"AP stopped (STA connected)\");\n  }\n"
 refs:
-  - components/infrastructure/network/src/wifi.cpp
-  - components/infrastructure/network/include/infrastructure/network/wifi.hpp
+- components/infrastructure/network/src/wifi.cpp
+- components/infrastructure/network/include/infrastructure/network/wifi.hpp
+title: AP remains visible after STA connects — user confusion

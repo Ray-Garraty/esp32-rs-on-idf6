@@ -1,50 +1,30 @@
 id: LL-041
 date: 2026-07-09
-crash_signature: "Captive portal popup not appearing — 302 Found vs 303 See Other"
+crash_signature: Captive portal popup not appearing — 302 Found vs 303 See Other
 category: http_redirect_status_captive_portal
 trigger_patterns:
-  - "302 Found.*captive portal"
-  - "303 See Other.*captive portal"
-  - "iOS captive portal.*redirect"
-lesson: >
-  The official ESP-IDF captive portal example uses HTTP 303 See Other
-  (not 302 Found) for captive portal redirects. This is semantically
-  correct per RFC 7231 §6.4.4:
-
-    302 Found: "The target resource resides temporarily under a different
-    URI." — implies the original URI may work again later. Browsers may
-    cache this and use the original URI next time.
-
-    303 See Other: "The response to the request can be found under a
-    different URI and SHOULD be retrieved using a GET method." —
-    explicitly tells the client to use GET on the new URI. This is the
-    correct semantics for captive portal redirects.
-
-  Additionally, iOS captive portal detection specifically requires BOTH a
-  redirect AND response body content. A bare redirect with no body is
-  not sufficient — the body text "Redirect to the captive portal"
-  satisfies this requirement.
-
-  Cache-Control: no-cache, no-store, must-revalidate should also be added
-  to prevent the OS from caching the redirect response, which could
-  suppress future captive portal detection attempts.
-
-  The official ESP-IDF example also registers ZERO explicit probe handlers
-  (/generate_204, /hotspot-detect.html, etc.) and relies solely on the
-  404 error handler to catch all unknown URIs. Having both explicit
-  handlers AND a 404 handler creates response inconsistency that may
-  confuse phone detection logic.
-diagnostic: >
-  Check the HTTP status code returned by the 404 handler:
-    curl -v http://192.168.4.1/random
-  Should show "HTTP/1.1 303 See Other", not "302 Found".
-fix: >
-  In http_server.cpp:
-    httpd_resp_set_status(req, "303 See Other");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-cache, no-store, must-revalidate");
-    httpd_resp_send(req, "Redirect to the captive portal", HTTPD_RESP_USE_STRLEN);
-  Remove all explicit probe handler registrations — let 404 handler catch everything.
+- 302 Found.*captive portal
+- 303 See Other.*captive portal
+- iOS captive portal.*redirect
+lesson: "The official ESP-IDF captive portal example uses HTTP 303 See Other (not 302 Found) for captive portal redirects.\
+  \ This is semantically correct per RFC 7231 §6.4.4:\n\n  302 Found: \"The target resource resides temporarily under a different\n\
+  \  URI.\" — implies the original URI may work again later. Browsers may\n  cache this and use the original URI next time.\n\
+  \n  303 See Other: \"The response to the request can be found under a\n  different URI and SHOULD be retrieved using a GET\
+  \ method.\" —\n  explicitly tells the client to use GET on the new URI. This is the\n  correct semantics for captive portal\
+  \ redirects.\n\nAdditionally, iOS captive portal detection specifically requires BOTH a redirect AND response body content.\
+  \ A bare redirect with no body is not sufficient — the body text \"Redirect to the captive portal\" satisfies this requirement.\n\
+  Cache-Control: no-cache, no-store, must-revalidate should also be added to prevent the OS from caching the redirect response,\
+  \ which could suppress future captive portal detection attempts.\nThe official ESP-IDF example also registers ZERO explicit\
+  \ probe handlers (/generate_204, /hotspot-detect.html, etc.) and relies solely on the 404 error handler to catch all unknown\
+  \ URIs. Having both explicit handlers AND a 404 handler creates response inconsistency that may confuse phone detection\
+  \ logic.\n"
+diagnostic: "Check the HTTP status code returned by the 404 handler:\n  curl -v http://192.168.4.1/random\nShould show \"\
+  HTTP/1.1 303 See Other\", not \"302 Found\".\n"
+fix: "In http_server.cpp:\n  httpd_resp_set_status(req, \"303 See Other\");\n  httpd_resp_set_hdr(req, \"Cache-Control\",\
+  \ \"no-cache, no-store, must-revalidate\");\n  httpd_resp_send(req, \"Redirect to the captive portal\", HTTPD_RESP_USE_STRLEN);\n\
+  Remove all explicit probe handler registrations — let 404 handler catch everything.\n"
 refs:
-  - components/infrastructure/network/src/http_server.cpp
-  - /home/vlabe/Downloads/esp-idf-master/examples/protocols/http_server/captive_portal/main/main.c
-  - RFC 7231 §6.4.4
+- components/infrastructure/network/src/http_server.cpp
+- /home/vlabe/Downloads/esp-idf-master/examples/protocols/http_server/captive_portal/main/main.c
+- RFC 7231 §6.4.4
+title: Captive portal popup not appearing — 302 Found vs 303 See Other

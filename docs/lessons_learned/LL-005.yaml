@@ -7,23 +7,20 @@ trigger_patterns:
 - StoreProhibited
 - Guru Meditation
 - execvaddr:\s*0x0+
-lesson: 'Rust std::panic::set_hook() does NOT fire for hardware exceptions (LoadProhibited,
-  StoreProhibited). These go through ESP-IDF''s C esp_panic_handler() directly. The
-  diag black box and stack watermarks are never dumped for hardware crashes. Fix:
-  override esp_panic_handler via linker wrapping (-Wl,--wrap=esp_panic_handler) —
-  this is the common entry point for ALL ESP-IDF panic events (both Rust panics and
-  hardware exceptions).
+lesson: 'Rust std::panic::set_hook() does NOT fire for hardware exceptions (LoadProhibited, StoreProhibited). These go through
+  ESP-IDF''s C esp_panic_handler() directly. The diag black box and stack watermarks are never dumped for hardware crashes.
+  Fix: override esp_panic_handler via linker wrapping (-Wl,--wrap=esp_panic_handler) — this is the common entry point for
+  ALL ESP-IDF panic events (both Rust panics and hardware exceptions).
 
   '
-diagnostic: 'Confirm by checking that the "!!! PANIC" header is absent from the crash
-  log. If a crash produces Guru Meditation output without the diag panic hook header,
-  the hook was bypassed.
+diagnostic: 'Confirm by checking that the "!!! PANIC" header is absent from the crash log. If a crash produces Guru Meditation
+  output without the diag panic hook header, the hook was bypassed.
 
   '
-fix: 'Add __wrap_esp_panic_handler in esp_safe.rs that dumps black box and stack watermarks
-  before calling the real handler. Requires linker flags and matching panic_info_t
-  / XtExcFrame Rust structs.
+fix: 'Add __wrap_esp_panic_handler in esp_safe.rs that dumps black box and stack watermarks before calling the real handler.
+  Requires linker flags and matching panic_info_t / XtExcFrame Rust structs.
 
   '
 refs:
 - docs/plans/pending/26_07_03_crash_diag_system.md
+title: LoadProhibited, EXCVADDR=0x00000000 — uart stack overflow in sleep()

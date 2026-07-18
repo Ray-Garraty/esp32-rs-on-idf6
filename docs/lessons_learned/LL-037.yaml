@@ -1,50 +1,33 @@
 id: LL-037
 date: 2026-07-09
-crash_signature: 'POST /wifi/connect returns {"success":false,"message":"Missing ssid or password"}'
+crash_signature: POST /wifi/connect returns {"success":false,"message":"Missing ssid or password"}
 category: json_parser_off_by_two
 trigger_patterns:
-  - "Missing ssid or password"
-  - "findField.*nullptr"
-  - "wifi connect.*ssid.*password.*missing"
-lesson: >
-  The inline findField JSON parser lambda had an off-by-two counting bug.
-  The line `pos += std::strlen(field) + 2` was intended to skip the field
-  name plus `":` (closing quote + colon), but `strlen` already includes the
-  trailing quote of the field name. Adding +2 overshoots the opening quote
-  of the value by one byte, landing on the first character of the value
-  instead of the opening quote. The subsequent check `if (*pos != '"')`
-  fails because `*pos` is a value character (e.g. 'm' in "mywifi"), not '"'.
+- Missing ssid or password
+- findField.*nullptr
+- wifi connect.*ssid.*password.*missing
+lesson: "The inline findField JSON parser lambda had an off-by-two counting bug. The line `pos += std::strlen(field) + 2`\
+  \ was intended to skip the field name plus `\":` (closing quote + colon), but `strlen` already includes the trailing quote\
+  \ of the field name. Adding +2 overshoots the opening quote of the value by one byte, landing on the first character of\
+  \ the value instead of the opening quote. The subsequent check `if (*pos != '\"')` fails because `*pos` is a value character\
+  \ (e.g. 'm' in \"mywifi\"), not '\"'.\nByte-level trace for body `{\"ssid\":\"mywifi\",\"password\":\"mypass\"}`:\n  strstr\
+  \ finds \"\\\"ssid\\\"\" at index 1\n  pos += 6 (strlen) + 2 → pos = index 9 = 'm'\n  *pos != '\"' → true → returns nullptr\
+  \ for BOTH ssid and password\n\nThe fix: use proper sequential parsing — skip field name, skip whitespace, verify colon,\
+  \ skip colon, skip whitespace, verify opening quote, extract value. This handles both compact JSON (JSON.stringify default)\
+  \ and whitespace variants.\nNEVER use `strlen(field) + N` to skip past a field in JSON. Always parse character-by-character\
+  \ with validation at each step.\nExtract JSON parsing into a domain-layer function (no ESP-IDF dependencies) so it can be\
+  \ unit-tested on the host.\n"
+diagnostic: 'Add ESP_LOGI(TAG, "WiFi connect request: content_len=%d, received=%zu bytes, body=%s", req->content_len, bodyLen,
+  bodyStr) in the handler. If the body looks correct but findField returns nullptr, the parser is the problem.
 
-  Byte-level trace for body `{"ssid":"mywifi","password":"mypass"}`:
-    strstr finds "\"ssid\"" at index 1
-    pos += 6 (strlen) + 2 → pos = index 9 = 'm'
-    *pos != '"' → true → returns nullptr for BOTH ssid and password
+  '
+fix: 'Extract findJsonField() into components/domain/include/domain/json_utils.hpp: - Skip field name (strlen) - Skip whitespace
+  - Verify colon, skip colon - Skip whitespace - Verify opening quote, skip quote - Find closing quote via strchr - Return
+  malloc''d string (caller frees) - Return nullptr on any validation failure
 
-  The fix: use proper sequential parsing — skip field name, skip whitespace,
-  verify colon, skip colon, skip whitespace, verify opening quote, extract
-  value. This handles both compact JSON (JSON.stringify default) and
-  whitespace variants.
-
-  NEVER use `strlen(field) + N` to skip past a field in JSON. Always parse
-  character-by-character with validation at each step.
-
-  Extract JSON parsing into a domain-layer function (no ESP-IDF dependencies)
-  so it can be unit-tested on the host.
-diagnostic: >
-  Add ESP_LOGI(TAG, "WiFi connect request: content_len=%d, received=%zu bytes,
-  body=%s", req->content_len, bodyLen, bodyStr) in the handler. If the body
-  looks correct but findField returns nullptr, the parser is the problem.
-fix: >
-  Extract findJsonField() into components/domain/include/domain/json_utils.hpp:
-  - Skip field name (strlen)
-  - Skip whitespace
-  - Verify colon, skip colon
-  - Skip whitespace
-  - Verify opening quote, skip quote
-  - Find closing quote via strchr
-  - Return malloc'd string (caller frees)
-  - Return nullptr on any validation failure
+  '
 refs:
-  - docs/issues/active/26_07_09_captive_portal_not_working.md
-  - components/domain/include/domain/json_utils.hpp
-  - tests/src/test_json_utils.cpp
+- docs/issues/active/26_07_09_captive_portal_not_working.md
+- components/domain/include/domain/json_utils.hpp
+- tests/src/test_json_utils.cpp
+title: POST /wifi/connect returns {"success":false,"message":"Missing ssid or password"}
