@@ -519,7 +519,6 @@ extern "C" void app_main(void)
 
                         ecotiter::domain::memory::ResponseBuffer buf{};
                         size_t off = ecotiter::application::formatSmResult(buf, resultId, smResult);
-                        ESP_LOGI(TAG, "SM result: %.*s", static_cast<int>(off > buf.size() ? buf.size() : off), buf.data());
 
                         if (off > 0 && off < buf.size())
                         {
@@ -532,6 +531,7 @@ extern "C" void app_main(void)
                                 std::memcpy(item.data, buf.data(), copyLen);
                                 item.len = copyLen;
                                 xQueueSend(bleManager.notifyQueue(), &item, 0);
+                                ESP_LOGI(TAG, "SM result: %.*s", static_cast<int>(off), buf.data());
                             }
                         }
                     }

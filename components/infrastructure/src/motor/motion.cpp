@@ -131,7 +131,7 @@ void store_result(SmResult::Type type, int32_t stepsTaken, float measuredSpeed,
         }
     }
 
-    ESP_LOGI("motor_task", "store_result: type=%d steps=%ld", static_cast<int>(type), static_cast<long>(stepsTaken));
+    ESP_LOGI("motor_task", "Motor complete: type=%d steps=%ld", static_cast<int>(type), static_cast<long>(stepsTaken));
     domain::gBuretteState.store(BuretteState::Idle, std::memory_order_release);
 }
 

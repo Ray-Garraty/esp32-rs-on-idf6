@@ -230,6 +230,7 @@ void handleSetValvePosition(const MotorCommand& cmd)
             xQueueSend(gWsBroadcastQueue, &entry, 0);
         }
     }
+    ESP_LOGI(TAG, "Valve settled: position=%s", posStr);
 }
 
 void handleReadTmcRegister(const MotorCommand& cmd)
@@ -251,6 +252,9 @@ void handleReadTmcRegister(const MotorCommand& cmd)
         {
             entry.len = static_cast<size_t>(n);
             xQueueSend(gWsBroadcastQueue, &entry, 0);
+            ESP_LOGI(TAG, "SG result: reg=0x%02x value=%lu",
+                     static_cast<unsigned>(cmd.readTmcReg.reg),
+                     static_cast<unsigned long>(regValue));
         }
     }
 }
